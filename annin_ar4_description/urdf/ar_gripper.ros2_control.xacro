@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:macro name="ar_gripper_ros2_control" params="
+    name
+    plugin_name
+    serial_port
+    driver_parameters_file
+    tf_prefix
+  ">
+    <xacro:property name="driver_parameters"
+      value="${xacro.load_yaml(driver_parameters_file)}"/>
+
+    <ros2_control name="${name}" type="system">
+
+      <hardware>
+        <plugin>${plugin_name}</plugin>
+        <param name="serial_port">${serial_port}</param>
+        <param name="use_overcurrent_protection">${driver_parameters['use_overcurrent_protection']}</param>
+        <param name="ACS712_version_current">${driver_parameters['ACS712_version_current']}</param>
+        <param name="closed_servo_angle">${driver_parameters['closed_servo_angle']}</param>
+        <param name="open_servo_angle">${driver_parameters['open_servo_angle']}</param>
+        <param name="tf_prefix">${tf_prefix}</param>
+      </hardware>
+
+      <joint name="${tf_prefix}gripper_jaw1_joint">
+        <command_interface name="position" />
+        <state_interface name="position">
+          <param name="initial_value">0.0</param>
+        </state_interface>
+        <state_interface name="velocity">
+          <param name="initial_value">0.0</param>
+        </state_interface>
+      </joint>
+      <joint name="${tf_prefix}gripper_jaw2_joint">
+        <param name="mimic">${tf_prefix}gripper_jaw1_joint</param>
+        <param name="multiplier">1</param>
+        <state_interface name="position">
+          <param name="initial_value">0.0</param>
+        </state_interface>
+        <state_interface name="velocity">
+          <param name="initial_value">0.0</param>
+        </state_interface>
+      </joint>
+
+    </ros2_control>
+  </xacro:macro>
+</robot>
