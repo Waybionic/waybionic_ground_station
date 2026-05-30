@@ -222,6 +222,13 @@ def generate_launch_description():
         ],
     )
 
+    waybionic_parts_display_node = Node(
+        package="annin_ar4_driver",
+        executable="waybionic_parts_display.py",
+        name="waybionic_parts_display",
+        output="log",
+    )
+
     return LaunchDescription([
         db_arg,
         ar_model_arg,
@@ -233,4 +240,5 @@ def generate_launch_description():
         joint_state_broadcaster_spawner,
         joint_controller_spawner,
         gripper_controller_spawner,
+        waybionic_parts_display_node,
     ])

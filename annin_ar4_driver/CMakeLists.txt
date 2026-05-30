@@ -72,6 +72,7 @@ install(DIRECTORY config launch urdf
 
 install(PROGRAMS
   scripts/reset_estop.sh
+  scripts/waybionic_parts_display.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

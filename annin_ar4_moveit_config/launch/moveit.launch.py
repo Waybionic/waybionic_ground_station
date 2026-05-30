@@ -244,5 +244,12 @@ def generate_launch_description():
         condition=IfCondition(moveit_servo),
     )
 
-    nodes_to_start = [move_group_node, rviz_node, servo_node]
+    waybionic_parts_display_node = Node(
+        package="annin_ar4_driver",
+        executable="waybionic_parts_display.py",
+        name="waybionic_parts_display",
+        output="log",
+    )
+
+    nodes_to_start = [move_group_node, rviz_node, servo_node, waybionic_parts_display_node]
     return LaunchDescription(declared_arguments + nodes_to_start)

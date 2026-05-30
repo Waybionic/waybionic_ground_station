@@ -23,6 +23,18 @@ Panels:
 Visualization Manager:
   Class: ""
   Displays:
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: WayBionic Parts
+      Namespaces:
+        waybionic_parts: true
+      Topic:
+        Depth: 5
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /waybionic_parts
+      Value: true
     - Alpha: 0.5
       Cell Size: 1
       Class: rviz_default_plugins/Grid
