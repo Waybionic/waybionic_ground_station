@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """
+AI GENERATED
+
 Publishes waybionic arm parts from annin_ar4_description/meshes/waybionic/
 as a MarkerArray so they appear in RViz alongside the robot model.
 
@@ -18,6 +20,7 @@ from std_msgs.msg import ColorRGBA
 from ament_index_python.packages import get_package_share_directory
 
 # RGB colors per sub-assembly (r, g, b, a)
+# For 7 subgroups - allows you to distinguish
 _GROUPS = [
     ('base',         (0.25, 0.45, 0.85, 0.85), ['base_updated', 'base_funnel', 'armcart', 'dome', 'new_dome', 'lid']),
     ('shoulder',     (0.20, 0.80, 0.40, 0.85), ['shoulder', 'elbow', 'base_to_shoulder', 'basetoshoulder', 'pipe', 'pvc']),
@@ -98,6 +101,7 @@ class WayBionicPartsDisplay(Node):
 
 def main(args=None):
     rclpy.init(args=args)
+    # Displays arm
     node = WayBionicPartsDisplay()
     rclpy.spin(node)
     node.destroy_node()
