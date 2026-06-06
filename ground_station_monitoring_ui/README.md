@@ -4,6 +4,18 @@ This folder contains a first desktop UI proof of concept for the WayBionic engin
 
 The prototype uses locally generated mock diagnostic data immediately. It does not depend on robot hardware, sensors, ROS topics, PCBs, cameras, or the doctor/surgeon controller.
 
+## Languages and Frameworks
+
+This prototype is built as a standalone desktop app using:
+
+- **Python 3**: core application language for the entry point, dashboard logic, mock diagnostics, and normalized diagnostic contract.
+- **PySide6**: official Qt for Python bindings used to render the desktop UI.
+- **Qt Widgets**: window layout, panels, tables, buttons, timers, and Qt Style Sheets for the dark engineering dashboard theme.
+
+Current Python dependencies are listed in `requirements.txt`. The only required package today is `PySide6`.
+
+This sprint does not use ROS 2, rclpy, or web frameworks in the UI layer. Future live integration is expected to add a backend diagnostics subscriber (for example via ROS 2), but the dashboard should continue consuming the same normalized `DiagnosticMessage` format rather than depending directly on ROS message types.
+
 ## Scope
 
 This app is monitoring-only.
