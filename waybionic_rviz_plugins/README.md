@@ -5,7 +5,7 @@ RViz2-native ground station interface for WayBionic. This package provides two o
 - **Doctor / Surgeon Camera View** — camera feeds only, no engineering telemetry.
 - **Engineer View** — robot visualization plus diagnostics, telemetry, live values, and alerts.
 
-This is the V2 direction. The archived standalone PySide6 prototype lives in `ground_station_monitoring_ui/` on earlier branches.
+This is the V2 direction. The archived standalone PySide6 prototype lives in `ground_station_monitoring_ui_archived/`.
 
 ## Scope
 

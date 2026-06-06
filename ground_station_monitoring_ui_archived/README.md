@@ -1,4 +1,6 @@
-# WayBionic Ground Station Monitoring Interface
+# WayBionic Ground Station Monitoring Interface (Archived)
+
+> **Archived:** This standalone PySide6 prototype has been superseded by the RViz2-native ground station UI in `waybionic_rviz_plugins/`. Kept for reference only.
 
 This folder contains a first desktop UI proof of concept for the WayBionic engineering and operations ground station. It is a standalone Python + PySide6/Qt dashboard focused on monitoring diagnostic health and live values.
 
