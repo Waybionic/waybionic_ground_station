@@ -102,7 +102,7 @@ The doctor view was also launched briefly under a timeout to verify RViz starts 
 
 ## PR Status
 
-Use this file as the PR description source. Review screenshots are at the top for reviewer context only.
+Opened as https://github.com/Waybionic/waybionic_ground_station/pull/2 against `main`. Review screenshots at the top of this file are for reviewer context only.
 
 ## Known Limitations
 
