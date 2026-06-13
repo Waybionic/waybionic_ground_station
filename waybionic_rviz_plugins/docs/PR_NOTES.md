@@ -1,5 +1,17 @@
 # PR Notes
 
+## Review Screenshots
+
+These images are included only to help reviewers see the UI quickly. They are not part of the runtime package behavior.
+
+| Engineer view — mock normal | Engineer view — mock fault |
+| --- | --- |
+| ![Engineer mock normal](screenshots/engineer_mock_normal.png) | ![Engineer mock fault](screenshots/engineer_mock_fault.png) |
+
+Doctor/surgeon placeholder panel:
+
+![Surgeon camera placeholder](screenshots/surgeon_camera_placeholder.png)
+
 ## Summary
 
 This branch makes `waybionic_rviz_plugins` a generic WayBionic RViz2 diagnostics foundation package. The default engineer launch opens RViz with the diagnostics panel, mock diagnostics are kept for validation, and live mode is ready to consume ROS 2 diagnostics without binding the panel UI to raw ROS messages.
@@ -90,7 +102,7 @@ The doctor view was also launched briefly under a timeout to verify RViz starts 
 
 ## PR Status
 
-PR status could not be confirmed from this environment. `gh` is not available in PowerShell, and the WSL check did not return PR data. Use this file as the PR description source if the PR still needs to be opened.
+Use this file as the PR description source. Review screenshots are at the top for reviewer context only.
 
 ## Known Limitations
 
