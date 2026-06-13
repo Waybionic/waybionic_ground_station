@@ -30,9 +30,11 @@ add_library(${PROJECT_NAME} SHARED
   include/waybionic_rviz_plugins/diagnostics_source.hpp
   include/waybionic_rviz_plugins/diagnostics_panel.hpp
   include/waybionic_rviz_plugins/ros_diagnostics_source.hpp
+  include/waybionic_rviz_plugins/surgeon_camera_panel.hpp
   src/diagnostics_panel.cpp
   src/mock_diagnostics_source.cpp
   src/ros_diagnostics_source.cpp
+  src/surgeon_camera_panel.cpp
 )
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)

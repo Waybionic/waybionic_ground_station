@@ -1,6 +1,15 @@
 Panels:
   - Class: rviz_common/Displays
+    Help Height: 70
     Name: Displays
+    Property Tree Widget:
+      Expanded: ~
+      Splitter Ratio: 0.5
+    Tree Height: 280
+  - Class: waybionic_rviz_plugins/SurgeonCameraPanel
+    Name: WayBionic Surgeon Camera
+    Primary Camera Topic: /camera/camera/color/image_raw
+    Secondary Camera Topic: /surgeon/secondary/image_raw
 Visualization Manager:
   Class: ""
   Displays:
@@ -19,7 +28,7 @@ Visualization Manager:
         Value: /camera/camera/color/image_raw
       Value: true
     - Class: rviz_default_plugins/Image
-      Enabled: false
+      Enabled: true
       Max Value: 1
       Median window: 5
       Min Value: 0
@@ -31,7 +40,7 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /surgeon/secondary/image_raw
-      Value: false
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 0; 0; 0
@@ -52,7 +61,7 @@ Visualization Manager:
       Class: rviz_default_plugins/Orbit
       Distance: 1
       Enable Stereo Rendering:
-        Stereo Eye Separation: 0.06
+        Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
@@ -61,14 +70,14 @@ Visualization Manager:
         Y: 0
         Z: 0
       Focal Shape Fixed Size: true
-      Focal Shape Size: 0.05
+      Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
-      Near Clip Distance: 0.01
-      Pitch: 0
+      Near Clip Distance: 0.009999999776482582
+      Pitch: 0.28479644656181335
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 0
+      Yaw: 4.648182392120361
     Saved: ~
 Window Geometry:
   Displays:
@@ -76,10 +85,13 @@ Window Geometry:
   Height: 995
   Hide Left Dock: false
   Hide Right Dock: true
+  QMainWindow State: 000000ff00000000fd0000000100000000000001560000038dfc0200000003fb0000004800530075007200670065006f006e0020005300650063006f006e0064006100720079002000430061006d00650072006100200050006c0061006300650068006f006c006400650072010000003b000000f40000001600fffffffb0000002c00530075007200670065006f006e0020005000720069006d006100720079002000430061006d0065007200610100000135000000f40000001600fffffffb000000100044006900730070006c006100790073010000022f00000199000000c700ffffff000006240000038d00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Surgeon Primary Camera:
     collapsed: false
+  WayBionic Surgeon Camera:
+    collapsed: false
   Surgeon Secondary Camera Placeholder:
-    collapsed: true
+    collapsed: false
   Width: 1920
-  X: 0
-  Y: 0
+  X: -32
+  Y: -32
