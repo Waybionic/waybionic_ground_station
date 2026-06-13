@@ -2,24 +2,31 @@
 
 #include <algorithm>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include <QAbstractItemView>
 #include <QButtonGroup>
+#include <QCheckBox>
 #include <QColor>
 #include <QFrame>
 #include <QGridLayout>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QStringList>
 #include <QStyle>
 #include <QTableWidgetItem>
 #include <QVBoxLayout>
 
 #include <pluginlib/class_list_macros.hpp>
+#include <rviz_common/display_context.hpp>
+#include <rviz_common/ros_integration/ros_node_abstraction_iface.hpp>
+
+#include "waybionic_rviz_plugins/ros_diagnostics_source.hpp"
 
 namespace waybionic_rviz_plugins
 {
@@ -115,14 +122,42 @@ DiagnosticsPanel::DiagnosticsPanel(QWidget * parent)
 : rviz_common::Panel(parent)
 {
   buildUi();
+  configureSource(use_mock_diagnostics_);
 }
 
 void DiagnosticsPanel::onInitialize()
 {
+  if (auto ros_node_abstraction = getDisplayContext()->getRosNodeAbstraction().lock()) {
+    rviz_node_ = ros_node_abstraction->get_raw_node();
+  }
+
+  diagnostics_topic_ = readDiagnosticsTopicParameter(diagnostics_topic_);
+  configureSource(readUseMockDiagnosticsParameter(use_mock_diagnostics_));
   refresh_timer_ = new QTimer(this);
   connect(refresh_timer_, &QTimer::timeout, this, [this]() { refresh(); });
   refresh_timer_->start(1000);
   refresh();
+}
+
+void DiagnosticsPanel::save(rviz_common::Config config) const
+{
+  rviz_common::Panel::save(config);
+  config.mapSetValue("Use Mock Diagnostics", use_mock_diagnostics_);
+  config.mapSetValue("Diagnostics Topic", QString::fromStdString(diagnostics_topic_));
+}
+
+void DiagnosticsPanel::load(const rviz_common::Config & config)
+{
+  rviz_common::Panel::load(config);
+
+  bool use_mock_diagnostics = use_mock_diagnostics_;
+  QString diagnostics_topic;
+  if (config.mapGetString("Diagnostics Topic", &diagnostics_topic)) {
+    diagnostics_topic_ = diagnostics_topic.toStdString();
+  }
+  if (config.mapGetBool("Use Mock Diagnostics", &use_mock_diagnostics)) {
+    configureSource(use_mock_diagnostics);
+  }
 }
 
 void DiagnosticsPanel::buildUi()
@@ -143,24 +178,37 @@ void DiagnosticsPanel::buildUi()
   state_label_->setObjectName("StateNormal");
   last_updated_label_ = makeMuted("Last updated: --");
 
+  use_mock_diagnostics_checkbox_ = new QCheckBox("Use Mock Diagnostics");
+  use_mock_diagnostics_checkbox_->setChecked(use_mock_diagnostics_);
+  use_mock_diagnostics_checkbox_->setToolTip(
+    "Checked: local mock validation states. Unchecked: subscribe to live ROS 2 diagnostics.");
+  connect(use_mock_diagnostics_checkbox_, &QCheckBox::toggled, this, [this](const bool checked) {
+    setUseMockDiagnostics(checked);
+  });
+
   auto * button_row = new QHBoxLayout();
-  normal_button_ = new QPushButton("Normal Demo");
+  normal_button_ = new QPushButton("Mock Normal");
   normal_button_->setCheckable(true);
   normal_button_->setChecked(true);
-  fault_button_ = new QPushButton("Fault Demo");
+  fault_button_ = new QPushButton("Mock Fault");
   fault_button_->setCheckable(true);
 
-  demo_button_group_ = new QButtonGroup(this);
-  demo_button_group_->setExclusive(true);
-  demo_button_group_->addButton(normal_button_);
-  demo_button_group_->addButton(fault_button_);
-  connect(normal_button_, &QPushButton::clicked, this, [this]() { setDemoMode(DemoMode::Normal); });
-  connect(fault_button_, &QPushButton::clicked, this, [this]() { setDemoMode(DemoMode::Fault); });
+  mock_state_button_group_ = new QButtonGroup(this);
+  mock_state_button_group_->setExclusive(true);
+  mock_state_button_group_->addButton(normal_button_);
+  mock_state_button_group_->addButton(fault_button_);
+  connect(normal_button_, &QPushButton::clicked, this, [this]() {
+    setMockDiagnosticsState(MockDiagnosticsState::Normal);
+  });
+  connect(fault_button_, &QPushButton::clicked, this, [this]() {
+    setMockDiagnosticsState(MockDiagnosticsState::Fault);
+  });
 
   button_row->addWidget(normal_button_);
   button_row->addWidget(fault_button_);
 
   header_layout->addWidget(title);
+  header_layout->addWidget(use_mock_diagnostics_checkbox_);
   header_layout->addLayout(button_row);
   header_layout->addWidget(state_label_);
   header_layout->addWidget(last_updated_label_);
@@ -172,7 +220,7 @@ void DiagnosticsPanel::buildUi()
   system_layout->addWidget(makeTitle("System Status"), 0, 0, 1, 2);
 
   source_label_ = new QLabel("Mock");
-  ros_connection_label_ = new QLabel("Not connected / Future integration");
+  ros_connection_label_ = new QLabel("Local mock diagnostics");
   heartbeat_label_ = new QLabel("OK");
   ui_mode_label_ = new QLabel("Monitoring only");
   safety_label_ = new QLabel("No motor commands sent from this RViz panel");
@@ -224,18 +272,70 @@ void DiagnosticsPanel::buildUi()
   root_layout->addWidget(alerts_card);
 }
 
+void DiagnosticsPanel::configureSource(const bool use_mock_diagnostics)
+{
+  use_mock_diagnostics_ = use_mock_diagnostics;
+  mock_diagnostics_source_ = nullptr;
+
+  if (use_mock_diagnostics_ || !rviz_node_) {
+    auto mock_source = std::make_unique<MockDiagnosticsSource>();
+    mock_diagnostics_source_ = mock_source.get();
+    diagnostics_source_ = std::move(mock_source);
+  } else {
+    diagnostics_source_ = std::make_unique<RosDiagnosticsSource>(rviz_node_, diagnostics_topic_);
+  }
+
+  updateSourceControls();
+}
+
+bool DiagnosticsPanel::readUseMockDiagnosticsParameter(const bool default_value)
+{
+  if (!rviz_node_) {
+    return default_value;
+  }
+
+  if (!rviz_node_->has_parameter("use_mock_diagnostics")) {
+    return rviz_node_->declare_parameter<bool>("use_mock_diagnostics", default_value);
+  }
+
+  return rviz_node_->get_parameter("use_mock_diagnostics").as_bool();
+}
+
+std::string DiagnosticsPanel::readDiagnosticsTopicParameter(const std::string & default_value)
+{
+  if (!rviz_node_) {
+    return default_value;
+  }
+
+  if (!rviz_node_->has_parameter("diagnostics_topic")) {
+    return rviz_node_->declare_parameter<std::string>("diagnostics_topic", default_value);
+  }
+
+  return rviz_node_->get_parameter("diagnostics_topic").as_string();
+}
+
 void DiagnosticsPanel::refresh()
 {
   const auto now = clock_.now();
-  const auto messages = diagnostics_source_.messages(now);
+  const auto messages = diagnostics_source_->messages(now);
   updateSystemStatus(messages, now);
   updateTelemetryTable(messages, now);
   updateAlerts(messages);
 }
 
-void DiagnosticsPanel::setDemoMode(const DemoMode mode)
+void DiagnosticsPanel::setMockDiagnosticsState(const MockDiagnosticsState mode)
 {
-  diagnostics_source_.setMode(mode);
+  if (mock_diagnostics_source_ == nullptr) {
+    return;
+  }
+
+  mock_diagnostics_source_->setMode(mode);
+  refresh();
+}
+
+void DiagnosticsPanel::setUseMockDiagnostics(const bool use_mock_diagnostics)
+{
+  configureSource(use_mock_diagnostics);
   refresh();
 }
 
@@ -252,12 +352,20 @@ void DiagnosticsPanel::updateSystemStatus(
       return message.status == DiagnosticStatus::Stale;
     });
 
-  state_label_->setText(has_alert ? "Current State: FAULT" : "Current State: NORMAL");
+  const bool waiting_for_live_diagnostics =
+    !use_mock_diagnostics_ && messages.size() == 1 && messages.front().signal_name == "diagnostics.topic";
+
+  if (waiting_for_live_diagnostics) {
+    state_label_->setText("Current State: WAITING FOR LIVE DIAGNOSTICS");
+  } else {
+    state_label_->setText(has_alert ? "Current State: FAULT" : "Current State: NORMAL");
+  }
   state_label_->setObjectName(has_alert ? "StateFault" : "StateNormal");
   state_label_->style()->unpolish(state_label_);
   state_label_->style()->polish(state_label_);
 
-  source_label_->setText(QString::fromStdString(diagnostics_source_.sourceName()));
+  source_label_->setText(QString::fromStdString(diagnostics_source_->sourceName()));
+  ros_connection_label_->setText(QString::fromStdString(diagnostics_source_->connectionStatus(now)));
   heartbeat_label_->setText(has_stale ? "STALE" : "OK");
   heartbeat_label_->setStyleSheet(QString("color: %1; font-weight: 800;").arg(has_stale ? "#9aa4ad" : "#3ddc84"));
   safety_label_->setStyleSheet(QString("color: %1; font-weight: 700;").arg(has_alert ? "#ff4d5e" : "#8ea3b1"));
@@ -272,6 +380,22 @@ void DiagnosticsPanel::updateSystemStatus(
     latest_age = std::min(latest_age, (now - message.timestamp).seconds());
   }
   last_updated_label_->setText(QString("Last updated: %1s ago").arg(latest_age, 0, 'f', 1));
+}
+
+void DiagnosticsPanel::updateSourceControls()
+{
+  if (use_mock_diagnostics_checkbox_ != nullptr) {
+    const QSignalBlocker blocker(use_mock_diagnostics_checkbox_);
+    use_mock_diagnostics_checkbox_->setChecked(use_mock_diagnostics_);
+  }
+
+  const bool mock_enabled = mock_diagnostics_source_ != nullptr;
+  if (normal_button_ != nullptr) {
+    normal_button_->setEnabled(mock_enabled);
+  }
+  if (fault_button_ != nullptr) {
+    fault_button_->setEnabled(mock_enabled);
+  }
 }
 
 void DiagnosticsPanel::updateTelemetryTable(

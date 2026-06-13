@@ -27,12 +27,12 @@ std::string formatNumber(const double value, const int precision)
 
 }  // namespace
 
-void MockDiagnosticsSource::setMode(const DemoMode mode)
+void MockDiagnosticsSource::setMode(const MockDiagnosticsState mode)
 {
   mode_ = mode;
 }
 
-DemoMode MockDiagnosticsSource::mode() const
+MockDiagnosticsState MockDiagnosticsSource::mode() const
 {
   return mode_;
 }
@@ -42,9 +42,14 @@ std::string MockDiagnosticsSource::sourceName() const
   return "Mock";
 }
 
+std::string MockDiagnosticsSource::connectionStatus(const rclcpp::Time & /*now*/) const
+{
+  return "Local mock diagnostics";
+}
+
 std::vector<DiagnosticMessage> MockDiagnosticsSource::messages(const rclcpp::Time & now) const
 {
-  if (mode_ == DemoMode::Fault) {
+  if (mode_ == MockDiagnosticsState::Fault) {
     return faultMessages(now);
   }
   return normalMessages(now);

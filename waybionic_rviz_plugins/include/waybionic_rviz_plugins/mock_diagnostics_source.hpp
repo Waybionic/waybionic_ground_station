@@ -7,30 +7,32 @@
 #include <rclcpp/time.hpp>
 
 #include "waybionic_rviz_plugins/diagnostics_contract.hpp"
+#include "waybionic_rviz_plugins/diagnostics_source.hpp"
 
 namespace waybionic_rviz_plugins
 {
 
-enum class DemoMode
+enum class MockDiagnosticsState
 {
   Normal,
   Fault
 };
 
-class MockDiagnosticsSource
+class MockDiagnosticsSource : public DiagnosticsSource
 {
 public:
-  void setMode(DemoMode mode);
-  DemoMode mode() const;
-  std::string sourceName() const;
+  void setMode(MockDiagnosticsState mode);
+  MockDiagnosticsState mode() const;
+  std::string sourceName() const override;
+  std::string connectionStatus(const rclcpp::Time & now) const override;
 
-  std::vector<DiagnosticMessage> messages(const rclcpp::Time & now) const;
+  std::vector<DiagnosticMessage> messages(const rclcpp::Time & now) const override;
 
 private:
   std::vector<DiagnosticMessage> normalMessages(const rclcpp::Time & now) const;
   std::vector<DiagnosticMessage> faultMessages(const rclcpp::Time & now) const;
 
-  DemoMode mode_{DemoMode::Normal};
+  MockDiagnosticsState mode_{MockDiagnosticsState::Normal};
 };
 
 }  // namespace waybionic_rviz_plugins
