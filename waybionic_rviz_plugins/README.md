@@ -1,175 +1,181 @@
-# WayBionic Ground Station UI (RViz2)
+# WayBionic RViz2 Diagnostics Plugin
 
-RViz2-native ground station interface for WayBionic. This package provides two operator views inside RViz2:
+RViz2-native diagnostics and monitoring UI for WayBionic. This package is a generic foundation plugin: it does not require Annin/AR4 packages for the default engineer or doctor views.
 
-- **Doctor / Surgeon Camera View** — camera feeds only, no engineering telemetry.
-- **Engineer View** — robot visualization plus diagnostics, telemetry, live values, and alerts.
-
-This is the V2 direction. The archived standalone PySide6 prototype lives in `ground_station_monitoring_ui_archived/`.
-
-## Scope
-
-Monitoring-first only:
+Monitoring-only scope:
 
 - No motor commands from this package.
 - No robot control or safety-critical logic.
-- No camera driver implementation in this sprint.
-- No RViz source-code modifications.
+- No camera driver or camera pipeline implementation.
+- Mock diagnostics for validation while backend `/diagnostics` is not ready.
 
-## Prerequisites
+## Quickstart
 
-- ROS 2 Jazzy on Ubuntu 24.04 (WSL or native Linux).
-- An existing colcon workspace with the AR4 packages built, for example `~/ar4_ws`.
-- RViz2 and Qt development packages (installed via `rosdep`).
-
-Tested workflow uses WSL Ubuntu with an `ar4_ws` workspace that already contains `annin_ar4_moveit_config`, `annin_ar4_description`, and related AR4 packages.
-
-## Add This Package To Your Workspace
-
-If this repo is checked out on Windows and you build from WSL, symlink the package into your ROS workspace `src/`:
+Use this package from any ROS 2 Jazzy colcon workspace:
 
 ```bash
-ln -s "/mnt/c/Users/<you>/OneDrive/Desktop/Uni Work/Clubs/WayBionic/waybionic_ground_station/waybionic_ground_station/waybionic_rviz_plugins" \
-  ~/ar4_ws/src/waybionic_rviz_plugins
-```
-
-If you clone the repo directly inside WSL, copy or symlink `waybionic_rviz_plugins/` into `~/ar4_ws/src/` instead.
-
-## Build
-
-From your ROS workspace (same style as the existing AR4 demo):
-
-```bash
-cd ~/ar4_ws
+cd <your_ros2_ws>
 source /opt/ros/jazzy/setup.bash
 rosdep install --from-paths src --ignore-src -r -y
 colcon build --packages-select waybionic_rviz_plugins --symlink-install
 source install/setup.bash
-```
-
-After editing files in this package, rebuild with the same `colcon build` command and re-source `install/setup.bash`.
-
-## Run
-
-### Engineer monitoring view
-
-```bash
-cd ~/ar4_ws
-source /opt/ros/jazzy/setup.bash
-source install/setup.bash
 ros2 launch waybionic_rviz_plugins engineer_view.launch.py
-```
-
-Optional arguments:
-
-```bash
-ros2 launch waybionic_rviz_plugins engineer_view.launch.py ar_model:=mk3 include_gripper:=True
-```
-
-This launches:
-
-- `robot_state_publisher` and `joint_state_publisher` for passive robot visualization.
-- RViz2 with `config/engineer_monitoring_view.rviz`.
-- The docked `WayBionic Diagnostics` panel with mock Normal/Fault demo modes.
-
-It does **not** start the hardware driver or send motor commands.
-
-### Doctor / surgeon camera view
-
-```bash
-cd ~/ar4_ws
-source /opt/ros/jazzy/setup.bash
-source install/setup.bash
 ros2 launch waybionic_rviz_plugins doctor_view.launch.py
 ```
-
-This opens `config/doctor_camera_view.rviz` with image displays only.
-
-## Demo Modes (Engineer Panel)
-
-Use the panel buttons:
-
-- **Normal Demo** — all mock signals `OK`, no active alerts.
-- **Fault Demo** — high board temperature `FAULT` and IMU heartbeat `STALE`.
-
-The panel refreshes about once per second from the current diagnostic source.
-
-## Future Integration With Live Data
-
-### Diagnostics (backend / Korede)
-
-Today:
-
-```text
-MockDiagnosticsSource -> DiagnosticMessage -> DiagnosticsPanel
-```
-
-Future:
-
-```text
-ROS2 /diagnostics subscriber -> DiagnosticMessage -> same DiagnosticsPanel
-```
-
-Preferred topic: `/diagnostics` using `diagnostic_msgs/msg/DiagnosticArray` or an agreed WayBionic format.
-
-Backend should publish stable signal names, status, timestamp, value, unit, and alert message. See `docs/DIAGNOSTICS_CONTRACT.md` for the full normalized contract and mapping guidance.
-
-Integration steps (later):
-
-1. Add a `ROS2DiagnosticsSubscriber` (or equivalent) that converts live messages into `DiagnosticMessage`.
-2. Replace or supplement `MockDiagnosticsSource` inside the panel based on a parameter such as `use_mock_diagnostics`.
-3. Keep all Qt table and alert rendering on the normalized contract — do not bind the UI directly to ROS message fields.
-4. Test with mock data first, then connect live `/diagnostics` once the backend publishes it.
-
-### Surgeon camera feeds
-
-Current placeholder topics in `config/doctor_camera_view.rviz`:
-
-- `/camera/camera/color/image_raw` (primary)
-- `/surgeon/secondary/image_raw` (disabled placeholder)
-
-When real camera drivers are available:
-
-1. Confirm the live `sensor_msgs/Image` topic names.
-2. Update `config/doctor_camera_view.rviz` Image display topics.
-3. Launch `doctor_view.launch.py` while the camera node is running.
-4. No panel plugin changes are required for basic camera viewing.
-
-### Robot visualization with live joint states
-
-The engineer launch currently uses `joint_state_publisher` for a passive demo pose. For live hardware or simulation:
-
-1. Stop relying on the passive joint publisher.
-2. Launch your existing arm stack (driver, Gazebo, or MoveIt) so `/joint_states` and TF are published.
-3. Keep using `engineer_monitoring_view.rviz` or point RViz at the same config via `rviz_config_file`.
-4. The diagnostics panel remains independent of arm control.
-
-Example reference for an existing AR4 RViz demo:
-
-```bash
-cd ~/ar4_ws
-source install/setup.bash
-ros2 launch annin_ar4_moveit_config demo.launch.py
-```
-
-WayBionic engineer monitoring is separate from that launch, but can reuse the same workspace and robot description packages.
 
 ## Package Layout
 
 ```text
 waybionic_rviz_plugins/
-  README.md
-  CMakeLists.txt
-  package.xml
-  plugin_description.xml
+  CMakeLists.txt              # Builds the shared RViz plugin library
+  package.xml                 # Generic deps only; no Annin/AR4 exec deps
+  plugin_description.xml      # Registers DiagnosticsPanel + SurgeonCameraPanel
   include/waybionic_rviz_plugins/
+    diagnostics_contract.hpp  # Normalized DiagnosticMessage model
+    diagnostics_source.hpp    # DiagnosticsSource interface
+    diagnostics_panel.hpp     # Engineer monitoring panel
+    mock_diagnostics_source.hpp
+    ros_diagnostics_source.hpp
+    surgeon_camera_panel.hpp  # Doctor/surgeon placeholder panel
   src/
+    diagnostics_panel.cpp
+    mock_diagnostics_source.cpp
+    ros_diagnostics_source.cpp
+    surgeon_camera_panel.cpp
   config/
+    engineer_monitoring_view.rviz   # Generic engineer layout (default)
+    doctor_camera_view.rviz         # Doctor/surgeon placeholder layout
+    engineer_ar4_demo.rviz          # Optional AR4 visualization helper
   launch/
+    engineer_view.launch.py         # Generic engineer launch (default)
+    doctor_view.launch.py           # Doctor/surgeon placeholder launch
+    engineer_ar4_demo.launch.py     # Optional AR4 helper only
   docs/
+    DIAGNOSTICS_CONTRACT.md         # Backend /diagnostics mapping contract
+    GROUND_STATION_RVIZ_UI.md       # Extended architecture notes
+    PR_NOTES.md                     # Review/PR summary
 ```
 
-## More Documentation
+### What each launch/config pair does
 
-- `docs/GROUND_STATION_RVIZ_UI.md` — view details and architecture notes.
-- `docs/DIAGNOSTICS_CONTRACT.md` — normalized diagnostic interface for backend integration.
+| Launch | RViz config | Purpose |
+|--------|-------------|---------|
+| `engineer_view.launch.py` | `engineer_monitoring_view.rviz` | Generic engineer monitoring; no AR4 |
+| `doctor_view.launch.py` | `doctor_camera_view.rviz` | Surgeon camera placeholder layout |
+| `engineer_ar4_demo.launch.py` | `engineer_ar4_demo.rviz` | Optional passive AR4 robot viz |
+
+Core plugin dependencies are ROS/RViz/Qt only (`rclcpp`, `rviz_common`, `diagnostic_msgs`, etc.). AR4/Annin packages are required only for the optional `engineer_ar4_demo` helper.
+
+## RViz Panels
+
+Both panels appear under **Panels → Add Panel → `waybionic_rviz_plugins`**:
+
+| Panel | Role |
+|-------|------|
+| `DiagnosticsPanel` | Engineer monitoring: telemetry table, alerts, mock/live diagnostics |
+| `SurgeonCameraPanel` | Doctor/surgeon placeholder: topic names, waiting state, scope notes |
+
+Saved launch layouts are still the recommended way to open a clean engineer or doctor view. Panels can also be docked manually in one RViz session.
+
+## Engineer View
+
+```bash
+ros2 launch waybionic_rviz_plugins engineer_view.launch.py
+```
+
+Opens `config/engineer_monitoring_view.rviz` with the docked `WayBionic Diagnostics` panel. Does not launch Annin/AR4 packages or robot publishers.
+
+### Mock vs live diagnostics
+
+```bash
+ros2 launch waybionic_rviz_plugins engineer_view.launch.py use_mock_diagnostics:=true
+ros2 launch waybionic_rviz_plugins engineer_view.launch.py use_mock_diagnostics:=false
+ros2 launch waybionic_rviz_plugins engineer_view.launch.py use_mock_diagnostics:=false diagnostics_topic:=/diagnostics
+```
+
+| Mode | Behavior |
+|------|----------|
+| Mock (`use_mock_diagnostics:=true`, default) | Uses `MockDiagnosticsSource`; `Mock Normal` / `Mock Fault` controls enabled |
+| Live (`use_mock_diagnostics:=false`) | Uses `RosDiagnosticsSource`; subscribes to `diagnostic_msgs/msg/DiagnosticArray`; mock controls disabled |
+
+Live mode with no publisher yet shows a stable waiting state (`Waiting for <topic> messages`) instead of fake mock data.
+
+Panel settings are also saved in `engineer_monitoring_view.rviz` as `Use Mock Diagnostics` and `Diagnostics Topic`.
+
+### Diagnostics architecture
+
+```text
+DiagnosticsSource
+  MockDiagnosticsSource -> DiagnosticMessage -> DiagnosticsPanel
+  RosDiagnosticsSource  -> DiagnosticMessage -> DiagnosticsPanel
+```
+
+`RosDiagnosticsSource` maps ROS diagnostic levels and fields into the internal `DiagnosticMessage` model before the Qt panel renders them. See `docs/DIAGNOSTICS_CONTRACT.md` for the full mapping Korede/backend should follow.
+
+## Doctor / Surgeon Placeholder View
+
+```bash
+ros2 launch waybionic_rviz_plugins doctor_view.launch.py
+```
+
+Opens `config/doctor_camera_view.rviz` with:
+
+- RViz Image displays for placeholder camera topics
+- Docked `WayBionic Surgeon Camera` panel (`SurgeonCameraPanel`)
+
+Placeholder topics until Gianna/electrical select actual camera hardware:
+
+- `/camera/camera/color/image_raw` (primary)
+- `/surgeon/secondary/image_raw` (secondary placeholder)
+
+Both Image displays are configured in the RViz layout, but no camera feed will appear until a driver publishes those topics. The surgeon panel shows `Waiting for camera feed` and does not subscribe to images directly.
+
+## Switching Between Views
+
+Engineer and doctor are separate saved layouts. Options:
+
+1. Close one window and launch the other launch file.
+2. In RViz: **File → Open Config** and load the other layout from the installed package:
+   - Engineer: `.../share/waybionic_rviz_plugins/config/engineer_monitoring_view.rviz`
+   - Doctor: `.../share/waybionic_rviz_plugins/config/doctor_camera_view.rviz`
+3. Dock `DiagnosticsPanel` or `SurgeonCameraPanel` manually via the Panels menu.
+
+## Optional AR4 Visualization Helper
+
+Not part of the default quickstart. Isolated for prototype review only:
+
+```bash
+ros2 launch waybionic_rviz_plugins engineer_ar4_demo.launch.py
+ros2 launch waybionic_rviz_plugins engineer_ar4_demo.launch.py ar_model:=mk3 include_gripper:=True
+```
+
+Requires an AR4/Annin workspace with `annin_ar4_description`, `xacro`, `robot_state_publisher`, and `joint_state_publisher`. These are not core dependencies of `waybionic_rviz_plugins`.
+
+## Mock-Only vs Live
+
+**Mock-only today (synthetic, for UI validation):**
+
+- `Mock Normal` / `Mock Fault` controls in the engineer panel
+- Synthetic telemetry values in mock mode
+
+**Live path (ready for backend):**
+
+- `use_mock_diagnostics:=false`
+- `diagnostics_topic:=/diagnostics` (or another agreed topic)
+- `RosDiagnosticsSource` in `src/ros_diagnostics_source.cpp`
+
+**Placeholder only (no real pipeline yet):**
+
+- Doctor/surgeon camera topics and `SurgeonCameraPanel` waiting state
+
+## Related Docs
+
+- `docs/DIAGNOSTICS_CONTRACT.md` — normalized diagnostic model and ROS mapping
+- `docs/GROUND_STATION_RVIZ_UI.md` — extended architecture and view notes
+- `docs/PR_NOTES.md` — review summary, testing, and PR description source
+
+## Follow-Ups
+
+- Test engineer layout against Harold's WayBionic placeholder robot once `origin/rebuild/waybionic-foundation` is merge-ready.
+- Connect live camera topic names after hardware selection.
+- Validate live `/diagnostics` once Korede/backend publishes stable data.

@@ -1,6 +1,6 @@
 # Diagnostics Contract
 
-The RViz2 diagnostics panel consumes a normalized internal model. Mock diagnostics use this contract now, and future ROS 2 diagnostics should be converted into the same model before updating the UI.
+The RViz2 diagnostics panel consumes a normalized internal model. Mock diagnostics and live ROS 2 diagnostics both convert into this model before updating the UI.
 
 ## Internal C++ Shape
 
@@ -52,26 +52,30 @@ imu.heartbeat     | STALE | -    | - | 5.2s ago | Sensor timeout
 
 Other rows can remain `OK` while these fault rows generate visible alerts.
 
-## Future ROS 2 Mapping
+## ROS 2 Diagnostics Mapping
 
-Preferred future topic:
+Live mode subscribes to `/diagnostics` by default. The topic can be overridden at launch:
 
-```text
-/diagnostics
+```bash
+ros2 launch waybionic_rviz_plugins engineer_view.launch.py use_mock_diagnostics:=false diagnostics_topic:=/diagnostics
 ```
 
-Recommended source format:
+Message type:
 
 - `diagnostic_msgs/msg/DiagnosticArray`
-- or another agreed WayBionic diagnostics message
 
 Mapping guidance:
 
+- `DiagnosticStatus.name` maps to `signal_name`.
 - ROS diagnostic `OK` maps to `DiagnosticStatus::Ok`.
 - ROS diagnostic `WARN` maps to `DiagnosticStatus::Warn`.
 - ROS diagnostic `ERROR` maps to `DiagnosticStatus::Fault`.
-- Missing or old timestamps should map to `DiagnosticStatus::Stale`.
-- Diagnostic key/value pairs should be normalized into `value`, `unit`, and `alert_message` before updating the panel.
+- ROS diagnostic `STALE` maps to `DiagnosticStatus::Stale`.
+- `DiagnosticStatus.message` maps to `alert_message` when the status is not `OK`.
+- `DiagnosticStatus.values` may provide `value` and `unit` keys. If those keys are not present, the first non-empty key/value pair is shown as a value with the key as the unit/label.
+- `DiagnosticArray.header.stamp` is used as the row timestamp. If it is unset, receive time is used.
+- If no live message has arrived, the panel shows `Live diagnostics mode active` and `Waiting for <topic> messages` instead of mock data.
+- If the latest live message is old, the panel marks rows stale.
 
 The Qt/RViz UI should depend on `DiagnosticMessage`, not raw ROS message internals. This keeps mock data, future backend diagnostics, and any future simulator diagnostics on the same path.
 
@@ -88,10 +92,27 @@ Please publish each monitored signal with:
 
 Faults and stale signals should generate visible alerts in the engineer panel.
 
-## Integration Checklist (Later)
+## Source Switching
 
-1. Publish live diagnostics to `/diagnostics` (or agreed topic) with stable signal names.
-2. Implement a ROS 2 subscriber that maps incoming messages to `DiagnosticMessage`.
-3. Add a panel parameter such as `use_mock_diagnostics:=false` to switch from mock to live data.
-4. Verify Normal and Fault scenarios in the engineer RViz panel before operator use.
-5. Keep camera and robot visualization integration separate — they do not require changes to the diagnostic contract itself.
+Launch with mock diagnostics:
+
+```bash
+ros2 launch waybionic_rviz_plugins engineer_view.launch.py use_mock_diagnostics:=true
+```
+
+Launch with live ROS 2 diagnostics:
+
+```bash
+ros2 launch waybionic_rviz_plugins engineer_view.launch.py use_mock_diagnostics:=false
+ros2 launch waybionic_rviz_plugins engineer_view.launch.py use_mock_diagnostics:=false diagnostics_topic:=/diagnostics
+```
+
+Mock mode keeps the `Mock Normal` and `Mock Fault` validation controls enabled. Live mode disables those controls and listens to the configured diagnostics topic.
+
+## Integration Checklist
+
+1. Publish live diagnostics to `/diagnostics` or pass the agreed topic as `diagnostics_topic:=<topic>`.
+2. Verify that each `DiagnosticStatus` includes a stable `name`, useful `message`, and value/unit keys where applicable.
+3. Launch the engineer view with `use_mock_diagnostics:=false`.
+4. Verify mock normal/fault validation states and live backend diagnostics before operator use.
+5. Keep camera and robot visualization integration separate; they do not require changes to the diagnostic contract itself.
