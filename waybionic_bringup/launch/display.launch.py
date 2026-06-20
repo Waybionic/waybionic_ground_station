@@ -15,6 +15,13 @@ def generate_launch_description():
     with open(urdf_path, 'r') as infp:
         robot_desc = infp.read()
 
+    # Path to the RViz config shipped with this package
+    rviz_config_path = os.path.join(
+        get_package_share_directory('waybionic_bringup'),
+        'rviz',
+        'waybionic.rviz'
+    )
+
     # Node 1: Robot State Publisher (Publishes 3D transforms)
     robot_state_publisher_node = Node(
         package='robot_state_publisher',
@@ -39,7 +46,8 @@ def generate_launch_description():
         package='rviz2',
         executable='rviz2',
         name='rviz2',
-        output='screen'
+        output='screen',
+        arguments=['-d', rviz_config_path]
     )
 
     return LaunchDescription([
