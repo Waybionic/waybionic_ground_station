@@ -65,3 +65,23 @@ Use a **rolling shutter** as a cost fallback. It must be tested for tool-motion 
 | **GigE / 10GigE** | Better for longer routed cables and multi-camera setups | More setup/network tuning |
 | **MIPI CSI** | Very low latency to robot-side compute | Very short cables and board-specific setup |
 
+Overall:
+* Start with **USB3** for the first test.
+* Use **GigE/10GigE** if cable distance or multiple cameras become important.
+* Use **MIPI CSI** only if the camera is mounted close to robot-side compute.
+
+## 7. Recommended Camera Interfaces/Paths
+
+### First Benchtop Path
+Use a **USB3 machine-vision camera** or high-quality USB camera first.
+
+Goal:
+* test the doctor-view pipeline quickly
+* run at **1080p, 30-60 fps**
+* measure real camera-to-display latency
+* only test **4K** after 1080p is working well
+
+### Long-Term Ideal Path
+Use a **stereo, CMOS, global-shutter camera setup** with a dedicated doctor-view pipeline.
+
+I would recommend the GigE setup as the final goal due to the longer distance it will be able to travel. The MIPI is a close second, but still unsure of the electrical/hardware requirements it would take.
