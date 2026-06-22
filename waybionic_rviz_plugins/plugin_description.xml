@@ -7,12 +7,4 @@
       WayBionic ground station diagnostics, telemetry, and alerts panel for RViz2.
     </description>
   </class>
-  <class
-    name="waybionic_rviz_plugins/SurgeonCameraPanel"
-    type="waybionic_rviz_plugins::SurgeonCameraPanel"
-    base_class_type="rviz_common::Panel">
-    <description>
-      WayBionic surgeon camera placeholder panel for RViz2.
-    </description>
-  </class>
 </library>

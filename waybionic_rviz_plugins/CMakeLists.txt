@@ -15,7 +15,6 @@ find_package(Qt5 REQUIRED COMPONENTS Widgets)
 find_package(rclcpp REQUIRED)
 find_package(rviz_common REQUIRED)
 find_package(rviz_default_plugins REQUIRED)
-find_package(sensor_msgs REQUIRED)
 
 set(THIS_PACKAGE_INCLUDE_DEPENDS
   diagnostic_msgs
@@ -23,18 +22,15 @@ set(THIS_PACKAGE_INCLUDE_DEPENDS
   rclcpp
   rviz_common
   rviz_default_plugins
-  sensor_msgs
 )
 
 add_library(${PROJECT_NAME} SHARED
   include/waybionic_rviz_plugins/diagnostics_source.hpp
   include/waybionic_rviz_plugins/diagnostics_panel.hpp
   include/waybionic_rviz_plugins/ros_diagnostics_source.hpp
-  include/waybionic_rviz_plugins/surgeon_camera_panel.hpp
   src/diagnostics_panel.cpp
   src/mock_diagnostics_source.cpp
   src/ros_diagnostics_source.cpp
-  src/surgeon_camera_panel.cpp
 )
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
@@ -69,6 +65,26 @@ install(
   FILES plugin_description.xml
   DESTINATION share/${PROJECT_NAME}
 )
+
+install(
+  PROGRAMS scripts/temporary_diagnostics_publisher.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_lint_cmake REQUIRED)
+  find_package(ament_cmake_pytest REQUIRED)
+  find_package(ament_cmake_xmllint REQUIRED)
+
+  ament_lint_cmake()
+  ament_xmllint()
+
+  ament_add_pytest_test(
+    test_package_metadata
+    test/test_package_metadata.py
+    TIMEOUT 60
+  )
+endif()
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_dependencies(${THIS_PACKAGE_INCLUDE_DEPENDS})

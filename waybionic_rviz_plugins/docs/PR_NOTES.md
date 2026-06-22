@@ -8,13 +8,11 @@ These images are included only to help reviewers see the UI quickly. They are no
 | --- | --- |
 | ![Engineer mock normal](screenshots/engineer_mock_normal.png) | ![Engineer mock fault](screenshots/engineer_mock_fault.png) |
 
-Doctor/surgeon placeholder panel:
-
-![Surgeon camera placeholder](screenshots/surgeon_camera_placeholder.png)
-
 ## Summary
 
-This branch makes `waybionic_rviz_plugins` a generic WayBionic RViz2 diagnostics foundation package. The default engineer launch opens RViz with the diagnostics panel, mock diagnostics are kept for validation, and live mode is ready to consume ROS 2 diagnostics without binding the panel UI to raw ROS messages.
+This PR makes `waybionic_rviz_plugins` a focused WayBionic RViz2 diagnostics package. It keeps the engineer monitoring panel, mock/live diagnostics switching, and a temporary `/diagnostics` publisher for local validation.
+
+Camera/doctor placeholder work was removed from this PR and will be handled separately later.
 
 ## Primary Launch Commands
 
@@ -22,13 +20,25 @@ This branch makes `waybionic_rviz_plugins` a generic WayBionic RViz2 diagnostics
 colcon build --packages-select waybionic_rviz_plugins --symlink-install
 source install/setup.bash
 ros2 launch waybionic_rviz_plugins engineer_view.launch.py
-ros2 launch waybionic_rviz_plugins doctor_view.launch.py
 ```
 
-Live diagnostics mode:
+Mock diagnostics (default):
+
+```bash
+ros2 launch waybionic_rviz_plugins engineer_view.launch.py use_mock_diagnostics:=true
+```
+
+Live diagnostics:
 
 ```bash
 ros2 launch waybionic_rviz_plugins engineer_view.launch.py use_mock_diagnostics:=false diagnostics_topic:=/diagnostics
+```
+
+Temporary backend/demo publisher:
+
+```bash
+ros2 launch waybionic_rviz_plugins temporary_diagnostics_publisher.launch.py
+ros2 launch waybionic_rviz_plugins temporary_diagnostics_publisher.launch.py mode:=cycle
 ```
 
 ## What Works
@@ -37,8 +47,9 @@ ros2 launch waybionic_rviz_plugins engineer_view.launch.py use_mock_diagnostics:
 - Mock normal and fault validation states.
 - Alert banner/table rendering from normalized `DiagnosticMessage` rows.
 - Live diagnostics source path that subscribes to a `diagnostic_msgs/msg/DiagnosticArray` topic.
-- Doctor/surgeon placeholder camera layout with a docked `SurgeonCameraPanel`.
-- Both RViz panels are registered under `waybionic_rviz_plugins`: `DiagnosticsPanel` and `SurgeonCameraPanel`.
+- Temporary `/diagnostics` publisher with `normal`, `fault`, `stale`, and `cycle` modes.
+- Package metadata and lint/test wiring via `colcon test`.
+- Only `DiagnosticsPanel` is registered in `plugin_description.xml`.
 
 ## Mock Diagnostics Mode
 
@@ -46,7 +57,7 @@ Mock mode is enabled by default through `use_mock_diagnostics:=true`. It uses sy
 
 ## Live `/diagnostics` Path
 
-`RosDiagnosticsSource` subscribes to `/diagnostics` by default, or another topic passed as `diagnostics_topic:=<topic>`, and converts each status into the internal `DiagnosticMessage` model before the panel renders it. If no backend is publishing yet, the panel stays stable and shows that live diagnostics mode is active while it waits for messages.
+`RosDiagnosticsSource` subscribes to `/diagnostics` by default, or another topic passed as `diagnostics_topic:=<topic>`, and converts each status into the internal `DiagnosticMessage` model before the panel renders it.
 
 Expected mapping:
 
@@ -59,17 +70,31 @@ Expected mapping:
 - `DiagnosticStatus.values` -> `value` and `unit` when those keys are present
 - `DiagnosticArray.header.stamp`, or receive time when unset, -> `timestamp`
 
-## Doctor / Surgeon Camera Placeholder View
+## Temporary Diagnostics Publisher
 
-`doctor_view.launch.py` opens `config/doctor_camera_view.rviz` with RViz Image displays and the docked `WayBionic Surgeon Camera` placeholder panel. The configured topics are placeholders until Gianna/electrical select the real camera hardware and ROS topics; this package does not claim a camera pipeline exists yet.
+`scripts/temporary_diagnostics_publisher.py` publishes sample `DiagnosticArray` messages for local testing while Korede/backend publishing is unavailable.
 
-The surgeon camera panel is available from RViz through:
+Modes:
 
-```text
-Panels -> Add Panel -> waybionic_rviz_plugins -> SurgeonCameraPanel
+- `normal` — OK telemetry
+- `fault` — high board temperature + stale IMU heartbeat
+- `stale` — all sample signals STALE
+- `cycle` — rotate through normal/fault/stale every 5 seconds
+
+## Lint / Test Wiring
+
+```bash
+colcon test --packages-select waybionic_rviz_plugins
+colcon test-result --verbose
 ```
 
-It shows the placeholder topic names and `Waiting for camera feed`; actual image rendering remains in RViz Image displays once camera topics exist.
+Tests verify:
+
+- `DiagnosticsPanel` is registered in `plugin_description.xml`
+- `SurgeonCameraPanel` is not registered
+- `package.xml` has no Annin/AR4 dependency
+- doctor/camera launch/config files are removed
+- temporary diagnostics publisher files exist
 
 ## Optional AR4 Visualization Helper
 
@@ -80,16 +105,16 @@ Optional AR4 coupling is isolated in:
 - `launch/engineer_ar4_demo.launch.py`
 - `config/engineer_ar4_demo.rviz`
 
-That helper requires an AR4/Annin workspace with `annin_ar4_description`, `xacro`, `robot_state_publisher`, and `joint_state_publisher` available.
-
 ## Testing Performed
 
 ```bash
 source /opt/ros/jazzy/setup.bash
 colcon build --packages-select waybionic_rviz_plugins --symlink-install
 source install/setup.bash
+colcon test --packages-select waybionic_rviz_plugins
+colcon test-result --verbose
 ros2 launch waybionic_rviz_plugins engineer_view.launch.py --show-args
-ros2 launch waybionic_rviz_plugins doctor_view.launch.py --show-args
+ros2 launch waybionic_rviz_plugins temporary_diagnostics_publisher.launch.py --show-args
 ```
 
 Optional AR4 helper, only in a workspace with AR4 dependencies:
@@ -98,21 +123,19 @@ Optional AR4 helper, only in a workspace with AR4 dependencies:
 ros2 launch waybionic_rviz_plugins engineer_ar4_demo.launch.py --show-args
 ```
 
-The doctor view was also launched briefly under a timeout to verify RViz starts and loads the placeholder panel without plugin errors.
-
 ## PR Status
 
 Opened as https://github.com/Waybionic/waybionic_ground_station/pull/2 against `main`. Review screenshots at the top of this file are for reviewer context only.
 
 ## Known Limitations
 
-- Meaningful live rows require Korede/backend to publish stable diagnostics data.
+- Meaningful live rows still depend on stable backend publishing once Korede is available.
 - Stale handling is currently a simple five-second freshness check.
-- Doctor view is a placeholder layout only; no real camera hardware or pipeline is implied.
 - The UI is monitoring-only and does not send motor commands.
+- Camera/doctor workflow is out of scope for this PR.
 
 ## Next Steps
 
 - Confirm final diagnostic signal names and value/unit conventions with backend.
-- Connect live camera topic names after hardware selection.
-- Add focused runtime validation once a diagnostics publisher is available.
+- Merge diagnostics foundation, then handle camera/doctor low-latency workflow separately.
+- Add focused runtime validation against Korede/backend once publishing is available.

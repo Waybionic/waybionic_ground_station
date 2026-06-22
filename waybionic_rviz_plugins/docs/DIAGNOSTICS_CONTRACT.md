@@ -115,4 +115,4 @@ Mock mode keeps the `Mock Normal` and `Mock Fault` validation controls enabled. 
 2. Verify that each `DiagnosticStatus` includes a stable `name`, useful `message`, and value/unit keys where applicable.
 3. Launch the engineer view with `use_mock_diagnostics:=false`.
 4. Verify mock normal/fault validation states and live backend diagnostics before operator use.
-5. Keep camera and robot visualization integration separate; they do not require changes to the diagnostic contract itself.
+5. Keep robot visualization integration separate; it does not require changes to the diagnostic contract itself.
