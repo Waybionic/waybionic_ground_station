@@ -1,0 +1,2 @@
+- Only add ROS-display mesh assets to this folder
+- No CAD dumps or mechanical source files in this folder
