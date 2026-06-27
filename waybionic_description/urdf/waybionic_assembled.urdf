@@ -1,0 +1,551 @@
+<?xml version="1.0"?>
+<robot name="waybionic_assembled">
+
+  <link name="world"/>
+  <link name="base_link"/>
+  <joint name="world_to_base" type="fixed">
+    <parent link="world"/><child link="base_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_bts_01"><color rgba="0.950 0.332 0.332 1.0"/></material>
+  <link name="bts_01">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_2WireSlipRing-2-wire-slipring-1_2WireSli_.step-1_rotor.step-1_rotator-base.step-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_bts_01"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_2WireSlipRing-2-wire-slipring-1_2WireSli_.step-1_rotor.step-1_rotator-base.step-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_bts_01" type="fixed">
+    <parent link="base_link"/><child link="bts_01"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_bts_02"><color rgba="0.950 0.435 0.332 1.0"/></material>
+  <link name="bts_02">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_2WireSlipRing-2-wire-slipring-1_2WireSli_.step-1_stator.step-1_stator_body.step-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_bts_02"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_2WireSlipRing-2-wire-slipring-1_2WireSli_.step-1_stator.step-1_stator_body.step-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_bts_02" type="fixed">
+    <parent link="base_link"/><child link="bts_02"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_bts_03"><color rgba="0.950 0.538 0.332 1.0"/></material>
+  <link name="bts_03">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_2WireSlipRing-2-wire-slipring-1_2WireSli_rotor.step-1_negative-rotor-wire.step-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_bts_03"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_2WireSlipRing-2-wire-slipring-1_2WireSli_rotor.step-1_negative-rotor-wire.step-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_bts_03" type="fixed">
+    <parent link="base_link"/><child link="bts_03"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_bts_04"><color rgba="0.950 0.641 0.332 1.0"/></material>
+  <link name="bts_04">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_2WireSlipRing-2-wire-slipring-1_2WireSli_rotor.step-1_positive-rotor-wire.step-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_bts_04"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_2WireSlipRing-2-wire-slipring-1_2WireSli_rotor.step-1_positive-rotor-wire.step-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_bts_04" type="fixed">
+    <parent link="base_link"/><child link="bts_04"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_bts_05"><color rgba="0.950 0.744 0.332 1.0"/></material>
+  <link name="bts_05">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_2WireSlipRing-2-wire-slipring-1_2WireSli_tator.step-1_negative-stator-wire.step-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_bts_05"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_2WireSlipRing-2-wire-slipring-1_2WireSli_tator.step-1_negative-stator-wire.step-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_bts_05" type="fixed">
+    <parent link="base_link"/><child link="bts_05"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_bts_06"><color rgba="0.950 0.847 0.332 1.0"/></material>
+  <link name="bts_06">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_2WireSlipRing-2-wire-slipring-1_2WireSli_tator.step-1_positive-stator-wire.step-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_bts_06"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_2WireSlipRing-2-wire-slipring-1_2WireSli_tator.step-1_positive-stator-wire.step-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_bts_06" type="fixed">
+    <parent link="base_link"/><child link="bts_06"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_bts_07"><color rgba="0.950 0.950 0.332 1.0"/></material>
+  <link name="bts_07">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_6656K153_Ultra-Thin_Ball_Bearing-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_bts_07"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_6656K153_Ultra-Thin_Ball_Bearing-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_bts_07" type="fixed">
+    <parent link="base_link"/><child link="bts_07"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_bts_08"><color rgba="0.847 0.950 0.332 1.0"/></material>
+  <link name="bts_08">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_Stepper-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_bts_08"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_Stepper-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_bts_08" type="fixed">
+    <parent link="base_link"/><child link="bts_08"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_bts_09"><color rgba="0.744 0.950 0.332 1.0"/></material>
+  <link name="bts_09">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_carrier_1-changedDimensionsMar21-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_bts_09"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_carrier_1-changedDimensionsMar21-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_bts_09" type="fixed">
+    <parent link="base_link"/><child link="bts_09"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_bts_10"><color rgba="0.641 0.950 0.332 1.0"/></material>
+  <link name="bts_10">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_outer_ring_newDimensionsMar21-5.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_bts_10"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_outer_ring_newDimensionsMar21-5.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_bts_10" type="fixed">
+    <parent link="base_link"/><child link="bts_10"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_bts_11"><color rgba="0.538 0.950 0.332 1.0"/></material>
+  <link name="bts_11">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_planetShafts-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_bts_11"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_planetShafts-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_bts_11" type="fixed">
+    <parent link="base_link"/><child link="bts_11"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_bts_12"><color rgba="0.435 0.950 0.332 1.0"/></material>
+  <link name="bts_12">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_planetShafts-2.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_bts_12"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_planetShafts-2.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_bts_12" type="fixed">
+    <parent link="base_link"/><child link="bts_12"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_bts_13"><color rgba="0.332 0.950 0.332 1.0"/></material>
+  <link name="bts_13">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_planetShafts-3.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_bts_13"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_planetShafts-3.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_bts_13" type="fixed">
+    <parent link="base_link"/><child link="bts_13"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_bts_14"><color rgba="0.332 0.950 0.435 1.0"/></material>
+  <link name="bts_14">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_planetShafts-4.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_bts_14"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_planetShafts-4.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_bts_14" type="fixed">
+    <parent link="base_link"/><child link="bts_14"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_bts_15"><color rgba="0.332 0.950 0.538 1.0"/></material>
+  <link name="bts_15">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_spur_gear_iso-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_bts_15"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_spur_gear_iso-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_bts_15" type="fixed">
+    <parent link="base_link"/><child link="bts_15"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_bts_16"><color rgba="0.332 0.950 0.641 1.0"/></material>
+  <link name="bts_16">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_spur_gear_iso-2.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_bts_16"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_spur_gear_iso-2.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_bts_16" type="fixed">
+    <parent link="base_link"/><child link="bts_16"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_bts_17"><color rgba="0.332 0.950 0.744 1.0"/></material>
+  <link name="bts_17">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_spur_gear_iso-3.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_bts_17"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_spur_gear_iso-3.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_bts_17" type="fixed">
+    <parent link="base_link"/><child link="bts_17"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_bts_18"><color rgba="0.332 0.950 0.847 1.0"/></material>
+  <link name="bts_18">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_spur_gear_iso-4.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_bts_18"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_spur_gear_iso-4.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_bts_18" type="fixed">
+    <parent link="base_link"/><child link="bts_18"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_bts_19"><color rgba="0.332 0.950 0.950 1.0"/></material>
+  <link name="bts_19">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_spur_gear_iso-5.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_bts_19"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/baseToShoulder-newDim-Mar24-stl_-_spur_gear_iso-5.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_bts_19" type="fixed">
+    <parent link="base_link"/><child link="bts_19"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_carrier_01"><color rgba="0.332 0.847 0.950 1.0"/></material>
+  <link name="carrier_01">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/carrier_to_pulley_feb28-stl_-_3rd_Joint_Pulley_V1_HT_20250927-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_carrier_01"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/carrier_to_pulley_feb28-stl_-_3rd_Joint_Pulley_V1_HT_20250927-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_carrier_01" type="fixed">
+    <parent link="base_link"/><child link="carrier_01"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_carrier_02"><color rgba="0.332 0.744 0.950 1.0"/></material>
+  <link name="carrier_02">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/carrier_to_pulley_feb28-stl_-_3rd_Joint_V1_HT_20250920-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_carrier_02"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/carrier_to_pulley_feb28-stl_-_3rd_Joint_V1_HT_20250920-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_carrier_02" type="fixed">
+    <parent link="base_link"/><child link="carrier_02"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_carrier_03"><color rgba="0.332 0.641 0.950 1.0"/></material>
+  <link name="carrier_03">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/carrier_to_pulley_feb28-stl_-_GT2_x_6mm_Pully_5mm_Bore-pulley-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_carrier_03"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/carrier_to_pulley_feb28-stl_-_GT2_x_6mm_Pully_5mm_Bore-pulley-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_carrier_03" type="fixed">
+    <parent link="base_link"/><child link="carrier_03"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_carrier_04"><color rgba="0.332 0.538 0.950 1.0"/></material>
+  <link name="carrier_04">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/carrier_to_pulley_feb28-stl_-_Pipe-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_carrier_04"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/carrier_to_pulley_feb28-stl_-_Pipe-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_carrier_04" type="fixed">
+    <parent link="base_link"/><child link="carrier_04"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_carrier_05"><color rgba="0.332 0.435 0.950 1.0"/></material>
+  <link name="carrier_05">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/carrier_to_pulley_feb28-stl_-_Stepper-Pulley-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_carrier_05"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/carrier_to_pulley_feb28-stl_-_Stepper-Pulley-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_carrier_05" type="fixed">
+    <parent link="base_link"/><child link="carrier_05"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_key_01"><color rgba="0.332 0.332 0.950 1.0"/></material>
+  <link name="key_01">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_GT2_60T_b5_6mm_-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_key_01"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_GT2_60T_b5_6mm_-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_key_01" type="fixed">
+    <parent link="base_link"/><child link="key_01"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_key_02"><color rgba="0.435 0.332 0.950 1.0"/></material>
+  <link name="key_02">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_GT2_x_6mm_Pully_5mm_Bore-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_key_02"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_GT2_x_6mm_Pully_5mm_Bore-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_key_02" type="fixed">
+    <parent link="base_link"/><child link="key_02"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_key_03"><color rgba="0.538 0.332 0.950 1.0"/></material>
+  <link name="key_03">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_GT2_x_6mm_Pully_5mm_Bore-2.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_key_03"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_GT2_x_6mm_Pully_5mm_Bore-2.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_key_03" type="fixed">
+    <parent link="base_link"/><child link="key_03"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_key_04"><color rgba="0.641 0.332 0.950 1.0"/></material>
+  <link name="key_04">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_StepperHolderV2-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_key_04"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_StepperHolderV2-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_key_04" type="fixed">
+    <parent link="base_link"/><child link="key_04"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_key_05"><color rgba="0.744 0.332 0.950 1.0"/></material>
+  <link name="key_05">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_another-Stepper-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_key_05"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_another-Stepper-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_key_05" type="fixed">
+    <parent link="base_link"/><child link="key_05"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_key_06"><color rgba="0.847 0.332 0.950 1.0"/></material>
+  <link name="key_06">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_another-Stepper-2.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_key_06"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_another-Stepper-2.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_key_06" type="fixed">
+    <parent link="base_link"/><child link="key_06"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_key_07"><color rgba="0.950 0.332 0.950 1.0"/></material>
+  <link name="key_07">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_arduino-uno-rough-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_key_07"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_arduino-uno-rough-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_key_07" type="fixed">
+    <parent link="base_link"/><child link="key_07"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_key_08"><color rgba="0.950 0.332 0.847 1.0"/></material>
+  <link name="key_08">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_bottom-pvc-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_key_08"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_bottom-pvc-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_key_08" type="fixed">
+    <parent link="base_link"/><child link="key_08"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_key_09"><color rgba="0.950 0.332 0.744 1.0"/></material>
+  <link name="key_09">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_keyed_shaft-updated-mar13-15mm-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_key_09"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_keyed_shaft-updated-mar13-15mm-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_key_09" type="fixed">
+    <parent link="base_link"/><child link="key_09"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_key_10"><color rgba="0.950 0.332 0.641 1.0"/></material>
+  <link name="key_10">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_lid-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_key_10"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_lid-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_key_10" type="fixed">
+    <parent link="base_link"/><child link="key_10"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_key_11"><color rgba="0.950 0.332 0.538 1.0"/></material>
+  <link name="key_11">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_revised-3rd_Joint_Top_key_hole_170126_-mar15-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_key_11"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_revised-3rd_Joint_Top_key_hole_170126_-mar15-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_key_11" type="fixed">
+    <parent link="base_link"/><child link="key_11"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="m_key_12"><color rgba="0.950 0.332 0.435 1.0"/></material>
+  <link name="key_12">
+    <visual>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_top-pvc-1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="m_key_12"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="package://waybionic_description/meshes/key-to-diff-mar24-stl_-_top-pvc-1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j_key_12" type="fixed">
+    <parent link="base_link"/><child link="key_12"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+</robot>
