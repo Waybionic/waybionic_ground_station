@@ -18,7 +18,7 @@
   </link>
   <joint name="j_2WireSlipRing_2_wire_slipring_stl_2WireSlipRing_2_wire_slipring_step_1_rotor_step_1_negative_rotor_wire_step_1" type="fixed">
     <parent link="base_link"/><child link="2WireSlipRing_2_wire_slipring_stl_2WireSlipRing_2_wire_slipring_step_1_rotor_step_1_negative_rotor_wire_step_1"/>
-    <origin xyz="0.0 0.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="2WireSlipRing_2_wire_slipring_stl_2WireSlipRing_2_wire_slipring_step_1_rotor_step_1_positive_rotor_wire_step_1">
     <visual>
@@ -30,7 +30,7 @@
   </link>
   <joint name="j_2WireSlipRing_2_wire_slipring_stl_2WireSlipRing_2_wire_slipring_step_1_rotor_step_1_positive_rotor_wire_step_1" type="fixed">
     <parent link="base_link"/><child link="2WireSlipRing_2_wire_slipring_stl_2WireSlipRing_2_wire_slipring_step_1_rotor_step_1_positive_rotor_wire_step_1"/>
-    <origin xyz="0.5 0.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="2WireSlipRing_2_wire_slipring_stl_2WireSlipRing_2_wire_slipring_step_1_rotor_step_1_rotator_base_step_1">
     <visual>
@@ -42,7 +42,7 @@
   </link>
   <joint name="j_2WireSlipRing_2_wire_slipring_stl_2WireSlipRing_2_wire_slipring_step_1_rotor_step_1_rotator_base_step_1" type="fixed">
     <parent link="base_link"/><child link="2WireSlipRing_2_wire_slipring_stl_2WireSlipRing_2_wire_slipring_step_1_rotor_step_1_rotator_base_step_1"/>
-    <origin xyz="1.0 0.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="2WireSlipRing_2_wire_slipring_stl_2WireSlipRing_2_wire_slipring_step_1_stator_step_1_negative_stator_wire_step_1">
     <visual>
@@ -54,7 +54,7 @@
   </link>
   <joint name="j_2WireSlipRing_2_wire_slipring_stl_2WireSlipRing_2_wire_slipring_step_1_stator_step_1_negative_stator_wire_step_1" type="fixed">
     <parent link="base_link"/><child link="2WireSlipRing_2_wire_slipring_stl_2WireSlipRing_2_wire_slipring_step_1_stator_step_1_negative_stator_wire_step_1"/>
-    <origin xyz="1.5 0.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="2WireSlipRing_2_wire_slipring_stl_2WireSlipRing_2_wire_slipring_step_1_stator_step_1_positive_stator_wire_step_1">
     <visual>
@@ -66,7 +66,7 @@
   </link>
   <joint name="j_2WireSlipRing_2_wire_slipring_stl_2WireSlipRing_2_wire_slipring_step_1_stator_step_1_positive_stator_wire_step_1" type="fixed">
     <parent link="base_link"/><child link="2WireSlipRing_2_wire_slipring_stl_2WireSlipRing_2_wire_slipring_step_1_stator_step_1_positive_stator_wire_step_1"/>
-    <origin xyz="2.0 0.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="2WireSlipRing_2_wire_slipring_stl_2WireSlipRing_2_wire_slipring_step_1_stator_step_1_stator_body_step_1">
     <visual>
@@ -78,7 +78,7 @@
   </link>
   <joint name="j_2WireSlipRing_2_wire_slipring_stl_2WireSlipRing_2_wire_slipring_step_1_stator_step_1_stator_body_step_1" type="fixed">
     <parent link="base_link"/><child link="2WireSlipRing_2_wire_slipring_stl_2WireSlipRing_2_wire_slipring_step_1_stator_step_1_stator_body_step_1"/>
-    <origin xyz="2.5 0.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="3rd_Joint_Pulley_V1_HT_20250927_stl">
     <visual>
@@ -90,7 +90,7 @@
   </link>
   <joint name="j_3rd_Joint_Pulley_V1_HT_20250927_stl" type="fixed">
     <parent link="base_link"/><child link="3rd_Joint_Pulley_V1_HT_20250927_stl"/>
-    <origin xyz="3.0 0.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="3rd_Joint_V1_HT_20250920_stl">
     <visual>
@@ -102,7 +102,7 @@
   </link>
   <joint name="j_3rd_Joint_V1_HT_20250920_stl" type="fixed">
     <parent link="base_link"/><child link="3rd_Joint_V1_HT_20250920_stl"/>
-    <origin xyz="3.5 0.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="6656K153_Ultra_Thin_Ball_Bearing_stl">
     <visual>
@@ -114,7 +114,7 @@
   </link>
   <joint name="j_6656K153_Ultra_Thin_Ball_Bearing_stl" type="fixed">
     <parent link="base_link"/><child link="6656K153_Ultra_Thin_Ball_Bearing_stl"/>
-    <origin xyz="4.0 0.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="90_degree_elbow_V4_NB_stl">
     <visual>
@@ -126,7 +126,7 @@
   </link>
   <joint name="j_90_degree_elbow_V4_NB_stl" type="fixed">
     <parent link="base_link"/><child link="90_degree_elbow_V4_NB_stl"/>
-    <origin xyz="4.5 0.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="Base_Funnel_1_stl">
     <visual>
@@ -138,7 +138,7 @@
   </link>
   <joint name="j_Base_Funnel_1_stl" type="fixed">
     <parent link="base_link"/><child link="Base_Funnel_1_stl"/>
-    <origin xyz="0.0 0.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="Base_Updated_stl">
     <visual>
@@ -150,7 +150,7 @@
   </link>
   <joint name="j_Base_Updated_stl" type="fixed">
     <parent link="base_link"/><child link="Base_Updated_stl"/>
-    <origin xyz="0.5 0.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="CapForDifferentialV2_Mar14_stl">
     <visual>
@@ -162,7 +162,7 @@
   </link>
   <joint name="j_CapForDifferentialV2_Mar14_stl" type="fixed">
     <parent link="base_link"/><child link="CapForDifferentialV2_Mar14_stl"/>
-    <origin xyz="1.0 0.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="DifferentialHousing_stl">
     <visual>
@@ -174,7 +174,7 @@
   </link>
   <joint name="j_DifferentialHousing_stl" type="fixed">
     <parent link="base_link"/><child link="DifferentialHousing_stl"/>
-    <origin xyz="1.5 0.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="GT2_60T_b5_6mm_stl">
     <visual>
@@ -186,7 +186,7 @@
   </link>
   <joint name="j_GT2_60T_b5_6mm_stl" type="fixed">
     <parent link="base_link"/><child link="GT2_60T_b5_6mm_stl"/>
-    <origin xyz="2.0 0.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="GT2_x_6mm_Pully_5mm_Bore_pulley_stl">
     <visual>
@@ -198,7 +198,7 @@
   </link>
   <joint name="j_GT2_x_6mm_Pully_5mm_Bore_pulley_stl" type="fixed">
     <parent link="base_link"/><child link="GT2_x_6mm_Pully_5mm_Bore_pulley_stl"/>
-    <origin xyz="2.5 0.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="GT2_x_6mm_Pully_5mm_Bore_stl">
     <visual>
@@ -210,7 +210,7 @@
   </link>
   <joint name="j_GT2_x_6mm_Pully_5mm_Bore_stl" type="fixed">
     <parent link="base_link"/><child link="GT2_x_6mm_Pully_5mm_Bore_stl"/>
-    <origin xyz="3.0 0.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="Pipe_stl">
     <visual>
@@ -222,7 +222,7 @@
   </link>
   <joint name="j_Pipe_stl" type="fixed">
     <parent link="base_link"/><child link="Pipe_stl"/>
-    <origin xyz="3.5 0.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="Stepper_Pulley_stl">
     <visual>
@@ -234,7 +234,7 @@
   </link>
   <joint name="j_Stepper_Pulley_stl" type="fixed">
     <parent link="base_link"/><child link="Stepper_Pulley_stl"/>
-    <origin xyz="4.0 0.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="Stepper_stl">
     <visual>
@@ -246,7 +246,7 @@
   </link>
   <joint name="j_Stepper_stl" type="fixed">
     <parent link="base_link"/><child link="Stepper_stl"/>
-    <origin xyz="4.5 0.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="StepperHolderV2_stl">
     <visual>
@@ -258,7 +258,7 @@
   </link>
   <joint name="j_StepperHolderV2_stl" type="fixed">
     <parent link="base_link"/><child link="StepperHolderV2_stl"/>
-    <origin xyz="0.0 1.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="another_Stepper_stl">
     <visual>
@@ -270,7 +270,7 @@
   </link>
   <joint name="j_another_Stepper_stl" type="fixed">
     <parent link="base_link"/><child link="another_Stepper_stl"/>
-    <origin xyz="0.5 1.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="arduino_uno_rough_stl">
     <visual>
@@ -282,7 +282,7 @@
   </link>
   <joint name="j_arduino_uno_rough_stl" type="fixed">
     <parent link="base_link"/><child link="arduino_uno_rough_stl"/>
-    <origin xyz="1.0 1.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_step_1_rotor_step_1_rotator_base_step_1_1">
     <visual>
@@ -294,7 +294,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_step_1_rotor_step_1_rotator_base_step_1_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_step_1_rotor_step_1_rotator_base_step_1_1"/>
-    <origin xyz="1.5 1.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_step_1_rotor_step_1_rotator_base_step_1">
     <visual>
@@ -306,7 +306,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_step_1_rotor_step_1_rotator_base_step_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_step_1_rotor_step_1_rotator_base_step_1"/>
-    <origin xyz="2.0 1.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_step_1_stator_step_1_stator_body_step_1_1">
     <visual>
@@ -318,7 +318,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_step_1_stator_step_1_stator_body_step_1_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_step_1_stator_step_1_stator_body_step_1_1"/>
-    <origin xyz="2.5 1.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_step_1_stator_step_1_stator_body_step_1">
     <visual>
@@ -330,7 +330,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_step_1_stator_step_1_stator_body_step_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_step_1_stator_step_1_stator_body_step_1"/>
-    <origin xyz="3.0 1.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_rotor_step_1_negative_rotor_wire_step_1_1">
     <visual>
@@ -342,7 +342,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_rotor_step_1_negative_rotor_wire_step_1_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_rotor_step_1_negative_rotor_wire_step_1_1"/>
-    <origin xyz="3.5 1.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_rotor_step_1_negative_rotor_wire_step_1">
     <visual>
@@ -354,7 +354,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_rotor_step_1_negative_rotor_wire_step_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_rotor_step_1_negative_rotor_wire_step_1"/>
-    <origin xyz="4.0 1.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_rotor_step_1_positive_rotor_wire_step_1_1">
     <visual>
@@ -366,7 +366,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_rotor_step_1_positive_rotor_wire_step_1_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_rotor_step_1_positive_rotor_wire_step_1_1"/>
-    <origin xyz="4.5 1.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_rotor_step_1_positive_rotor_wire_step_1">
     <visual>
@@ -378,7 +378,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_rotor_step_1_positive_rotor_wire_step_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_rotor_step_1_positive_rotor_wire_step_1"/>
-    <origin xyz="0.0 1.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_tator_step_1_negative_stator_wire_step_1_1">
     <visual>
@@ -390,7 +390,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_tator_step_1_negative_stator_wire_step_1_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_tator_step_1_negative_stator_wire_step_1_1"/>
-    <origin xyz="0.5 1.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_tator_step_1_negative_stator_wire_step_1">
     <visual>
@@ -402,7 +402,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_tator_step_1_negative_stator_wire_step_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_tator_step_1_negative_stator_wire_step_1"/>
-    <origin xyz="1.0 1.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_tator_step_1_positive_stator_wire_step_1_1">
     <visual>
@@ -414,7 +414,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_tator_step_1_positive_stator_wire_step_1_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_tator_step_1_positive_stator_wire_step_1_1"/>
-    <origin xyz="1.5 1.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_tator_step_1_positive_stator_wire_step_1">
     <visual>
@@ -426,7 +426,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_tator_step_1_positive_stator_wire_step_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_2WireSlipRing_2_wire_slipring_1_2WireSli_tator_step_1_positive_stator_wire_step_1"/>
-    <origin xyz="2.0 1.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_6656K153_Ultra_Thin_Ball_Bearing_1_1">
     <visual>
@@ -438,7 +438,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_6656K153_Ultra_Thin_Ball_Bearing_1_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_6656K153_Ultra_Thin_Ball_Bearing_1_1"/>
-    <origin xyz="2.5 1.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_6656K153_Ultra_Thin_Ball_Bearing_1">
     <visual>
@@ -450,7 +450,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_6656K153_Ultra_Thin_Ball_Bearing_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_6656K153_Ultra_Thin_Ball_Bearing_1"/>
-    <origin xyz="3.0 1.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_Stepper_1_1">
     <visual>
@@ -462,7 +462,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_Stepper_1_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_Stepper_1_1"/>
-    <origin xyz="3.5 1.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_Stepper_1">
     <visual>
@@ -474,7 +474,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_Stepper_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_Stepper_1"/>
-    <origin xyz="4.0 1.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_carrier_1_changedDimensionsMar21_1_1">
     <visual>
@@ -486,7 +486,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_carrier_1_changedDimensionsMar21_1_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_carrier_1_changedDimensionsMar21_1_1"/>
-    <origin xyz="4.5 1.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_carrier_1_changedDimensionsMar21_1">
     <visual>
@@ -498,7 +498,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_carrier_1_changedDimensionsMar21_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_carrier_1_changedDimensionsMar21_1"/>
-    <origin xyz="0.0 2.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_outer_ring_newDimensionsMar21_5_1">
     <visual>
@@ -510,7 +510,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_outer_ring_newDimensionsMar21_5_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_outer_ring_newDimensionsMar21_5_1"/>
-    <origin xyz="0.5 2.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_outer_ring_newDimensionsMar21_5">
     <visual>
@@ -522,7 +522,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_outer_ring_newDimensionsMar21_5" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_outer_ring_newDimensionsMar21_5"/>
-    <origin xyz="1.0 2.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_planetShafts_1_1">
     <visual>
@@ -534,7 +534,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_planetShafts_1_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_planetShafts_1_1"/>
-    <origin xyz="1.5 2.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_planetShafts_1">
     <visual>
@@ -546,7 +546,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_planetShafts_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_planetShafts_1"/>
-    <origin xyz="2.0 2.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_planetShafts_2_1">
     <visual>
@@ -558,7 +558,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_planetShafts_2_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_planetShafts_2_1"/>
-    <origin xyz="2.5 2.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_planetShafts_2">
     <visual>
@@ -570,7 +570,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_planetShafts_2" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_planetShafts_2"/>
-    <origin xyz="3.0 2.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_planetShafts_3_1">
     <visual>
@@ -582,7 +582,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_planetShafts_3_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_planetShafts_3_1"/>
-    <origin xyz="3.5 2.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_planetShafts_3">
     <visual>
@@ -594,7 +594,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_planetShafts_3" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_planetShafts_3"/>
-    <origin xyz="4.0 2.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_planetShafts_4_1">
     <visual>
@@ -606,7 +606,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_planetShafts_4_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_planetShafts_4_1"/>
-    <origin xyz="4.5 2.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_planetShafts_4">
     <visual>
@@ -618,7 +618,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_planetShafts_4" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_planetShafts_4"/>
-    <origin xyz="0.0 2.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_spur_gear_iso_1_1">
     <visual>
@@ -630,7 +630,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_spur_gear_iso_1_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_spur_gear_iso_1_1"/>
-    <origin xyz="0.5 2.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_spur_gear_iso_1">
     <visual>
@@ -642,7 +642,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_spur_gear_iso_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_spur_gear_iso_1"/>
-    <origin xyz="1.0 2.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_spur_gear_iso_2_1">
     <visual>
@@ -654,7 +654,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_spur_gear_iso_2_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_spur_gear_iso_2_1"/>
-    <origin xyz="1.5 2.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_spur_gear_iso_2">
     <visual>
@@ -666,7 +666,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_spur_gear_iso_2" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_spur_gear_iso_2"/>
-    <origin xyz="2.0 2.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_spur_gear_iso_3_1">
     <visual>
@@ -678,7 +678,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_spur_gear_iso_3_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_spur_gear_iso_3_1"/>
-    <origin xyz="2.5 2.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_spur_gear_iso_3">
     <visual>
@@ -690,7 +690,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_spur_gear_iso_3" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_spur_gear_iso_3"/>
-    <origin xyz="3.0 2.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_spur_gear_iso_4_1">
     <visual>
@@ -702,7 +702,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_spur_gear_iso_4_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_spur_gear_iso_4_1"/>
-    <origin xyz="3.5 2.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_spur_gear_iso_4">
     <visual>
@@ -714,7 +714,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_spur_gear_iso_4" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_spur_gear_iso_4"/>
-    <origin xyz="4.0 2.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_spur_gear_iso_5_1">
     <visual>
@@ -726,7 +726,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_spur_gear_iso_5_1" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_spur_gear_iso_5_1"/>
-    <origin xyz="4.5 2.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="baseToShoulder_newDim_Mar24_stl_spur_gear_iso_5">
     <visual>
@@ -738,7 +738,7 @@
   </link>
   <joint name="j_baseToShoulder_newDim_Mar24_stl_spur_gear_iso_5" type="fixed">
     <parent link="base_link"/><child link="baseToShoulder_newDim_Mar24_stl_spur_gear_iso_5"/>
-    <origin xyz="0.0 3.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="bottom_pvc_stl">
     <visual>
@@ -750,7 +750,7 @@
   </link>
   <joint name="j_bottom_pvc_stl" type="fixed">
     <parent link="base_link"/><child link="bottom_pvc_stl"/>
-    <origin xyz="0.5 3.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="carrier_1_changedDimensionsMar21_stl">
     <visual>
@@ -762,7 +762,7 @@
   </link>
   <joint name="j_carrier_1_changedDimensionsMar21_stl" type="fixed">
     <parent link="base_link"/><child link="carrier_1_changedDimensionsMar21_stl"/>
-    <origin xyz="1.0 3.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="carrier_to_pulley_feb28_stl_3rd_Joint_Pulley_V1_HT_20250927_1">
     <visual>
@@ -774,7 +774,7 @@
   </link>
   <joint name="j_carrier_to_pulley_feb28_stl_3rd_Joint_Pulley_V1_HT_20250927_1" type="fixed">
     <parent link="base_link"/><child link="carrier_to_pulley_feb28_stl_3rd_Joint_Pulley_V1_HT_20250927_1"/>
-    <origin xyz="1.5 3.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="carrier_to_pulley_feb28_stl_3rd_Joint_V1_HT_20250920_1">
     <visual>
@@ -786,7 +786,7 @@
   </link>
   <joint name="j_carrier_to_pulley_feb28_stl_3rd_Joint_V1_HT_20250920_1" type="fixed">
     <parent link="base_link"/><child link="carrier_to_pulley_feb28_stl_3rd_Joint_V1_HT_20250920_1"/>
-    <origin xyz="2.0 3.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="carrier_to_pulley_feb28_stl_GT2_x_6mm_Pully_5mm_Bore_pulley_1">
     <visual>
@@ -798,7 +798,7 @@
   </link>
   <joint name="j_carrier_to_pulley_feb28_stl_GT2_x_6mm_Pully_5mm_Bore_pulley_1" type="fixed">
     <parent link="base_link"/><child link="carrier_to_pulley_feb28_stl_GT2_x_6mm_Pully_5mm_Bore_pulley_1"/>
-    <origin xyz="2.5 3.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="carrier_to_pulley_feb28_stl_Pipe_1">
     <visual>
@@ -810,7 +810,7 @@
   </link>
   <joint name="j_carrier_to_pulley_feb28_stl_Pipe_1" type="fixed">
     <parent link="base_link"/><child link="carrier_to_pulley_feb28_stl_Pipe_1"/>
-    <origin xyz="3.0 3.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="carrier_to_pulley_feb28_stl_Stepper_Pulley_1">
     <visual>
@@ -822,7 +822,7 @@
   </link>
   <joint name="j_carrier_to_pulley_feb28_stl_Stepper_Pulley_1" type="fixed">
     <parent link="base_link"/><child link="carrier_to_pulley_feb28_stl_Stepper_Pulley_1"/>
-    <origin xyz="3.5 3.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="full_arm_jun13_stl_90_degree_elbow_V4_NB_1">
     <visual>
@@ -834,7 +834,7 @@
   </link>
   <joint name="j_full_arm_jun13_stl_90_degree_elbow_V4_NB_1" type="fixed">
     <parent link="base_link"/><child link="full_arm_jun13_stl_90_degree_elbow_V4_NB_1"/>
-    <origin xyz="4.0 3.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="key_to_diff_mar24_stl_GT2_60T_b5_6mm_1">
     <visual>
@@ -846,7 +846,7 @@
   </link>
   <joint name="j_key_to_diff_mar24_stl_GT2_60T_b5_6mm_1" type="fixed">
     <parent link="base_link"/><child link="key_to_diff_mar24_stl_GT2_60T_b5_6mm_1"/>
-    <origin xyz="4.5 3.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="key_to_diff_mar24_stl_GT2_x_6mm_Pully_5mm_Bore_1">
     <visual>
@@ -858,7 +858,7 @@
   </link>
   <joint name="j_key_to_diff_mar24_stl_GT2_x_6mm_Pully_5mm_Bore_1" type="fixed">
     <parent link="base_link"/><child link="key_to_diff_mar24_stl_GT2_x_6mm_Pully_5mm_Bore_1"/>
-    <origin xyz="0.0 3.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="key_to_diff_mar24_stl_GT2_x_6mm_Pully_5mm_Bore_2">
     <visual>
@@ -870,7 +870,7 @@
   </link>
   <joint name="j_key_to_diff_mar24_stl_GT2_x_6mm_Pully_5mm_Bore_2" type="fixed">
     <parent link="base_link"/><child link="key_to_diff_mar24_stl_GT2_x_6mm_Pully_5mm_Bore_2"/>
-    <origin xyz="0.5 3.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="key_to_diff_mar24_stl_StepperHolderV2_1">
     <visual>
@@ -882,7 +882,7 @@
   </link>
   <joint name="j_key_to_diff_mar24_stl_StepperHolderV2_1" type="fixed">
     <parent link="base_link"/><child link="key_to_diff_mar24_stl_StepperHolderV2_1"/>
-    <origin xyz="1.0 3.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="key_to_diff_mar24_stl_another_Stepper_1">
     <visual>
@@ -894,7 +894,7 @@
   </link>
   <joint name="j_key_to_diff_mar24_stl_another_Stepper_1" type="fixed">
     <parent link="base_link"/><child link="key_to_diff_mar24_stl_another_Stepper_1"/>
-    <origin xyz="1.5 3.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="key_to_diff_mar24_stl_another_Stepper_2">
     <visual>
@@ -906,7 +906,7 @@
   </link>
   <joint name="j_key_to_diff_mar24_stl_another_Stepper_2" type="fixed">
     <parent link="base_link"/><child link="key_to_diff_mar24_stl_another_Stepper_2"/>
-    <origin xyz="2.0 3.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="key_to_diff_mar24_stl_arduino_uno_rough_1">
     <visual>
@@ -918,7 +918,7 @@
   </link>
   <joint name="j_key_to_diff_mar24_stl_arduino_uno_rough_1" type="fixed">
     <parent link="base_link"/><child link="key_to_diff_mar24_stl_arduino_uno_rough_1"/>
-    <origin xyz="2.5 3.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="key_to_diff_mar24_stl_bottom_pvc_1">
     <visual>
@@ -930,7 +930,7 @@
   </link>
   <joint name="j_key_to_diff_mar24_stl_bottom_pvc_1" type="fixed">
     <parent link="base_link"/><child link="key_to_diff_mar24_stl_bottom_pvc_1"/>
-    <origin xyz="3.0 3.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="key_to_diff_mar24_stl_keyed_shaft_updated_mar13_15mm_1">
     <visual>
@@ -942,7 +942,7 @@
   </link>
   <joint name="j_key_to_diff_mar24_stl_keyed_shaft_updated_mar13_15mm_1" type="fixed">
     <parent link="base_link"/><child link="key_to_diff_mar24_stl_keyed_shaft_updated_mar13_15mm_1"/>
-    <origin xyz="3.5 3.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="key_to_diff_mar24_stl_lid_1">
     <visual>
@@ -954,7 +954,7 @@
   </link>
   <joint name="j_key_to_diff_mar24_stl_lid_1" type="fixed">
     <parent link="base_link"/><child link="key_to_diff_mar24_stl_lid_1"/>
-    <origin xyz="4.0 3.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="key_to_diff_mar24_stl_revised_3rd_Joint_Top_key_hole_170126_mar15_1">
     <visual>
@@ -966,7 +966,7 @@
   </link>
   <joint name="j_key_to_diff_mar24_stl_revised_3rd_Joint_Top_key_hole_170126_mar15_1" type="fixed">
     <parent link="base_link"/><child link="key_to_diff_mar24_stl_revised_3rd_Joint_Top_key_hole_170126_mar15_1"/>
-    <origin xyz="4.5 3.5 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="key_to_diff_mar24_stl_top_pvc_1">
     <visual>
@@ -978,7 +978,7 @@
   </link>
   <joint name="j_key_to_diff_mar24_stl_top_pvc_1" type="fixed">
     <parent link="base_link"/><child link="key_to_diff_mar24_stl_top_pvc_1"/>
-    <origin xyz="0.0 4.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="keyed_shaft_updated_mar13_15mm_stl">
     <visual>
@@ -990,7 +990,7 @@
   </link>
   <joint name="j_keyed_shaft_updated_mar13_15mm_stl" type="fixed">
     <parent link="base_link"/><child link="keyed_shaft_updated_mar13_15mm_stl"/>
-    <origin xyz="0.5 4.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="lid_stl">
     <visual>
@@ -1002,7 +1002,7 @@
   </link>
   <joint name="j_lid_stl" type="fixed">
     <parent link="base_link"/><child link="lid_stl"/>
-    <origin xyz="1.0 4.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="outer_ring_newDimensionsMar21_stl">
     <visual>
@@ -1014,7 +1014,7 @@
   </link>
   <joint name="j_outer_ring_newDimensionsMar21_stl" type="fixed">
     <parent link="base_link"/><child link="outer_ring_newDimensionsMar21_stl"/>
-    <origin xyz="1.5 4.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="planetShafts_stl">
     <visual>
@@ -1026,7 +1026,7 @@
   </link>
   <joint name="j_planetShafts_stl" type="fixed">
     <parent link="base_link"/><child link="planetShafts_stl"/>
-    <origin xyz="2.0 4.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="revised_3rd_Joint_Top_key_hole_170126_mar15_stl">
     <visual>
@@ -1038,7 +1038,7 @@
   </link>
   <joint name="j_revised_3rd_Joint_Top_key_hole_170126_mar15_stl" type="fixed">
     <parent link="base_link"/><child link="revised_3rd_Joint_Top_key_hole_170126_mar15_stl"/>
-    <origin xyz="2.5 4.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="shoulder_elbow_stepper_housing_NB_stl">
     <visual>
@@ -1050,7 +1050,7 @@
   </link>
   <joint name="j_shoulder_elbow_stepper_housing_NB_stl" type="fixed">
     <parent link="base_link"/><child link="shoulder_elbow_stepper_housing_NB_stl"/>
-    <origin xyz="3.0 4.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="spur_gear_iso_stl">
     <visual>
@@ -1062,7 +1062,7 @@
   </link>
   <joint name="j_spur_gear_iso_stl" type="fixed">
     <parent link="base_link"/><child link="spur_gear_iso_stl"/>
-    <origin xyz="3.5 4.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="straight_bevel_pinion_iso">
     <visual>
@@ -1074,7 +1074,7 @@
   </link>
   <joint name="j_straight_bevel_pinion_iso" type="fixed">
     <parent link="base_link"/><child link="straight_bevel_pinion_iso"/>
-    <origin xyz="4.0 4.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="top_pvc_stl">
     <visual>
@@ -1086,7 +1086,7 @@
   </link>
   <joint name="j_top_pvc_stl" type="fixed">
     <parent link="base_link"/><child link="top_pvc_stl"/>
-    <origin xyz="4.5 4.0 0" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
 </robot>
