@@ -8,6 +8,11 @@
 
 ## The ask
 
+> ⚠️ **We specifically need the URDF for the May 26th version of the arm.**
+> Please make sure the parts and positioning correspond to the **May 26th**
+> revision of the assembly — not an earlier or later version — so the software
+> model matches the build we are working from.
+
 **The mechanical team needs to provide the parts with their assembled
 positioning** — i.e. each part's correct position and orientation relative to
 the base, or an assembly export where every STL is already placed in its real
@@ -166,8 +171,9 @@ missing is correct positioning.
   `(0,0,0)`, overlapping into one cluster.
 - 📐 The current grid layout is a temporary spread-out workaround, **not** the
   real assembly.
-- ➡️ **Next step (mechanical team):** provide each part's assembled position &
-  orientation (or a positioned assembly export) so the arm can be built correctly
+- ➡️ **Next step (mechanical team):** provide the URDF / assembly for the
+  **May 26th version** of the arm, with each part's assembled position &
+  orientation (or a positioned assembly export), so the arm can be built correctly
   instead of laid out on a grid.
 
 ---
