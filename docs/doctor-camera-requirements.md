@@ -72,14 +72,13 @@ Overall:
 
 ## 7. Recommended Camera Interfaces/Paths
 
-### First Benchtop Path
-Use a **USB3 machine-vision camera** or high-quality USB camera first.
+### First Benchtop Testing Recommendation
+Use a **USB3 stereoscopic camera**  first. This elimiates the extra cost of a second camera if we were to buy a regular camera twice and gives us easy access to testing with the stereoscopic cameras.
 
-Goal:
-* test the doctor-view pipeline quickly
+Goal settings:
 * run at **1080p, 30-60 fps**
 * measure real camera-to-display latency
-* only test **4K** after 1080p is working well
+* only test **4K** after **1080p** is working well
 
 ### Long-Term Ideal Path
 Use a **stereo, CMOS, global-shutter camera setup** with a dedicated doctor-view pipeline.
