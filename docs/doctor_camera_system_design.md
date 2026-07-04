@@ -26,3 +26,42 @@ It can be attatched to give a birds-eye view of the surgery with capabilities to
 
 ## 3. Benchtop Testing
 Using the Gemini 2 by Orbbec, we can test the camera formatting of a stereo camera and can also test how it works in harsh, high contrast lighting. First, we can test simply via our laptops to make sure the camera works. Then, we can try implementing it into our UI which can be made easier since we would have the actual camera with camera feed.
+
+We should keep these in mind/log information during the first test:
+- frame timestamp
+- subscriber receive time
+- frame number
+- resolution
+- FPS
+- latency per frame
+
+Then, we should note down:
+- average latency
+- minimum latency
+- maximum latency
+- jitter
+
+## 4. ROS2 Topic Name Proposal
+
+| Stream | Proposed Topic Name | Purpose |
+| --- | --- | --- |
+| Left raw image | /doctor_view/left/image_raw | Unprocessed left camera feed |
+| Right raw image | /doctor_view/right/image_raw | Unprocessed right camera feed|
+| Left processed image | /doctor_view/left/image_proc | Calibrated/stabilized left camera feed |
+| Right processed image | /doctor_view/right/image_proc | Calibrated/stabilized right camera feed |
+| Left camera info | /doctor_view/left/camera_info| This is where calibration settings for the left camera live|
+| Right camera info| /doctor_view/right/camera_info | This is where calibration setting for the right camera live |
+| Operator preview | /doctor_view/preview/image_view | An overall view for the operator |
+
+## 5. Timestamps
+
+| Requirement | Expectation |
+| --- | --- |
+| header.stamp | This will display when the frame was captured, not time displayed |
+| Left and right stereo sync | The two cameras in the stereo setup should have matching timestamps |
+| Frame ID | Using doctor_view_right or left_optical_frame gives the 3D data for the camera views |
+
+## 6. Latency Measurement Method
+- We can manual measure latency by subtracting the *ROS_System_Time* - *Message_Header.stamp* as long as the ROS2 time is synchronized and the header.stamp for the camera feeds are working properly.
+- There's a GitHub Repo that is able to calculate latency using OpenCV and ROS, though I don't know if it is helpful for us ([ros-can-latency](https://github.com/plusk01/ros-cam-latency))
+- Another manual method is using a stopwatch to view how it changes on screen vs in real time
