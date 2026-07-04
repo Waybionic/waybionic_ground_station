@@ -2,8 +2,8 @@ FROM ros:jazzy
 
 SHELL ["/bin/bash", "-c"]
 
-WORKDIR /ar4_ws
-COPY . /ar4_ws/src
+WORKDIR /waybionic_ws
+COPY . /waybionic_ws/src
 
 RUN apt update
 RUN rosdep update
