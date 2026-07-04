@@ -24,6 +24,8 @@ It can be attatched to give a birds-eye view of the surgery with capabilities to
 | Expected number of cameras | 1 or 2 | We can have a camera directly on the arm and/or one mounted elsewhere |
 | Placement | On the robot or overhead | Gives the surgeon a more active view or a more natural view. |
 
+More info on how to integrate/test the camera [here](https://wiki.seeedstudio.com/orbbec_gemini2/)
+
 ## 3. Benchtop Testing
 Using the Gemini 2 by Orbbec, we can test the camera formatting of a stereo camera and can also test how it works in harsh, high contrast lighting. First, we can test simply via our laptops to make sure the camera works. Then, we can try implementing it into our UI which can be made easier since we would have the actual camera with camera feed.
 
