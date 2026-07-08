@@ -1,0 +1,9 @@
+# CODEOWNERS — WayBionic ground station
+#
+# Every change to this repository requires review from the code owner below.
+# This is enforced on `main` by the "Protect main" branch ruleset
+# (require a pull request + Code Owner review before merging).
+#
+# The last matching pattern takes precedence.
+
+*       @yassinsolim
