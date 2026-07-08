@@ -131,12 +131,16 @@ void DiagnosticsPanel::onInitialize()
     rviz_node_ = ros_node_abstraction->get_raw_node();
   }
 
-  diagnostics_topic_ = readDiagnosticsTopicParameter(diagnostics_topic_);
-  configureSource(readUseMockDiagnosticsParameter(use_mock_diagnostics_));
   refresh_timer_ = new QTimer(this);
   connect(refresh_timer_, &QTimer::timeout, this, [this]() { refresh(); });
   refresh_timer_->start(1000);
-  refresh();
+
+  // Re-apply launch parameters after RViz finishes load() so use_mock_diagnostics:=false wins.
+  QTimer::singleShot(0, this, [this]() {
+    diagnostics_topic_ = readDiagnosticsTopicParameter(diagnostics_topic_);
+    configureSource(readUseMockDiagnosticsParameter(use_mock_diagnostics_));
+    refresh();
+  });
 }
 
 void DiagnosticsPanel::save(rviz_common::Config config) const

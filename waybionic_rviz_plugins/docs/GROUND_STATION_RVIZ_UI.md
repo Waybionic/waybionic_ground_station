@@ -58,14 +58,6 @@ Supported modes: `normal`, `fault`, `stale`, `cycle`.
 
 Sample signals: `board.temperature`, `motor.current`, `imu.roll`, `imu.pitch`, `imu.yaw`, `imu.heartbeat`.
 
-## Optional AR4 Visualization Helper
-
-```bash
-ros2 launch waybionic_rviz_plugins engineer_ar4_demo.launch.py
-```
-
-This launches passive AR4 robot visualization using `annin_ar4_description`, `xacro`, `robot_state_publisher`, and `joint_state_publisher`, then opens `config/engineer_ar4_demo.rviz`. These are optional visualization dependencies, not core plugin dependencies.
-
 ## Architecture
 
 ```text
@@ -75,10 +67,6 @@ Generic engineer view:
 
 Temporary backend demo:
   temporary_diagnostics_publisher.launch.py -> /diagnostics
-
-Optional AR4 visualization helper:
-  engineer_ar4_demo.launch.py -> engineer_ar4_demo.rviz
-    -> AR4 robot_description + passive joint states
 
 Diagnostics flow:
   DiagnosticsSource
@@ -121,11 +109,9 @@ waybionic_rviz_plugins/
     temporary_diagnostics_publisher.py
   config/
     engineer_monitoring_view.rviz
-    engineer_ar4_demo.rviz
   launch/
     engineer_view.launch.py
     temporary_diagnostics_publisher.launch.py
-    engineer_ar4_demo.launch.py
   test/
     test_package_metadata.py
   docs/

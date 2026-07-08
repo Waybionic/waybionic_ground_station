@@ -1,7 +1,9 @@
+import os
 from pathlib import Path
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = PACKAGE_ROOT.parent
 
 
 def read_text(relative_path: str) -> str:
@@ -32,6 +34,22 @@ def test_doctor_camera_files_removed():
     assert not (PACKAGE_ROOT / 'src' / 'surgeon_camera_panel.cpp').exists()
 
 
+def test_archived_camera_placeholder_removed():
+    assert not (REPO_ROOT / 'ground_station_monitoring_ui_archived').exists()
+
+
+def test_ar4_demo_helper_removed():
+    assert not (PACKAGE_ROOT / 'launch' / 'engineer_ar4_demo.launch.py').exists()
+    assert not (PACKAGE_ROOT / 'config' / 'engineer_ar4_demo.rviz').exists()
+
+
 def test_temporary_diagnostics_publisher_exists():
     assert (PACKAGE_ROOT / 'scripts' / 'temporary_diagnostics_publisher.py').exists()
     assert (PACKAGE_ROOT / 'launch' / 'temporary_diagnostics_publisher.launch.py').exists()
+
+
+def test_temporary_diagnostics_publisher_executable():
+    script = PACKAGE_ROOT / 'scripts' / 'temporary_diagnostics_publisher.py'
+    assert os.access(script, os.X_OK), (
+        'temporary_diagnostics_publisher.py must be executable for --symlink-install'
+    )

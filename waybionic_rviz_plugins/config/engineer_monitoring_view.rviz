@@ -6,7 +6,6 @@ Panels:
   - Class: waybionic_rviz_plugins/DiagnosticsPanel
     Diagnostics Topic: /diagnostics
     Name: WayBionic Diagnostics
-    Use Mock Diagnostics: true
 Visualization Manager:
   Class: ""
   Displays:

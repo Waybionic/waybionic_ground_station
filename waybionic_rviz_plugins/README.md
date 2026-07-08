@@ -50,11 +50,9 @@ waybionic_rviz_plugins/
     ros_diagnostics_source.cpp
   config/
     engineer_monitoring_view.rviz   # Generic engineer layout (default)
-    engineer_ar4_demo.rviz          # Optional AR4 visualization helper
   launch/
     engineer_view.launch.py
     temporary_diagnostics_publisher.launch.py
-    engineer_ar4_demo.launch.py     # Optional AR4 helper only
   test/
     test_package_metadata.py
   docs/
@@ -67,11 +65,10 @@ waybionic_rviz_plugins/
 
 | Launch | RViz config | Purpose |
 |--------|-------------|---------|
-| `engineer_view.launch.py` | `engineer_monitoring_view.rviz` | Generic engineer monitoring; no AR4 |
+| `engineer_view.launch.py` | `engineer_monitoring_view.rviz` | Generic engineer monitoring |
 | `temporary_diagnostics_publisher.launch.py` | — | Temporary `/diagnostics` demo publisher |
-| `engineer_ar4_demo.launch.py` | `engineer_ar4_demo.rviz` | Optional passive AR4 robot viz |
 
-Core plugin dependencies are ROS/RViz/Qt only (`rclcpp`, `rviz_common`, `diagnostic_msgs`, etc.). AR4/Annin packages are required only for the optional `engineer_ar4_demo` helper.
+Core plugin dependencies are ROS/RViz/Qt only (`rclcpp`, `rviz_common`, `diagnostic_msgs`, etc.).
 
 ## RViz Panel
 
@@ -102,7 +99,7 @@ ros2 launch waybionic_rviz_plugins engineer_view.launch.py use_mock_diagnostics:
 
 Live mode with no publisher yet shows a stable waiting state (`Waiting for <topic> messages`) instead of fake mock data.
 
-Panel settings are also saved in `engineer_monitoring_view.rviz` as `Use Mock Diagnostics` and `Diagnostics Topic`.
+Launch arguments `use_mock_diagnostics` and `diagnostics_topic` take precedence over any saved RViz panel settings.
 
 ### Temporary diagnostics publisher
 
@@ -138,18 +135,7 @@ DiagnosticsSource
   RosDiagnosticsSource  -> DiagnosticMessage -> DiagnosticsPanel
 ```
 
-`RosDiagnosticsSource` maps ROS diagnostic levels and fields into the internal `DiagnosticMessage` model before the Qt panel renders them. See `docs/DIAGNOSTICS_CONTRACT.md` for the full mapping Korede/backend should follow.
-
-## Optional AR4 Visualization Helper
-
-Not part of the default quickstart. Isolated for prototype review only:
-
-```bash
-ros2 launch waybionic_rviz_plugins engineer_ar4_demo.launch.py
-ros2 launch waybionic_rviz_plugins engineer_ar4_demo.launch.py ar_model:=mk3 include_gripper:=True
-```
-
-Requires an AR4/Annin workspace with `annin_ar4_description`, `xacro`, `robot_state_publisher`, and `joint_state_publisher`. These are not core dependencies of `waybionic_rviz_plugins`.
+`RosDiagnosticsSource` maps ROS diagnostic levels and fields into the internal `DiagnosticMessage` model before the Qt panel renders them. See `docs/DIAGNOSTICS_CONTRACT.md` for the full mapping Korede/backend should follow, and `docs/DIAGNOSTICS_BACKEND_INTEGRATION.md` for backend replacement guidance.
 
 ## Platform Notes
 
@@ -159,11 +145,11 @@ Requires an AR4/Annin workspace with `annin_ar4_description`, `xacro`, `robot_st
 ## Related Docs
 
 - `docs/DIAGNOSTICS_CONTRACT.md` — normalized diagnostic model and ROS mapping
+- `docs/DIAGNOSTICS_BACKEND_INTEGRATION.md` — how a real backend replaces the temporary publisher
 - `docs/GROUND_STATION_RVIZ_UI.md` — extended architecture notes
 - `docs/PR_NOTES.md` — review summary and PR description source
 
 ## Follow-Ups
 
-- Test engineer layout against Harold's WayBionic placeholder robot once `origin/rebuild/waybionic-foundation` is merge-ready.
 - Validate live `/diagnostics` against Korede/backend once stable publishing is available.
 - Camera/doctor low-latency workflow will be handled in a separate PR.
