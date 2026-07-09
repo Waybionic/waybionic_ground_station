@@ -24,30 +24,6 @@ Visualization Manager:
       Plane Cell Count: 10
       Reference Frame: <Fixed Frame>
       Value: true
-    - Acceleration properties:
-        Acc. vector alpha: 1
-        Acc. vector color: 255; 0; 127
-        Acc. vector scale: 1
-        Derotate acceleration: true
-        Enable acceleration: true
-      Axes properties:
-        Axes length: 0.2
-        Axes radius: 0.02
-        Enable axes: true
-      Box properties:
-        Box alpha: 1
-        Box color: 255; 0; 0
-        Enable box: false
-      Class: rviz_default_plugins/Imu
-      Enabled: true
-      Name: IMU
-      Topic:
-        Depth: 5
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /waybionic/imu/data_raw
-      Value: true
     - Class: rviz_default_plugins/TF
       Enabled: true
       Frame Timeout: 15

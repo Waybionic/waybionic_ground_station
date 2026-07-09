@@ -26,7 +26,7 @@ ros2 launch waybionic_sensors imu_publisher.launch.py
 ros2 launch waybionic_sensors imu_demo.launch.py
 ```
 
-This starts the mock IMU publisher and opens RViz with an Imu display and TF tree.
+This starts the mock IMU publisher and opens RViz with a TF tree. ROS 2 Jazzy does not ship `rviz_default_plugins/Imu`, so orientation is verified through the `imu_link` frame relative to `base_link`.
 
 ## Inspect the topic
 
