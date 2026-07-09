@@ -154,13 +154,9 @@ void DiagnosticsPanel::load(const rviz_common::Config & config)
 {
   rviz_common::Panel::load(config);
 
-  bool use_mock_diagnostics = use_mock_diagnostics_;
   QString diagnostics_topic;
   if (config.mapGetString("Diagnostics Topic", &diagnostics_topic)) {
     diagnostics_topic_ = diagnostics_topic.toStdString();
-  }
-  if (config.mapGetBool("Use Mock Diagnostics", &use_mock_diagnostics)) {
-    configureSource(use_mock_diagnostics);
   }
 }
 
@@ -396,9 +392,15 @@ void DiagnosticsPanel::updateSourceControls()
   const bool mock_enabled = mock_diagnostics_source_ != nullptr;
   if (normal_button_ != nullptr) {
     normal_button_->setEnabled(mock_enabled);
+    if (!mock_enabled) {
+      normal_button_->setChecked(false);
+    }
   }
   if (fault_button_ != nullptr) {
     fault_button_->setEnabled(mock_enabled);
+    if (!mock_enabled) {
+      fault_button_->setChecked(false);
+    }
   }
 }
 

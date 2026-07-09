@@ -53,3 +53,11 @@ def test_temporary_diagnostics_publisher_executable():
     assert os.access(script, os.X_OK), (
         'temporary_diagnostics_publisher.py must be executable for --symlink-install'
     )
+
+
+def test_temporary_diagnostics_publisher_uses_lf_line_endings():
+    script = PACKAGE_ROOT / 'scripts' / 'temporary_diagnostics_publisher.py'
+    first_line = script.read_bytes().splitlines()[0]
+    assert first_line == b'#!/usr/bin/env python3', (
+        'temporary_diagnostics_publisher.py must use LF line endings for WSL/Linux shebang'
+    )
