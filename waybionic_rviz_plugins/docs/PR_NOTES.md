@@ -12,23 +12,28 @@ These images are included only to help reviewers see the UI quickly. They are no
 
 This PR makes `waybionic_rviz_plugins` a focused WayBionic RViz2 diagnostics package. It keeps the engineer monitoring panel, mock/live diagnostics switching, and a temporary `/diagnostics` publisher for local validation.
 
-The branch is rebased onto `main` (clean Waybionic foundation from PR #1). Review cleanup items from the latest review are addressed below.
+The branch is rebased onto `main` (clean Waybionic foundation from PR #1). All review cleanup items and WSL/Jazzy verification are complete.
 
 Camera/doctor placeholder work was removed from this PR and will be handled separately later.
+
+IMU work (`waybionic_sensors`) is intentionally **not** included here; it lives on `feature/imu-rviz-integration` for a follow-up PR after this merges.
 
 ## Merge Review Fixes
 
 | Item | Fix |
 |------|-----|
 | `temporary_diagnostics_publisher.py` + `--symlink-install` | Source script marked executable in git (`100755`); metadata test asserts `os.X_OK` |
-| Live diagnostics override | `DiagnosticsPanel::onInitialize()` defers ROS parameter application until after RViz `load()`; hardcoded `Use Mock Diagnostics` removed from `engineer_monitoring_view.rviz` |
+| WSL/Linux shebang (`python3\r`) | `.gitattributes` enforces `*.py text eol=lf`; metadata test asserts LF shebang |
+| Live diagnostics override | Launch ROS parameters win over saved RViz config; `load()` no longer reapplies mock mode; mock buttons disabled/unchecked in live mode |
 | Archived camera placeholder | `ground_station_monitoring_ui_archived/` removed |
 | AR4/Annin demo helper | `engineer_ar4_demo.launch.py` and `engineer_ar4_demo.rviz` removed; docs updated |
+| Foundation coexistence on WSL | `waybionic_bringup/display.launch.py` reads plain `.urdf` directly so paths with spaces work |
 
 ## Primary Launch Commands
 
 ```bash
 source /opt/ros/jazzy/setup.bash
+cd <workspace>
 rosdep install --from-paths . --ignore-src -r -y
 colcon build --packages-select waybionic_rviz_plugins waybionic_description waybionic_bringup --symlink-install
 source install/setup.bash
@@ -66,6 +71,8 @@ ros2 launch waybionic_bringup display.launch.py
 
 # Terminal 2
 ros2 launch waybionic_rviz_plugins temporary_diagnostics_publisher.launch.py mode:=normal
+
+# Terminal 3
 ros2 launch waybionic_rviz_plugins engineer_view.launch.py use_mock_diagnostics:=false
 ```
 
@@ -79,7 +86,7 @@ ros2 launch waybionic_rviz_plugins engineer_view.launch.py use_mock_diagnostics:
 - Temporary `/diagnostics` publisher with `normal`, `fault`, `stale`, and `cycle` modes.
 - Package metadata and lint/test wiring via `colcon test`.
 - Only `DiagnosticsPanel` is registered in `plugin_description.xml`.
-- Coexists in the same workspace as `waybionic_description` and `waybionic_bringup` after rebase onto `main`.
+- Coexists in the same workspace as `waybionic_description` and `waybionic_bringup`.
 
 ## Mock Diagnostics Mode
 
@@ -89,7 +96,7 @@ Mock mode is enabled by default through `use_mock_diagnostics:=true`. It uses sy
 
 `RosDiagnosticsSource` subscribes to `/diagnostics` by default, or another topic passed as `diagnostics_topic:=<topic>`, and converts each status into the internal `DiagnosticMessage` model before the panel renders it.
 
-See `DIAGNOSTICS_BACKEND_INTEGRATION.md` for backend replacement guidance.
+See `DIAGNOSTICS_BACKEND_INTEGRATION.md` for backend replacement guidance. Follow-up issue for the real backend: https://github.com/Waybionic/waybionic_ground_station/issues/4
 
 Expected mapping:
 
@@ -127,20 +134,21 @@ Tests verify:
 - `package.xml` has no Annin/AR4 dependency
 - doctor/camera launch/config files are removed
 - archived camera placeholder and AR4 demo helper files are removed
-- temporary diagnostics publisher exists and is executable
+- temporary diagnostics publisher exists, is executable, and uses LF line endings
 
 ## Testing Performed (Ubuntu 24.04 / ROS 2 Jazzy / WSL2)
 
 | Check | Result |
 |-------|--------|
 | `colcon build --packages-select waybionic_rviz_plugins waybionic_description waybionic_bringup --symlink-install` | Pass |
-| `colcon test --packages-select waybionic_rviz_plugins` | Pass (14 tests, 0 failures) |
-| `temporary_diagnostics_publisher.py` installed executable with symlink-install | Pass |
-| `engineer_view.launch.py --show-args` | Pass |
-| `temporary_diagnostics_publisher.launch.py --show-args` | Pass |
-| Mock diagnostics GUI (`use_mock_diagnostics:=true`) | Needs Ubuntu GUI confirmation |
-| Live diagnostics GUI with cycle publisher | Needs Ubuntu GUI confirmation |
-| Foundation + diagnostics two-terminal coexistence | Needs Ubuntu GUI confirmation |
+| `colcon test --packages-select waybionic_rviz_plugins` | Pass (15 tests, 0 failures) |
+| `temporary_diagnostics_publisher.py` with symlink-install on WSL | Pass |
+| `temporary_diagnostics_publisher.launch.py mode:=cycle` | Pass |
+| `ros2 topic echo /diagnostics` | Pass |
+| Mock diagnostics GUI (`use_mock_diagnostics:=true`) | Pass |
+| Live diagnostics GUI (`use_mock_diagnostics:=false` + cycle publisher) | Pass — panel shows `ROS /diagnostics`, connected, fault/stale cycle |
+| `waybionic_bringup display.launch.py` | Pass — robot + joint GUI + RViz |
+| Foundation + diagnostics coexistence | Pass |
 
 ```bash
 source /opt/ros/jazzy/setup.bash
@@ -148,15 +156,16 @@ colcon build --packages-select waybionic_rviz_plugins waybionic_description wayb
 source install/setup.bash
 colcon test --packages-select waybionic_rviz_plugins
 colcon test-result --verbose
-ros2 launch waybionic_rviz_plugins engineer_view.launch.py --show-args
-ros2 launch waybionic_rviz_plugins temporary_diagnostics_publisher.launch.py --show-args
+ros2 launch waybionic_rviz_plugins temporary_diagnostics_publisher.launch.py mode:=cycle
+ros2 launch waybionic_rviz_plugins engineer_view.launch.py use_mock_diagnostics:=false
+ros2 launch waybionic_bringup display.launch.py
 ```
 
 ## PR Status
 
 Opened as https://github.com/Waybionic/waybionic_ground_station/pull/2 against `main`. Rebased onto merged foundation (`main`). Review screenshots at the top of this file are for reviewer context only.
 
-**Merge recommendation:** Ready for final review after Ubuntu GUI confirmation of live diagnostics with the cycle publisher. Build, symlink-install publisher, and `colcon test` pass on ROS 2 Jazzy.
+**Merge recommendation:** Ready to merge.
 
 ## Known Limitations
 
@@ -167,7 +176,7 @@ Opened as https://github.com/Waybionic/waybionic_ground_station/pull/2 against `
 
 ## Next Steps
 
-- Merge diagnostics foundation after final GUI review.
-- Track real backend work in a follow-up GitHub issue (temperature, current, heartbeat, sensor health).
+- Merge diagnostics foundation.
+- Track real backend work in https://github.com/Waybionic/waybionic_ground_station/issues/4
+- Open follow-up PR for `waybionic_sensors` from `feature/imu-rviz-integration` after this merges.
 - Handle camera/doctor low-latency workflow in a separate PR.
-- IMU integration continues on `feature/imu-rviz-integration` after this PR merges.
