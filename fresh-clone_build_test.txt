@@ -1,0 +1,41 @@
+COMMAND:~$ mkdir -p ~/waybionic_qa_ws/src
+COMMAND:~$ cd ~/waybionic_qa_ws/src
+COMMAND:~/waybionic_qa_ws/src$ git clone https://github.com/Waybionic/waybionic_ground_station.git
+Cloning into 'waybionic_ground_station'...
+remote: Enumerating objects: 785, done.
+remote: Counting objects: 100% (48/48), done.
+remote: Compressing objects: 100% (20/20), done.
+remote: Total 785 (delta 43), reused 28 (delta 28), pack-reused 737 (from 1)
+Receiving objects: 100% (785/785), 114.11 MiB | 10.51 MiB/s, done.
+Resolving deltas: 100% (244/244), done.
+COMMAND:~/waybionic_qa_ws/src$ cd ~/waybionic_qa_ws
+COMMAND:~/waybionic_qa_ws$ source /opt/ros/jazzy/setup.bash
+COMMAND:~/waybionic_qa_ws$ rosdep install --from-paths . --ignore-src -r -y
+/usr/bin/rosdep:6: DeprecationWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html
+  from pkg_resources import load_entry_point
+#All required rosdeps installed successfully
+COMMAND:~/waybionic_qa_ws$ colcon build --packages-select waybionic_description waybionic_bringup
+Starting >>> waybionic_description
+Finished <<< waybionic_description [3.67s]                
+Starting >>> waybionic_bringup
+Finished <<< waybionic_bringup [3.65s]                  
+Summary: 2 packages finished [7.43s]
+COMMAND:~/waybionic_qa_ws$ source install/setup.bash
+COMMAND:~/waybionic_qa_ws$ ros2 launch waybionic_bringup display.launch.py
+[INFO] [launch]: All log files can be found below /home/hoodu/.ros/log/2026-07-10-13-05-05-540928-HKINSPIRON-5729
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [robot_state_publisher-1]: process started with pid [5733]
+[INFO] [joint_state_publisher_gui-2]: process started with pid [5734]
+[INFO] [rviz2-3]: process started with pid [5735]
+[robot_state_publisher-1] [INFO] [1783710305.811042817] [robot_state_publisher]: Robot initialized
+[joint_state_publisher_gui-2] [INFO] [1783710306.116934240] [joint_state_publisher_gui]: Waiting for robot_description to be published on the robot_description topic...
+[joint_state_publisher_gui-2] [INFO] [1783710306.142611172] [joint_state_publisher_gui]: Centering
+[rviz2-3] [INFO] [1783710306.184346358] [rviz2]: Stereo is NOT SUPPORTED
+[rviz2-3] [INFO] [1783710306.184576062] [rviz2]: OpenGl version: 4.5 (GLSL 4.5)
+[rviz2-3] [INFO] [1783710306.235441816] [rviz2]: Stereo is NOT SUPPORTED
+[joint_state_publisher_gui-2] [INFO] [1783710306.248351270] [joint_state_publisher_gui]: Centering
+[INFO] [rviz2-3]: process has finished cleanly [pid 5735]
+[INFO] [joint_state_publisher_gui-2]: process has finished cleanly [pid 5734]
+^C[WARNING] [launch]: user interrupted with ctrl-c (SIGINT)
+[robot_state_publisher-1] [INFO] [1783711167.445574412] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[INFO] [robot_state_publisher-1]: process has finished cleanly [pid 5733]
