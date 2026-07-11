@@ -7,6 +7,7 @@
 - [ROS2 Topic Name Proposals](#ros2-topic-name-proposal)
 - [Timestamps](#timestamps)
 - [Latency](#latency-measurement-method)
+- [Long Term Plan](#long-term-targets)
 - [Component Shortlist](#component-shortlist)
 
 ## Overview
@@ -45,11 +46,23 @@ It can be attatched to give a birds-eye view of the surgery with capabilities to
 | RAM needed | **4GB** |
 
 ## Mechanical Requirements
-> Note: Mechanical has yet to get back about specific requirements
+> Note: Mechanical has yet to get back about specific requirements... I am going off my own judgement
 
-Endoscopic Camera Wiring: Similar to motor wiring
+| Requirement | External | Endoscope |
+| --- | --- | --- |
+| **Approximate Location** | Around the arm | On the arm, as an extra tool |
+| **Working Distance** | 3 feet* | Close to the body/internally |
+| **Field of View** | Birds eye view | Small(?) |
+| **Camera/Lens Envelope** | TBD** | Within the arm |
+| **Adjustment Needs** | May be adjusted by zooming in and out | Can be adjusted to look around internally |
+| **Occlusion Risks** | View may be blocked or impacted by the tools of the arm. This needs to be considered in mounting position and arm movement. | Since the camera is so small, tools may have a bigger impact on the occlusion |
+| **Cable Routing** | TBD** | Similar to the motors on the arm |
+| **Lighting Conditions** | Must be able to handle very harsh light | Must work in darker areas |
+| **Mounting** | A removeable mount may be helpful for maintenance purpose | Directly attatched to arm |
 
-Mounting:
+> \* for personnel who are NOT scrubbed in... not sure if this applies for our robot
+
+> ** waiting for mechanical to get back for a more conclusive answer
 
 ## Benchtop Testing
 Using the Gemini 2 by Orbbec, we can test the camera formatting of a stereo camera and can also test how it works in harsh, high contrast lighting. First, we can test simply via our laptops to make sure the camera works. Then, we can try implementing it into our UI which can be made easier since we would have the actual camera with camera feed.
@@ -93,6 +106,15 @@ Then, we should note down:
 - There's a GitHub Repo that is able to calculate latency using OpenCV and ROS, though I don't know if it is helpful for us ([ros-can-latency](https://github.com/plusk01/ros-cam-latency))
 - Another manual method is using a stopwatch to view how it changes on screen vs in real time
 
+## Long-term Targets
+
+For long term, a **GigE** camera would be best due to its ability to send camera feeds over long distances. It has low latency and is relatively easier to implement compared to the MIPI CSI cameras. ROS2 also has drivers that are compatible with GigE cameras.
+
+**Stereo Camera**: Stereo cameras on the market are generally very small and are automatically synchronized. With this type of camera, the placement of the camera only needs to be considered if we are using two seperate cameras to make a stereo camera (which is harder than buying an already stereoscopic camera)
+
+**Monocular cameras** wouldn't be ideal, but if needed, the depth can be calculated rather than viewed.
+
 ## Component Shortlist 
 > Note: (TBD when mechanical gets back to us)
+
 - Orbbec Gemini 2 Stereo Camera (cable included) -> ~332.15CAD 
