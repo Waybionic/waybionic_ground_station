@@ -6,6 +6,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import Command, LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -15,7 +16,7 @@ def generate_launch_description():
 
     # Define default paths
     default_model_path = os.path.join(
-        waybionic_desc_dir, 'urdf', 'waybionic_placeholder.urdf'
+        waybionic_desc_dir, 'urdf', 'full_arm_mar24.urdf'
     )
     default_rviz_config_path = os.path.join(
         waybionic_bringup_dir, 'rviz', 'waybionic.rviz'
@@ -37,7 +38,10 @@ def generate_launch_description():
     # 2. Nodes
     # Use 'xacro' command substitution to read the URDF/Xacro file dynamically
     robot_description_content = {
-        'robot_description': Command(['xacro ', LaunchConfiguration('model')])
+        'robot_description': ParameterValue(
+            Command(['xacro ', LaunchConfiguration('model')]),
+            value_type=str
+        )
     }
 
     robot_state_publisher_node = Node(
