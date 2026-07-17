@@ -11,7 +11,7 @@ This guide is for importing and testing real URDF and mechanical mesh exports (S
 
 ## 2. Rebuild the Workspace
 Any time new files are added, rebuild the foundation so CMake can install them to the ROS 2 share directory. 
-From the root of your workspace (`~/ros2_ws`):
+From the root of your workspace (`~/waybionic_ws`):
 ```
 colcon build --packages-select waybionic_description
 source install/setup.bash

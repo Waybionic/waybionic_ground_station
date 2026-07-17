@@ -1,8 +1,13 @@
 #!/bin/bash
-# Fail immediately if any command fails
 set -e
 
+# Dynamically find the workspace root (assuming script is in ws/src/repo/scripts)
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+WS_ROOT="$( cd "$SCRIPT_DIR/../../.." >/dev/null 2>&1 && pwd )"
+
 echo "=== Waybionic Workspace Sanity Check ==="
+echo "Moving to workspace root: $WS_ROOT"
+cd "$WS_ROOT"
 
 echo "1. Sourcing ROS Jazzy..."
 source /opt/ros/jazzy/setup.bash
