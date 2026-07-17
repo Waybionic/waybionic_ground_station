@@ -17,7 +17,8 @@ echo "4. Sourcing workspace..."
 source install/setup.bash
 
 echo "5. Parsing URDF for syntax errors..."
-# This silently parses the URDF to catch XML errors without launching a GUI
-xacro src/waybionic_ground_station/waybionic_description/urdf/waybionic_placeholder.urdf > /dev/null
+# Find the URDF dynamically regardless of the clone folder name
+URDF_PATH=$(find src -name "waybionic_placeholder.urdf" | head -n 1)
+xacro $URDF_PATH > /dev/null
 
 echo "=== ✅ All checks passed! The foundation is clean and ready. ==="

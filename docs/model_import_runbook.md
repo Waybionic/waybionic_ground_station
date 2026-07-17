@@ -21,6 +21,6 @@ source install/setup.bash
 Don't edit `display.launch.py` to test the model. Instead, pass the path to the new URDF using the `model:=` argument.
 From the root of your workspace, run:
 ```
-ros2 launch waybionic_bringup display.launch.py model:=src/waybionic_ground_station/waybionic_description/urdf/YOUR_NEW_FILE.urdf
+ros2 launch waybionic_bringup display.launch.py model:=$(ros2 pkg prefix waybionic_description --share)/urdf/YOUR_NEW_FILE.urdf
 ```
 If parsed correctly, RViz will automatically open and display the model. If there are issues, errors will print in the terminal.
