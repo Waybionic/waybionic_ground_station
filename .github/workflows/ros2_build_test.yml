@@ -31,11 +31,13 @@ jobs:
           rosdep install --from-paths src --ignore-src -r -y
 
       - name: Build Packages
+        shell: bash
         run: |
           source /opt/ros/jazzy/setup.bash
           colcon build --packages-select ${{ env.PACKAGES }}
 
       - name: Run Tests
+        shell: bash
         run: |
           source /opt/ros/jazzy/setup.bash
           colcon test --packages-select ${{ env.PACKAGES }}
