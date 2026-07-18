@@ -1,5 +1,4 @@
 # Camera System Design (First Prototype Recommendations)
-- [Overview](#overview)
 - [Specific Camera Needs](#specific-camera-needs)
 - [Electrial Requirements](#electrical-requirements)
 - [Mechanical Requirements](#mechanical-requirements)
@@ -10,16 +9,7 @@
 - [Long Term Plan](#long-term-targets)
 - [Component Shortlist](#component-shortlist)
 
-## Overview
-
-The camera should be a stereo camera with 1080p resolution, 30 frames per second at minimum with a 50mm FOV, and must work under harsh lighting (bright lights with high contrast).
-
-The camera itself, I think, should be placed on a seperate mount from the arm as attatching the camera to the arm itself might lead to more issues with wiring and mechanical aspects.
-It can be attatched to give a birds-eye view of the surgery with capabilities to zoom in and out while retaining resolution (perhaps an entire new arm dedicated to the camera?).
-
-> Note: Much of these were assumptions based off of my own judgement. Mechanical will be consulted, though they are not present at the time of this document being made.
-
-## Specific Camera Needs
+## Specific External Camera Needs
 
 | Specific | Requirements | Why? |
 | --- | --- | --- |
@@ -37,12 +27,13 @@ It can be attatched to give a birds-eye view of the surgery with capabilities to
 ## Electrical Requirements
 > Note: All assumptions are based off of the Gemini2 Camera by Orbbec
 
+### Camera Requirements
 | Subject | Requirement |
 | --- | --- |
 | Power Input | **5V** via USB-C |
 | Power Consumption | Typical Average: **<2.0W**, Max Average: <2.5W, Max Peak Average: <6.5W |
 | Cable/Connector | **1 - 1.5m** in length |
-| CPU needed | qual-core, 2.9GHz |
+| CPU needed | **qual-core, 2.9GHz** |
 | RAM needed | **4GB** |
 
 ## Mechanical Requirements
@@ -56,8 +47,8 @@ It can be attatched to give a birds-eye view of the surgery with capabilities to
 | **Camera/Lens Envelope** | TBD** | Within the arm |
 | **Adjustment Needs** | May be adjusted by zooming in and out | Can be adjusted to look around internally |
 | **Occlusion Risks** | View may be blocked or impacted by the tools of the arm. This needs to be considered in mounting position and arm movement. | Since the camera is so small, tools may have a bigger impact on the occlusion |
-| **Cable Routing** | TBD** | Similar to the motors on the arm |
-| **Lighting Conditions** | Must be able to handle very harsh light | Must work in darker areas |
+| **Cable Routing** | Similar to motors on the arm | Similar to the motors on the arm |
+| **Lighting Conditions** | Must be able to handle very harsh light | Must work in darker areas (with light mounted?)|
 | **Mounting** | A removeable mount may be helpful for maintenance purpose | Directly attatched to arm |
 
 > \* for personnel who are NOT scrubbed in... not sure if this applies for our robot
@@ -108,13 +99,17 @@ Then, we should note down:
 
 ## Long-term Targets
 
-For long term, a **GigE** camera would be best due to its ability to send camera feeds over long distances. It has low latency and is relatively easier to implement compared to the MIPI CSI cameras. ROS2 also has drivers that are compatible with GigE cameras.
+For long term, a **GigE** camera would be best due to its ability to send camera feeds over long distances. It has low latency and is relatively easier to implement compared to the MIPI CSI cameras. ROS2 also has drivers that are compatible with many GigE cameras.
 
 **Stereo Camera**: Stereo cameras on the market are generally very small and are automatically synchronized. With this type of camera, the placement of the camera only needs to be considered if we are using two seperate cameras to make a stereo camera (which is harder than buying an already stereoscopic camera)
 
-**Monocular cameras** wouldn't be ideal, but if needed, the depth can be calculated rather than viewed.
+**Endoscopic Camera**: Endoscopic cameras would be very helpful for seeing closer internal footage. With this camera, we would need to decide how exaxtly we are going to implement this tool with the rest of the robotic arm. For a short-term target, it might not be possible to add this as endoscopic cameras can get expensive... but would be good to implement for a long-term project.
 
 ## Component Shortlist 
-> Note: (TBD when mechanical gets back to us)
+> Note: (TBD when mechanical gets back to us with more concrete materials needed)
 
-- Orbbec Gemini 2 Stereo Camera (cable included) -> ~332.15CAD 
+### Camera Options 
+> Note: I am leaning towards the Orbbec Gemini 2 Camera for the initial testing with decent quality... most assumptions are based off of that.
+
+- Orbbec Gemini 2 Stereo Camera (cable included) -> ~332.15CAD
+- Tara Stereo Camera (e-con Systems) -> ~325.05CAD
