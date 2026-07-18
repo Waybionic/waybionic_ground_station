@@ -1,6 +1,5 @@
 # Camera System Design (First Prototype Recommendations)
-- [Confirmed Requirements](#confirmed-requirements)
-- [Assumed Requirements](#assumed-requirements)
+- [Confirmed Requirements](#confirmed-mvp-short-term-requirements)
 - [Benchtop Testing](#benchtop-testing)
 - [ROS2 Details](#ros2-details)
 - [Long Term Plan](#long-term-targets)
@@ -20,7 +19,7 @@
 | Latency Needs | 0-200ms | 0-200ms is ideal for performing remote surgeries, however 300ms-700ms is also acceptable for performing surgeries|
 
 ### Camera Electrical Requirements
-> Note: All assumptions are based off of the Gemini2 Camera by Orbbec
+> Note: All assumptions are based off of the Gemini2 Camera by Orbbec... if we choose a different camera, electrical requirments may change
 
 | Subject | Requirement |
 | --- | --- |
@@ -30,25 +29,25 @@
 | CPU needed | **qual-core, 2.9GHz** |
 | RAM needed | **4GB** |
 
-## Assumed Requirements
-
-### Mechanical Requirements
-> Note: Mechanical has yet to get back about specific requirements... I am going off my own judgement
+### Camera Mechanical Requirements
+> Note: Some are assumptions. All assumptions will have a star next to it.
 
 | Requirement | External | Endoscope |
 | --- | --- | --- |
-| **Approximate Location** | Around the arm | On the arm, as an extra tool |
-| **Working Distance** | 3 feet* | Close to the body/internally |
-| **Camera/Lens Envelope** | TBD** | Within the arm |
+| **Approximate Location** | Overhead | On the arm, as an extra tool |
+| **Working Distance** | 1.10-1.20m from patient** | Close to the body/internally |
+| **Camera/Lens Envelope** | Above the patient, within the light* | Within the arm |
 | **Adjustment Needs** | May be adjusted by zooming in and out | Can be adjusted to look around internally |
-| **Occlusion Risks** | View may be blocked or impacted by the tools of the arm. This needs to be considered in mounting position and arm movement. | Since the camera is so small, tools may have a bigger impact on the occlusion |
-| **Cable Routing** | Similar to motors on the arm | Similar to the motors on the arm |
-| **Lighting Conditions** | Must be able to handle very harsh light | Must work in darker areas (with light mounted?)|
-| **Mounting** | A removeable mount may be helpful for maintenance purpose | Directly attatched to arm |
+| **Occlusion Risks** | View may be blocked or impacted by the tools of the arm... surgeons may be used to tools blocking views if the camera is over the light | Since the camera is so small, tools may have a bigger impact on the occlusion |
+| **Cable Routing** | Would need to be discussed, but probably similar to the light itelf* | Similar to the motors on the arm |
+| **Lighting Conditions** | Must be able to handle high contrast lighting | Must work in darker areas (with light mounted?)|
+| **Mounting** | Mounted to the light | Directly attatched to arm |
 
-> \* for personnel who are NOT scrubbed in... not sure if this applies for our robot
+> ** According to a [surgical light guide](https://www.getinge.com/dam/hospital/documents/english/guide_maquet_surgical_lights_ultimate_guide-89961-en.pdf), 1.10-1.20m is the ideal distance from patient to light... we can apply this to the camera too.
 
-> ** waiting for mechanical to get back for a more conclusive answer
+### Endoscope
+
+The endoscope would need to be researched more in order to implement it with the system (not the priority at the moment)*
 
 ## Benchtop Testing
 Using the Gemini 2 by Orbbec, we can test the camera formatting of a stereo camera and can also test how it works in harsh, high contrast lighting. First, we can test simply via laptops to make sure the camera works. Then, we can try implementing it into our UI which can be made easier since we would have the actual camera with camera feed.
@@ -114,11 +113,11 @@ For long term, a **GigE** camera would be best due to its ability to send camera
 
 ## MVP Short Term Targets
 
-Camera Architecture: We should use a stereo USB3 camera because it is simple to set up and attatch to the arm. The stereo would give us a good idea of the depth perception for future cases.
+Camera Architecture: We should use a stereo USB3 camera because it is simple to set up and attatch to the arm. The stereo would give us a good idea of the depth perception for future cases. We can also implement an endoscopic camera but the priority is the external camera
 
-Mounting: The external camera will be directly on the arm and the compute location would be around the base of the arm with everything else.*
+Mounting: The external camera will be located above the patient like where the surgical lights would be
 
-Expected Cable Length: The Orbbec Gemini 2 cable length is 1-1.5m in length... we may be able to purchase a longer cable if necessary
+Expected Cable Length: The Orbbec Gemini 2 cable length is 1-1.5m in length... we may be able to purchase a longer cable if necessary and compatible with the camera
 
 Lighting: Lighting will be provided by surgical lights and can be tested in harsher conditions
 
@@ -127,7 +126,6 @@ Mechanical Requirements: Must provide an encasing/place for the camera to be mou
 Electrical Requirements: Must look over the electrical requirements and adapt that to the total electrical requirements of the arm
 
 ## Component Shortlist 
-> Note: (TBD when mechanical gets back to us with more concrete materials needed)
 
 ### Camera Options 
 > Note: I am leaning towards the Orbbec Gemini 2 Camera for the initial testing with decent quality... most assumptions are based off of that.
