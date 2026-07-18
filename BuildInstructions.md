@@ -1,6 +1,15 @@
 Basic placeholder robot with a base box and moveable cylinder arm.
 
-How to build:
+## Setup workspace and Clone repo (*Skip if repo already cloned*)
+- Run these commands inside the terminal in Ubuntu:
+```
+mkdir -p ~/waybionic_ws/src
+cd ~/waybionic_ws/src
+git clone https://github.com/Waybionic/waybionic_ground_station.git
+cd ~/waybionic_ws
+```
+
+## Build and Launch
 - Run these commands in your workspace:
 ```
 source /opt/ros/jazzy/setup.bash

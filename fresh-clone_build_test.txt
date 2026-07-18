@@ -1,0 +1,19 @@
+Commit hash:
+d12f625b22fb10768c6e96ea5e7d07d812d9d566
+=== Waybionic Workspace Sanity Check ===
+Moving to workspace root: /home/hoodu/waybionic_ws
+1. Sourcing ROS Jazzy...
+2. Checking dependencies with rosdep...
+/usr/bin/rosdep:6: DeprecationWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html
+  from pkg_resources import load_entry_point
+#All required rosdeps installed successfully
+3. Building Waybionic packages...
+Starting >>> waybionic_description
+Finished <<< waybionic_description [3.37s]
+Starting >>> waybionic_bringup
+Finished <<< waybionic_bringup [3.26s]
+
+Summary: 2 packages finished [6.74s]
+4. Sourcing workspace...
+5. Parsing URDF for syntax errors...
+=== ✅ All checks passed! The foundation is clean and ready. ===
