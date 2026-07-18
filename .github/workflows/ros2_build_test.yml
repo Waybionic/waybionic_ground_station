@@ -6,11 +6,6 @@ on:
   pull_request:
     branches: [ "main" ]
 
-env:
-  # Task 4: Easy to extend package list. 
-  # Add waybionic_rviz_plugins or waybionic_sensors here when they merge.
-  PACKAGES: "waybionic_description waybionic_bringup"
-
 jobs:
   build-and-test:
     runs-on: ubuntu-24.04
@@ -21,7 +16,6 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          # Dynamically create the folder based on the repository's actual name
           path: src/${{ github.event.repository.name }}
 
       - name: Install Dependencies (rosdep)
@@ -34,11 +28,11 @@ jobs:
         shell: bash
         run: |
           source /opt/ros/jazzy/setup.bash
-          colcon build --packages-select ${{ env.PACKAGES }}
+          colcon build
 
       - name: Run Tests
         shell: bash
         run: |
           source /opt/ros/jazzy/setup.bash
-          colcon test --packages-select ${{ env.PACKAGES }}
+          colcon test
           colcon test-result --all
