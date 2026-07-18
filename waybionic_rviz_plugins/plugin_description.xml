@@ -1,0 +1,10 @@
+<library path="waybionic_rviz_plugins">
+  <class
+    name="waybionic_rviz_plugins/DiagnosticsPanel"
+    type="waybionic_rviz_plugins::DiagnosticsPanel"
+    base_class_type="rviz_common::Panel">
+    <description>
+      WayBionic ground station diagnostics, telemetry, and alerts panel for RViz2.
+    </description>
+  </class>
+</library>
