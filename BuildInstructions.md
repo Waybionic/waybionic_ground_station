@@ -10,13 +10,16 @@ cd ~/waybionic_ws
 ```
 
 ## Build and Launch
-- Run these commands in your workspace:
+- Run these commands from the root of your workspace (`~/waybionic_ws`) to install dependencies and build the foundation:
 ```
 source /opt/ros/jazzy/setup.bash
-rosdep install --from-paths . --ignore-src -r -y
+rosdep install --from-paths src --ignore-src -r -y
 colcon build --packages-select waybionic_description waybionic_bringup
 source install/setup.bash
-ros2 launch waybionic_bringup display.launch.py
+```
+- Launch ground station using:
+```
+ros2 launch waybionic_bringup ground_station.launch.py
 ```
 - **RViz** and **Joint State Publisher GUI** (separate small window) will pop up after the last command
 - RViz opens pre-configured with `base_link` fixed frame, `RobotModel`, and `TF` displays already loaded
