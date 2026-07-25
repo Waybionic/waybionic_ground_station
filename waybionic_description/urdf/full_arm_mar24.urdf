@@ -4,6 +4,13 @@
      For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
 <robot
   name="full-arm-mar24-urdf-and-meshes">
+  <!-- Added dummy link so that KDL/intertial values are not ignored (KDL warning when running ros2 launch waybionic_bringup display.launch.py gone)-->
+  <link name="world"/>
+  <joint name="world_to_base" type="fixed">
+    <parent link="world"/>
+    <child  link="base_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
   <link
     name="base_link">
     <inertial>
