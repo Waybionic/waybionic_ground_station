@@ -86,7 +86,7 @@
   </link>
   <joint
     name="joint1"
-    type="fixed">
+    type="revolute">
     <origin
       xyz="0.8001 -1.6434 1.3903"
       rpy="1.5708 0 -1.1999" />
@@ -95,7 +95,7 @@
     <child
       link="shoulder" />
     <axis
-      xyz="0 0 0" />
+      xyz="0 0 1" />
     <limit
       lower="-3.14"
       upper="3.14"
@@ -144,7 +144,7 @@
   </link>
   <joint
     name="joint2"
-    type="fixed">
+    type="revolute">
     <origin
       xyz="0.10285 0.058129 0.011405"
       rpy="2.8569 0 -3.1416" />
@@ -153,7 +153,7 @@
     <child
       link="elbow" />
     <axis
-      xyz="0 0 0" />
+      xyz="0 0 1" />
     <limit
       lower="-3.14"
       upper="3.14"
@@ -260,7 +260,7 @@
   </link>
   <joint
     name="joint4"
-    type="fixed">
+    type="revolute">
     <origin
       xyz="0 0.210000000000002 0.0132179574096474"
       rpy="0 0 0" />
@@ -269,6 +269,11 @@
     <child
       link="wrist" />
     <axis
-      xyz="0 0 0" />
+      xyz="0 0 1" />
+    <limit
+      lower="-3.14"
+      upper="3.14"
+      effort="100"
+      velocity="1" />
   </joint>
 </robot>
