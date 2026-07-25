@@ -70,7 +70,10 @@ def generate_launch_description():
 
     rsp_node = Node(
         package='robot_state_publisher', executable='robot_state_publisher',
-        parameters=[robot_description_content, {'use_sim_time': LaunchConfiguration('use_sim_time')}]
+        parameters=[
+            robot_description_content,
+            {'use_sim_time': LaunchConfiguration('use_sim_time')}
+        ]
     )
 
     jsp_gui_node = Node(
