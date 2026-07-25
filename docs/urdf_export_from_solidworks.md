@@ -94,7 +94,7 @@ Copy the exported `urdf/` and `meshes/` into
 cd /home/richard/waybionic_ground_station/waybionic_ground_station
 colcon build --packages-select waybionic_description waybionic_bringup
 source install/setup.bash
-ros2 launch waybionic_bringup assembled.launch.py
+ros2 launch waybionic_bringup display.launch.py
 ```
 
 Drag the Joint State Publisher GUI sliders to articulate the revolute joints.
