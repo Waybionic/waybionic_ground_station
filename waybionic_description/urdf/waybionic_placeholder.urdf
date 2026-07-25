@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<robot name="waybionic_placeholder">
+
+  <!-- Base Link (A simple gray box) -->
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <box size="0.2 0.2 0.1"/>
+      </geometry>
+      <material name="gray"><color rgba="0.5 0.5 0.5 1.0"/></material>
+    </visual>
+  </link>
+
+  <!-- Arm Link (A simple blue cylinder) -->
+  <link name="arm_link">
+    <visual>
+      <geometry>
+        <cylinder radius="0.05" length="0.4"/>
+      </geometry>
+      <origin xyz="0 0 0.2"/>
+      <material name="blue"><color rgba="0.0 0.0 0.8 1.0"/></material>
+    </visual>
+  </link>
+
+  <!-- Movable Joint (Revolute joint connecting base and arm) -->
+  <joint name="base_to_arm" type="revolute">
+    <parent link="base_link"/>
+    <child link="arm_link"/>
+    <origin xyz="0 0 0.05"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.57" upper="1.57" effort="10" velocity="1.0"/>
+  </joint>
+
+</robot>
