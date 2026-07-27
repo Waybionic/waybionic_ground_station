@@ -34,4 +34,11 @@ class TestGroundStationLaunch(unittest.TestCase):
 
     def test_nodes_started(self, proc_info, proc_output):
         proc_info.assertWaitForStartup(process=None, timeout=5)
-        assert True
+        assert len(proc_info.processes()) > 0, 'No processes were started!'
+
+
+@launch_testing.post_shutdown_test()
+class TestProcessOutput(unittest.TestCase):
+
+    def test_exit_codes(self, proc_info):
+        launch_testing.asserts.assertExitCodes(proc_info, allowable_exit_codes=[0, -2])

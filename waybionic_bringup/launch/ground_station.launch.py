@@ -87,7 +87,7 @@ def generate_launch_description():
         name='temp_diag_pub',
         condition=IfCondition(LaunchConfiguration('start_temporary_diagnostics_publisher')),
         parameters=[
-            {'mode': 'mock'},
+            {'mode': 'normal'},
             {'topic': LaunchConfiguration('diagnostics_topic')},
             {'publish_rate_hz': 10.0}
         ]

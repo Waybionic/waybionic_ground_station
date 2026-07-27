@@ -14,7 +14,7 @@ cd ~/waybionic_ws
 ```
 source /opt/ros/jazzy/setup.bash
 rosdep install --from-paths src --ignore-src -r -y
-colcon build --packages-select waybionic_description waybionic_bringup
+colcon build
 source install/setup.bash
 ```
 - Launch ground station using:
