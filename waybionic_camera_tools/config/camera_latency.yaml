@@ -1,0 +1,16 @@
+/**:
+  ros__parameters:
+    image_topic: /doctor_view/left/image_raw
+    camera_info_topic: /doctor_view/left/camera_info
+    diagnostics_topic: /diagnostics
+    camera_signal_name: camera.primary
+    expected_frame_rate: 30.0
+    expected_width: 1920
+    expected_height: 1080
+    optical_frame_id: doctor_view_left_optical_frame
+    timestamp_source: image.header.stamp
+    stale_timeout_sec: 1.0
+    history_size: 180
+    drop_gap_factor: 1.5
+    diagnostic_period_sec: 1.0
+    log_period_sec: 5.0
