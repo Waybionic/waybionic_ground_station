@@ -55,8 +55,10 @@ waybionic_rviz_plugins/
     temporary_diagnostics_publisher.launch.py
   test/
     test_package_metadata.py
+    test_ros_diagnostics_source.cpp   # Live/mock source handoff stress tests
   docs/
     DIAGNOSTICS_CONTRACT.md
+    DIAGNOSTICS_SOURCE_LIFECYCLE.md
     GROUND_STATION_RVIZ_UI.md
     PR_NOTES.md
 ```
@@ -137,6 +139,8 @@ DiagnosticsSource
 
 `RosDiagnosticsSource` maps ROS diagnostic levels and fields into the internal `DiagnosticMessage` model before the Qt panel renders them. See `docs/DIAGNOSTICS_CONTRACT.md` for the full mapping Korede/backend should follow, and `docs/DIAGNOSTICS_BACKEND_INTEGRATION.md` for backend replacement guidance.
 
+Switching between mock and live replaces the active source while a ROS callback may still be running. `docs/DIAGNOSTICS_SOURCE_LIFECYCLE.md` documents the ownership rules that keep that handoff safe and the stress test that guards it.
+
 ## Platform Notes
 
 - Primary validation target is Ubuntu/WSL2 with ROS 2 Jazzy.
@@ -146,6 +150,7 @@ DiagnosticsSource
 
 - `docs/DIAGNOSTICS_CONTRACT.md` — normalized diagnostic model and ROS mapping
 - `docs/DIAGNOSTICS_BACKEND_INTEGRATION.md` — how a real backend replaces the temporary publisher
+- `docs/DIAGNOSTICS_SOURCE_LIFECYCLE.md` — mock/live source ownership and the handoff stress test
 - `docs/GROUND_STATION_RVIZ_UI.md` — extended architecture notes
 - `docs/PR_NOTES.md` — review summary and PR description source
 
