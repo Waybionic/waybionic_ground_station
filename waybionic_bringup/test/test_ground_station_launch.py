@@ -1,4 +1,5 @@
 import os
+import time
 import unittest
 
 from ament_index_python.packages import get_package_share_directory
@@ -35,6 +36,7 @@ class TestGroundStationLaunch(unittest.TestCase):
     def test_nodes_started(self, proc_info, proc_output):
         proc_info.assertWaitForStartup(process=None, timeout=5)
         assert len(proc_info.processes()) > 0, 'No processes were started!'
+        time.sleep(3)
 
 
 @launch_testing.post_shutdown_test()
