@@ -117,9 +117,15 @@ ensure_workspace() {
 run_workspace() {
   ensure_workspace
   # shellcheck disable=SC2016
-  run_environment bash -c \
-    'cd "$1"; source install/setup.bash; shift; exec "$@"' \
-    _ "$ROOT" "$@"
+  run_environment bash -c '
+    cd "$1" || { echo "error: cannot enter workspace $1" >&2; exit 1; }
+    . install/setup.bash || {
+      echo "error: failed to source install/setup.bash; run ./scripts/macos.sh build" >&2
+      exit 1
+    }
+    shift
+    exec "$@"
+  ' _ "$ROOT" "$@"
 }
 
 command_name="${1:-help}"
