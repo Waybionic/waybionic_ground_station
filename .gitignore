@@ -76,3 +76,5 @@ bld/
 # NUNIT
 *.VisualState.xml
 TestResult.xml
+__pycache__/
+*.pyc
