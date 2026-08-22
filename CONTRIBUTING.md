@@ -115,9 +115,9 @@ Full build and launch steps are in [BuildInstructions.md](./BuildInstructions.md
 - **Target:** ROS 2 **Jazzy** on **Ubuntu 24.04**.
 - **Windows:** use **WSL2** with Ubuntu 24.04.
 - **Linux:** native, no extra setup.
-- **macOS (Apple Silicon):** first-class support is still being worked out (Docker / VM).
-  Ask in the team channel before starting, and **don't commit Mac-specific local paths**
-  into shared config.
+- **macOS (Apple Silicon):** use the native RoboStack workflow in
+  [BuildInstructions.md](./BuildInstructions.md). Do not commit Mac-specific
+  local paths into shared config.
 
 ## Questions
 

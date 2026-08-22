@@ -3,6 +3,10 @@ build/
 install/
 log/
 
+# Python caches
+__pycache__/
+*.py[cod]
+
 # imported ROS projects
 easy_handeye2/
 ros2_aruco/
@@ -76,3 +80,5 @@ bld/
 # NUNIT
 *.VisualState.xml
 TestResult.xml
+__pycache__/
+*.pyc
