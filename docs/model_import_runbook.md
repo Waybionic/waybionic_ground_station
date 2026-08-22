@@ -96,18 +96,45 @@ colcon test-result --all
 Confirms the "root link has inertia — KDL ignores it" warning is gone.
 
 ```bash
+if ! rsp_prefix="$(ros2 pkg prefix robot_state_publisher 2>&1)"; then
+  printf '%s\n' "$rsp_prefix"
+  echo "ERROR — robot_state_publisher package is unavailable"
+  exit 1
+fi
+rsp_executable="$rsp_prefix/lib/robot_state_publisher/robot_state_publisher"
+if [ ! -x "$rsp_executable" ]; then
+  echo "ERROR — robot_state_publisher executable is missing"
+  exit 1
+fi
+
 kdl_log="$(mktemp)"
-ros2 run robot_state_publisher robot_state_publisher \
+"$rsp_executable" \
   install/waybionic_description/share/waybionic_description/urdf/full_arm_mar24.urdf \
   >"$kdl_log" 2>&1 &
 kdl_pid=$!
 sleep 5
-kill -INT "$kdl_pid" 2>/dev/null || true
-wait "$kdl_pid" 2>/dev/null || true
+if kill -0 "$kdl_pid" 2>/dev/null; then
+  kdl_was_running=true
+  kill -INT "$kdl_pid" 2>/dev/null || kdl_was_running=false
+else
+  kdl_was_running=false
+fi
+if wait "$kdl_pid" 2>/dev/null; then
+  kdl_status=0
+else
+  kdl_status=$?
+fi
 kdl_output="$(cat "$kdl_log")"
 rm -f "$kdl_log"
 printf '%s\n' "$kdl_output"
-if printf '%s\n' "$kdl_output" | grep -qiE 'root link.*inertia|KDL.*inertia'; then
+if [ "$kdl_was_running" != true ] \
+  || { [ "$kdl_status" -ne 0 ] && [ "$kdl_status" -ne 130 ]; }; then
+  echo "ERROR — robot_state_publisher exited unexpectedly (status $kdl_status)"
+  exit 1
+elif ! printf '%s\n' "$kdl_output" | grep -q 'Robot initialized'; then
+  echo "ERROR — robot_state_publisher did not initialize within 5 seconds"
+  exit 1
+elif printf '%s\n' "$kdl_output" | grep -qiE 'root link.*inertia|KDL.*inertia'; then
   echo "ERROR — KDL root-inertia warning found"
   exit 1
 else
@@ -122,13 +149,21 @@ fi
 Don't count parts by eye — they range from a ~30 cm housing to a few-mm screw.
 
 ```bash
+if ! robot_description="$(
+  ros2 param get /robot_state_publisher robot_description 2>&1
+)"; then
+  printf '%s\n' "$robot_description"
+  echo "ERROR — could not read the live robot_description parameter"
+  exit 1
+fi
+
 # Robot links in the LIVE model loaded by RViz, excluding only the world frame
-ros2 param get /robot_state_publisher robot_description \
+printf '%s\n' "$robot_description" \
   | grep -oE '<link name="[^"]+"' | sed -E 's/<link name="//;s/"//' \
   | grep -vE '^world$' | wc -l
 
 # Confirm every referenced mesh actually exists on disk
-ros2 param get /robot_state_publisher robot_description \
+printf '%s\n' "$robot_description" \
   | grep -oE 'meshes/[^"]+\.STL' | sed 's#meshes/##' | sort -u \
   | while read -r m; do
       [ -f "waybionic_description/meshes/$m" ] && echo "OK   $m" || echo "MISS $m"
