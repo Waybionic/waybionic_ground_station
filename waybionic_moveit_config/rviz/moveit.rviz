@@ -1,4 +1,6 @@
 Panels:
+  - Class: waybionic_rviz_plugins/IkDemoPanel
+    Name: IK Demo
   - Class: rviz_common/Displays
     Help Height: 78
     Name: Displays
@@ -56,6 +58,8 @@ Visualization Manager:
       MoveIt_Planning_Time: 5
       MoveIt_Use_Cartesian_Path: false
       MoveIt_Use_Constraint_Aware_IK: false
+      Velocity_Scaling_Factor: 0.5
+      Acceleration_Scaling_Factor: 0.5
       MoveIt_Workspace:
         Center:
           X: 0

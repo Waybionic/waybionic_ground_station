@@ -23,9 +23,10 @@ For an automatic Cartesian demonstration, run:
 
 The arm first moves to its ready pose, then uses MoveIt's `/compute_ik`
 service to move the wrist along X, Y, and Z. RViz shows a red X axis, green Y
-axis, blue Z axis, and a yellow target. After the sequence, use the goal-state
-interactive marker for manual IK: drag a colored arrow, then click **Plan &
-Execute**.
+axis, blue Z axis, and a yellow target. Click **Replay XYZ Demo** in the IK Demo
+panel to run it again. For manual IK, drag a colored goal-state arrow and click
+**Plan & Execute**. MotionPlanning uses 50% of the model's velocity and
+acceleration limits by default; those sliders can still be adjusted in RViz.
 
 Headless (no RViz), useful for testing:
 
@@ -57,6 +58,7 @@ Consequences you need to know about:
 | `joint_state_broadcaster` | Publishes `/joint_states` |
 | `arm_controller` | `JointTrajectoryController`, executes planned paths |
 | `move_group` | Planning, IK, collision checking |
+| `ik_xyz_demo` | Runs and replays the Cartesian XYZ demonstration |
 | `rviz2` | MotionPlanning UI |
 
 No physical hardware is needed. The mock system echoes commands back as state,
@@ -68,7 +70,7 @@ so **Execute** animates the arm in RViz.
 srdf/waybionic.srdf                  # Planning group, named poses, collision matrix
 config/kinematics.yaml               # KDL, position-only IK
 config/joint_limits.yaml             # Velocity/acceleration limits
-config/ompl_planning.yaml            # OMPL planners (RRTConnect default)
+config/ompl_planning.yaml            # Focused OMPL RRTConnect configuration
 config/moveit_controllers.yaml       # move_group -> ros2_control handoff
 config/ros2_controllers.yaml         # controller_manager + JTC
 urdf/waybionic_moveit.urdf.xacro     # Includes base URDF, adds ros2_control
@@ -76,24 +78,20 @@ launch/demo.launch.py                # Brings up everything
 rviz/moveit.rviz                     # MotionPlanning preconfigured for group "arm"
 ```
 
-`waybionic_description` is **not modified**. The xacro in `urdf/` includes the
-existing URDF unchanged and layers `<ros2_control>` on top.
+The xacro in `urdf/` includes the shared robot description and layers
+`<ros2_control>` on top. High-resolution STL files are visual-only; lightweight
+boxes and cylinders provide portable, fast collision checking.
 
 ## Known limitations
 
 - **The collision matrix only disables adjacent link pairs.** It was written by
-  hand, not sampled by the MoveIt Setup Assistant. If planning fails immediately
-  with "start state in collision", non-adjacent links (likely `base_link` against
-  the arm links, given the SolidWorks export offsets) may be overlapping in the
-  meshes. Regenerate a proper matrix with:
+  hand, not sampled by the MoveIt Setup Assistant. The primitive collision
+  envelopes test clean at the demo poses, but production hardware should still
+  regenerate the matrix across the complete workspace with:
   ```bash
   ros2 launch moveit_setup_assistant setup_assistant.launch.py
   ```
   Load `urdf/waybionic_moveit.urdf.xacro`, then use the Self-Collisions pane.
-- **Collision geometry is the full visual STL** for every link. It works, but
-  the demo strips those placeholder collision meshes before loading MoveIt.
-  The visual STL model is unchanged. Add simplified convex collision meshes
-  before using this configuration for collision-aware planning.
 - **No end effector is defined** — there is no gripper in the URDF.
 - `No 3D sensor plugin(s) defined for octomap updates` is logged as an ERROR at
   startup. It is harmless: there is no depth camera in this setup.

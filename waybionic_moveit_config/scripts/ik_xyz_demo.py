@@ -16,6 +16,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
 from sensor_msgs.msg import JointState
+from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformException, TransformListener
 from trajectory_msgs.msg import JointTrajectoryPoint
 from visualization_msgs.msg import Marker, MarkerArray
@@ -31,9 +32,10 @@ class IkXyzDemo(Node):
     def __init__(self):
         super().__init__("ik_xyz_demo")
         self.declare_parameter("step_m", 0.04)
-        self.declare_parameter("move_seconds", 1.5)
-        self.declare_parameter("pause_seconds", 0.6)
+        self.declare_parameter("move_seconds", 0.55)
+        self.declare_parameter("pause_seconds", 0.15)
         self.declare_parameter("cycles", 1)
+        self.declare_parameter("run_on_start", False)
 
         marker_qos = QoSProfile(depth=1)
         marker_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
@@ -45,6 +47,7 @@ class IkXyzDemo(Node):
             PoseStamped, "/ik_demo/target", marker_qos
         )
         self.create_subscription(JointState, "/joint_states", self._on_joint_state, 10)
+        self.create_service(Trigger, "/ik_demo/replay", self._on_replay)
 
         self.ik_client = self.create_client(GetPositionIK, "/compute_ik")
         self.trajectory_client = ActionClient(
@@ -57,9 +60,46 @@ class IkXyzDemo(Node):
 
         self._joint_state = None
         self._joint_lock = threading.Lock()
+        self._demo_lock = threading.Lock()
+        self._demo_running = False
+        self._demo_requested = threading.Event()
         self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run_demo, daemon=True)
+        self._thread = threading.Thread(target=self._worker_loop, daemon=True)
         self._thread.start()
+        if self.get_parameter("run_on_start").value:
+            self._request_demo()
+
+    def _request_demo(self):
+        with self._demo_lock:
+            if self._demo_running or self._stop.is_set():
+                return False
+            self._demo_running = True
+            self._demo_requested.set()
+            return True
+
+    def _on_replay(self, _request, response):
+        response.success = self._request_demo()
+        if response.success:
+            response.message = "XYZ IK demo accepted"
+        else:
+            response.message = "XYZ IK demo is already running"
+        return response
+
+    def _worker_loop(self):
+        while not self._stop.is_set():
+            self._demo_requested.wait(timeout=0.2)
+            if self._stop.is_set():
+                return
+            if not self._demo_requested.is_set():
+                continue
+            self._demo_requested.clear()
+            try:
+                self._run_demo()
+            except Exception as error:  # Keep the replay service alive after a failed run.
+                self.get_logger().error(f"XYZ IK demo failed: {error}")
+            finally:
+                with self._demo_lock:
+                    self._demo_running = False
 
     def _on_joint_state(self, message):
         with self._joint_lock:
@@ -73,7 +113,7 @@ class IkXyzDemo(Node):
             time.sleep(0.05)
         return future.result() if future.done() else None
 
-    def _send_joint_positions(self, positions, seconds):
+    def _send_joint_positions(self, positions, seconds, rejection_timeout=0.0):
         goal = FollowJointTrajectory.Goal()
         goal.trajectory.joint_names = JOINT_NAMES
         point = JointTrajectoryPoint()
@@ -81,9 +121,19 @@ class IkXyzDemo(Node):
         point.time_from_start = Duration(seconds=seconds).to_msg()
         goal.trajectory.points = [point]
 
-        send_result = self._wait_for_future(
-            self.trajectory_client.send_goal_async(goal), 5.0
-        )
+        rejection_deadline = time.monotonic() + rejection_timeout
+        send_result = None
+        while rclpy.ok() and not self._stop.is_set():
+            send_result = self._wait_for_future(
+                self.trajectory_client.send_goal_async(goal), 5.0
+            )
+            if send_result is not None and send_result.accepted:
+                break
+            if time.monotonic() >= rejection_deadline:
+                break
+            if self._stop.wait(0.1):
+                return False
+
         if send_result is None or not send_result.accepted:
             self.get_logger().error("The arm controller rejected the trajectory")
             return False
@@ -257,10 +307,13 @@ class IkXyzDemo(Node):
             return
 
         self.get_logger().info("Moving to the ready pose...")
-        move_seconds = self.get_parameter("move_seconds").value
-        if not self._send_joint_positions(READY_POSITION, move_seconds):
+        move_seconds = max(0.1, float(self.get_parameter("move_seconds").value))
+        if not self._send_joint_positions(
+            READY_POSITION, max(0.8, move_seconds), rejection_timeout=5.0
+        ):
             return
-        time.sleep(0.4)
+        if self._stop.wait(0.15):
+            return
 
         origin = self._lookup_wrist_pose()
         if origin is None:
@@ -268,7 +321,7 @@ class IkXyzDemo(Node):
             return
 
         step = self.get_parameter("step_m").value
-        pause = self.get_parameter("pause_seconds").value
+        pause = max(0.0, float(self.get_parameter("pause_seconds").value))
         sequence = [
             ("X axis +", (step, 0.0, 0.0)),
             ("Center", (0.0, 0.0, 0.0)),
@@ -296,7 +349,8 @@ class IkXyzDemo(Node):
                 solution = self._solve_ik(target)
                 if solution is not None:
                     self._send_joint_positions(solution, move_seconds)
-                time.sleep(pause)
+                if self._stop.wait(pause):
+                    return
 
         self._publish_markers(origin, origin, "Manual IK ready")
         self.get_logger().info(
@@ -306,6 +360,9 @@ class IkXyzDemo(Node):
 
     def destroy_node(self):
         self._stop.set()
+        self._demo_requested.set()
+        if self._thread.is_alive():
+            self._thread.join(timeout=5.0)
         super().destroy_node()
 
 

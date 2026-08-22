@@ -7,7 +7,6 @@ Brings up, in one shot:
 No physical hardware is required.
 """
 import os
-import xml.etree.ElementTree as ET
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -30,24 +29,14 @@ def load_yaml(package_name, file_path):
         return yaml.safe_load(handle)
 
 
-def load_demo_robot_description():
-    """Load the arm while omitting unsafe placeholder collision meshes.
-
-    The SolidWorks STL files are kept for the visual model.  They have not yet
-    been converted into collision-safe geometry, and macOS FCL crashes while
-    constructing BVHs from them.  The IK demo therefore runs without collision
-    geometry until simplified convex collision meshes are supplied.
-    """
+def load_robot_description():
+    """Expand the shared arm description, including primitive collisions."""
     xacro_path = os.path.join(
         get_package_share_directory(PKG),
         "urdf",
         "waybionic_moveit.urdf.xacro",
     )
-    root = ET.fromstring(xacro.process_file(xacro_path).toxml())
-    for link in root.findall("link"):
-        for collision in link.findall("collision"):
-            link.remove(collision)
-    return ET.tostring(root, encoding="unicode")
+    return xacro.process_file(xacro_path).toxml()
 
 
 def generate_launch_description():
@@ -78,7 +67,7 @@ def generate_launch_description():
     ]
 
     # --- robot_description (URDF + ros2_control) ---
-    robot_description_content = load_demo_robot_description()
+    robot_description_content = load_robot_description()
     robot_description = {
         "robot_description": ParameterValue(robot_description_content, value_type=str)
     }
@@ -183,6 +172,7 @@ def generate_launch_description():
             robot_description,
             robot_description_semantic,
             robot_description_kinematics,
+            joint_limits,
             planning_pipeline_config,
         ],
     )
@@ -192,7 +182,9 @@ def generate_launch_description():
         executable="ik_xyz_demo.py",
         name="ik_xyz_demo",
         output="screen",
-        condition=IfCondition(auto_demo),
+        parameters=[
+            {"run_on_start": ParameterValue(auto_demo, value_type=bool)},
+        ],
     )
 
     # Load arm_controller only once joint_state_broadcaster is up, so the

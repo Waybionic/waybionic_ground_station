@@ -1,8 +1,8 @@
 # Velocity/effort values mirror the <limit> tags in full_arm_mar24.urdf.
 # The URDF declares no acceleration limits, so conservative values are set here
 # for time-optimal trajectory parameterization.
-default_velocity_scaling_factor: 0.1
-default_acceleration_scaling_factor: 0.1
+default_velocity_scaling_factor: 0.5
+default_acceleration_scaling_factor: 0.5
 
 joint_limits:
   joint1:

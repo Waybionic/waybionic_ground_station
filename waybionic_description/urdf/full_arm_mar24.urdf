@@ -44,13 +44,22 @@
           rgba="0.79216 0.81961 0.93333 1" />
       </material>
     </visual>
-    <collision>
+    <!-- Lightweight primitives keep collision checking fast and avoid asking
+         FCL to build a BVH from the high-resolution visual mesh. -->
+    <collision name="base_body_collision">
       <origin
-        xyz="0 0 0"
+        xyz="0.800105 -1.643392 1.00172"
         rpy="0 0 0" />
       <geometry>
-        <mesh
-          filename="package://waybionic_description/meshes/base_link.STL" />
+        <box size="0.54 0.47 0.51" />
+      </geometry>
+    </collision>
+    <collision name="base_top_collision">
+      <origin
+        xyz="0.800105 -1.643392 1.2862"
+        rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.078" length="0.070" />
       </geometry>
     </collision>
   </link>
@@ -84,13 +93,20 @@
           rgba="1 1 1 1" />
       </material>
     </visual>
-    <collision>
+    <collision name="shoulder_body_collision">
       <origin
-        xyz="0 0 0"
+        xyz="0.034 0.035 0"
         rpy="0 0 0" />
       <geometry>
-        <mesh
-          filename="package://waybionic_description/meshes/shoulder.STL" />
+        <box size="0.21 0.235 0.14" />
+      </geometry>
+    </collision>
+    <collision name="shoulder_shaft_collision">
+      <origin
+        xyz="0 -0.107 0"
+        rpy="1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.040" length="0.070" />
       </geometry>
     </collision>
   </link>
@@ -142,13 +158,28 @@
           rgba="0.75294 0.75294 0.75294 1" />
       </material>
     </visual>
-    <collision>
+    <collision name="elbow_proximal_collision">
       <origin
-        xyz="0 0 0"
+        xyz="-0.071 0.044 0.021"
         rpy="0 0 0" />
       <geometry>
-        <mesh
-          filename="package://waybionic_description/meshes/elbow.STL" />
+        <box size="0.24 0.19 0.14" />
+      </geometry>
+    </collision>
+    <collision name="elbow_link_collision">
+      <origin
+        xyz="-0.140 0.268 0.070"
+        rpy="0 0 0" />
+      <geometry>
+        <box size="0.11 0.34 0.17" />
+      </geometry>
+    </collision>
+    <collision name="elbow_distal_collision">
+      <origin
+        xyz="-0.140 0.440 0.105"
+        rpy="0 0 0" />
+      <geometry>
+        <box size="0.11 0.14 0.115" />
       </geometry>
     </collision>
   </link>
@@ -200,13 +231,20 @@
           rgba="0.75294 0.75294 0.75294 1" />
       </material>
     </visual>
-    <collision>
+    <collision name="forearm_proximal_collision">
       <origin
-        xyz="0 0 0"
+        xyz="0 0.0175 0.0655"
         rpy="0 0 0" />
       <geometry>
-        <mesh
-          filename="package://waybionic_description/meshes/forearm.STL" />
+        <box size="0.10 0.135 0.245" />
+      </geometry>
+    </collision>
+    <collision name="forearm_link_collision">
+      <origin
+        xyz="0 0.145 0.0132"
+        rpy="0 0 0" />
+      <geometry>
+        <box size="0.09 0.17 0.12" />
       </geometry>
     </collision>
   </link>
@@ -258,13 +296,12 @@
           rgba="0.79216 0.81961 0.93333 1" />
       </material>
     </visual>
-    <collision>
+    <collision name="wrist_collision">
       <origin
-        xyz="0 0 0"
+        xyz="0 0.054 0"
         rpy="0 0 0" />
       <geometry>
-        <mesh
-          filename="package://waybionic_description/meshes/wrist.STL" />
+        <box size="0.10 0.115 0.12" />
       </geometry>
     </collision>
   </link>

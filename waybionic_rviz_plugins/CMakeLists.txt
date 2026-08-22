@@ -14,21 +14,23 @@ find_package(pluginlib REQUIRED)
 find_package(Qt5 REQUIRED COMPONENTS Widgets)
 find_package(rclcpp REQUIRED)
 find_package(rviz_common REQUIRED)
-find_package(rviz_default_plugins REQUIRED)
+find_package(std_srvs REQUIRED)
 
 set(THIS_PACKAGE_INCLUDE_DEPENDS
   diagnostic_msgs
   pluginlib
   rclcpp
   rviz_common
-  rviz_default_plugins
+  std_srvs
 )
 
 add_library(${PROJECT_NAME} SHARED
   include/waybionic_rviz_plugins/diagnostics_source.hpp
   include/waybionic_rviz_plugins/diagnostics_panel.hpp
+  include/waybionic_rviz_plugins/ik_demo_panel.hpp
   include/waybionic_rviz_plugins/ros_diagnostics_source.hpp
   src/diagnostics_panel.cpp
+  src/ik_demo_panel.cpp
   src/mock_diagnostics_source.cpp
   src/ros_diagnostics_source.cpp
 )
