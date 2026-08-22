@@ -16,6 +16,10 @@ class DiagnosticsSource
 public:
   virtual ~DiagnosticsSource() = default;
 
+  /// Detach any external data feed so no further callbacks mutate this source.
+  /// Must be idempotent and safe to call from the UI thread.
+  virtual void stop() {}
+
   virtual std::string sourceName() const = 0;
   virtual std::string connectionStatus(const rclcpp::Time & now) const = 0;
   virtual std::vector<DiagnosticMessage> messages(const rclcpp::Time & now) const = 0;
