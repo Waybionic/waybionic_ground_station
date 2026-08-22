@@ -18,7 +18,7 @@
     name="base_link">
     <inertial>
       <origin
-        xyz="0.8001 0.96967 1.6434"
+        xyz="0.8001 -1.6434 0.96967"
         rpy="0 0 0" />
       <mass
         value="3.0245" />

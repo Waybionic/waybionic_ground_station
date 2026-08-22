@@ -12,6 +12,11 @@ if(BUILD_TESTING)
     TIMEOUT 120
     RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py"
   )
+  add_launch_test(
+    test/test_ik_demo_timeout_launch.py
+    TIMEOUT 20
+    RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py"
+  )
 endif()
 
 install(DIRECTORY config launch rviz srdf urdf

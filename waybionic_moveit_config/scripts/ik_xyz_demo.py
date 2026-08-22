@@ -36,6 +36,7 @@ class IkXyzDemo(Node):
         self.declare_parameter("pause_seconds", 0.15)
         self.declare_parameter("cycles", 1)
         self.declare_parameter("run_on_start", False)
+        self.declare_parameter("startup_timeout_seconds", 15.0)
 
         marker_qos = QoSProfile(depth=1)
         marker_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
@@ -112,6 +113,22 @@ class IkXyzDemo(Node):
                 return None
             time.sleep(0.05)
         return future.result() if future.done() else None
+
+    def _wait_until_available(self, wait_for_endpoint, timeout_sec):
+        deadline = time.monotonic() + max(0.0, float(timeout_sec))
+        while rclpy.ok() and not self._stop.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.0:
+                return False
+            try:
+                available = wait_for_endpoint(timeout_sec=min(0.2, remaining))
+            except Exception:
+                if self._stop.is_set() or not rclpy.ok():
+                    return False
+                raise
+            if available:
+                return True
+        return False
 
     def _send_joint_positions(self, positions, seconds, rejection_timeout=0.0):
         goal = FollowJointTrajectory.Goal()
@@ -285,13 +302,20 @@ class IkXyzDemo(Node):
 
     def _run_demo(self):
         self.get_logger().info("Waiting for MoveIt IK and the arm controller...")
-        while rclpy.ok() and not self._stop.is_set():
-            if self.ik_client.wait_for_service(timeout_sec=0.5):
-                break
-        if not rclpy.ok() or self._stop.is_set():
+        startup_timeout = self.get_parameter("startup_timeout_seconds").value
+        if not self._wait_until_available(
+            self.ik_client.wait_for_service, startup_timeout
+        ):
+            if rclpy.ok() and not self._stop.is_set():
+                self.get_logger().error("MoveIt IK service did not become available")
             return
-        if not self.trajectory_client.wait_for_server(timeout_sec=15.0):
-            self.get_logger().error("Arm trajectory action did not become available")
+        if not self._wait_until_available(
+            self.trajectory_client.wait_for_server, startup_timeout
+        ):
+            if rclpy.ok() and not self._stop.is_set():
+                self.get_logger().error(
+                    "Arm trajectory action did not become available"
+                )
             return
 
         deadline = time.monotonic() + 10.0

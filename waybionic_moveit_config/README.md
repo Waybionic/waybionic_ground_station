@@ -4,21 +4,45 @@ MoveIt 2 configuration for the WayBionic arm (`full_arm_mar24.urdf`).
 
 ## Quickstart
 
+Clone the repository once and use that directory as the colcon workspace:
+
 ```bash
-cd ~/waybionic_ground_station/waybionic_ground_station
+git clone https://github.com/Waybionic/waybionic_ground_station.git
+cd waybionic_ground_station
+```
+
+### Ubuntu 24.04 (ROS 2 Jazzy)
+
+From the repository root:
+
+```bash
 source /opt/ros/jazzy/setup.bash
+rosdep install --from-paths . --ignore-src -r -y
+colcon build --symlink-install
 source install/setup.bash
 ros2 launch waybionic_moveit_config demo.launch.py
+```
+
+### macOS (Apple Silicon)
+
+Use the repository helper so the RoboStack environment and Bash workspace
+overlay are applied correctly. Run `./scripts/macos.sh setup` once to create the
+environment, then use:
+
+```bash
+./scripts/macos.sh build
+./scripts/macos.sh run ros2 launch waybionic_moveit_config demo.launch.py
 ```
 
 RViz opens with the MotionPlanning display already configured for the `arm`
 group. Use the **Planning** tab: pick a start/goal state (or a named pose),
 press **Plan**, then **Execute**.
 
-For an automatic Cartesian demonstration, run:
+To run the automatic Cartesian demonstration at startup, append
+`auto_demo:=true` to the launch command. For example, on Ubuntu:
 
 ```bash
-./scripts/macos.sh run ros2 launch waybionic_moveit_config demo.launch.py auto_demo:=true
+ros2 launch waybionic_moveit_config demo.launch.py auto_demo:=true
 ```
 
 The arm first moves to its ready pose, then uses MoveIt's `/compute_ik`
@@ -33,6 +57,9 @@ Headless (no RViz), useful for testing:
 ```bash
 ros2 launch waybionic_moveit_config demo.launch.py use_rviz:=false
 ```
+
+On macOS, prefix the Ubuntu `ros2 launch` examples above with
+`./scripts/macos.sh run`.
 
 ## Important: this arm has 4 DOF
 

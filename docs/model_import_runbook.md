@@ -89,7 +89,7 @@ colcon test-result --all
 ```
 
 **Expect:** build finishes with no errors; `colcon test-result` ends with
-`0 errors, 0 failures` (last run: **44 tests, 0 failures** across the workspace).
+`0 errors, 0 failures` (last run: **52 tests, 0 failures** across the workspace).
 
 ### 4.3 KDL root-inertia check (headless)
 
@@ -162,12 +162,31 @@ printf '%s\n' "$robot_description" \
   | grep -oE '<link name="[^"]+"' | sed -E 's/<link name="//;s/"//' \
   | grep -vE '^world$' | wc -l
 
-# Confirm every referenced mesh actually exists on disk
-printf '%s\n' "$robot_description" \
-  | grep -oE 'meshes/[^"]+\.STL' | sed 's#meshes/##' | sort -u \
-  | while read -r m; do
-      [ -f "waybionic_description/meshes/$m" ] && echo "OK   $m" || echo "MISS $m"
-    done
+# Confirm every referenced mesh exists in the installed package RViz is using
+if ! description_share="$(ros2 pkg prefix --share waybionic_description 2>&1)"; then
+  printf '%s\n' "$description_share"
+  echo "ERROR — installed waybionic_description package is unavailable"
+  exit 1
+fi
+mesh_root="$description_share/meshes"
+mesh_names="$(
+  printf '%s\n' "$robot_description" \
+    | grep -oE 'meshes/[^"]+\.STL' | sed 's#meshes/##' | sort -u
+)"
+if [ -z "$mesh_names" ]; then
+  echo "ERROR — live robot_description does not reference any STL meshes"
+  exit 1
+fi
+missing_mesh=false
+while IFS= read -r m; do
+  if [ -f "$mesh_root/$m" ]; then
+    echo "OK   $m"
+  else
+    echo "MISS $m"
+    missing_mesh=true
+  fi
+done <<< "$mesh_names"
+[ "$missing_mesh" = false ] || exit 1
 ```
 
 A missing mesh still parses and still counts as a link — it just renders
@@ -179,9 +198,10 @@ invisibly — so check disk presence separately.
 ros2 launch waybionic_bringup display.launch.py
 ```
 
-Drive each slider through its full range and confirm the correct link rotates
-about the intended axis. Movable joints in `full_arm_mar24.urdf` (all axis
-`[0 0 1]`, placeholder limits `effort=100 velocity=1`):
+Drive the bounded revolute sliders through their full ranges and move continuous
+`joint3` through representative positive and negative angles. Confirm each link
+rotates about the intended axis. Movable joints in `full_arm_mar24.urdf` (all
+axis `[0 0 1]`, placeholder limits `effort=100 velocity=1`):
 
 | Joint | Type | Moves | Range | Notes / known limitations |
 |-------|------|-------|-------|---------------------------|
