@@ -83,23 +83,36 @@ root is what stops KDL from ignoring `base_link`'s inertia — if the root print
 ### 4.2 Build + unit tests
 
 ```bash
-colcon build                 # or: --packages-select waybionic_description waybionic_bringup
+colcon build                 # or select the description, bringup, MoveIt, and RViz packages
 colcon test
 colcon test-result --all
 ```
 
 **Expect:** build finishes with no errors; `colcon test-result` ends with
-`0 errors, 0 failures` (last run: **27 tests, 0 failures** across
-`waybionic_description`, `waybionic_bringup`, `waybionic_rviz_plugins`).
+`0 errors, 0 failures` (last run: **44 tests, 0 failures** across the workspace).
 
 ### 4.3 KDL root-inertia check (headless)
 
 Confirms the "root link has inertia — KDL ignores it" warning is gone.
 
 ```bash
-timeout 5 ros2 run robot_state_publisher robot_state_publisher \
-  install/waybionic_description/share/waybionic_description/urdf/full_arm_mar24.urdf 2>&1 \
-  | grep -iE 'KDL|inertia|root link' || echo "OK — no KDL root-inertia warning"
+kdl_log="$(mktemp)"
+ros2 run robot_state_publisher robot_state_publisher \
+  install/waybionic_description/share/waybionic_description/urdf/full_arm_mar24.urdf \
+  >"$kdl_log" 2>&1 &
+kdl_pid=$!
+sleep 5
+kill -INT "$kdl_pid" 2>/dev/null || true
+wait "$kdl_pid" 2>/dev/null || true
+kdl_output="$(cat "$kdl_log")"
+rm -f "$kdl_log"
+printf '%s\n' "$kdl_output"
+if printf '%s\n' "$kdl_output" | grep -qiE 'root link.*inertia|KDL.*inertia'; then
+  echo "ERROR — KDL root-inertia warning found"
+  exit 1
+else
+  echo "OK — no KDL root-inertia warning"
+fi
 ```
 
 **Expect:** `OK — no KDL root-inertia warning` and `Robot initialized`.
@@ -109,10 +122,10 @@ timeout 5 ros2 run robot_state_publisher robot_state_publisher \
 Don't count parts by eye — they range from a ~30 cm housing to a few-mm screw.
 
 ```bash
-# Part links the LIVE model loaded (what RViz renders), minus world/base frames
+# Robot links in the LIVE model loaded by RViz, excluding only the world frame
 ros2 param get /robot_state_publisher robot_description \
   | grep -oE '<link name="[^"]+"' | sed -E 's/<link name="//;s/"//' \
-  | grep -vE '^(world|base_link)$' | wc -l
+  | grep -vE '^world$' | wc -l
 
 # Confirm every referenced mesh actually exists on disk
 ros2 param get /robot_state_publisher robot_description \
