@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SRDF for the WayBionic arm (full_arm_mar24.urdf).
+
+  The robot name MUST match the <robot name=...> in the URDF, otherwise
+  MoveIt refuses to load the semantic description.
+
+  NOTE ON DOF: this arm has 4 revolute joints (joint1, joint2, joint4) plus one
+  continuous joint (joint3). Four DOF cannot reach an arbitrary 6-DOF pose, so
+  IK is configured position-only in config/kinematics.yaml.
+-->
+<robot name="full-arm-mar24-urdf-and-meshes">
+
+  <!-- ===== Planning group ===== -->
+  <group name="arm">
+    <chain base_link="base_link" tip_link="wrist"/>
+  </group>
+
+  <!-- ===== Named poses ===== -->
+  <group_state name="home" group="arm">
+    <joint name="joint1" value="0"/>
+    <joint name="joint2" value="0"/>
+    <joint name="joint3" value="0"/>
+    <joint name="joint4" value="0"/>
+  </group_state>
+
+  <group_state name="ready" group="arm">
+    <joint name="joint1" value="0"/>
+    <joint name="joint2" value="-0.7854"/>
+    <joint name="joint3" value="0"/>
+    <joint name="joint4" value="0.7854"/>
+  </group_state>
+
+  <!-- ===== World attachment ===== -->
+  <!-- The URDF root link is "world"; anchor it to the planning frame. -->
+  <virtual_joint name="virtual_joint" type="fixed"
+                 parent_frame="world" child_link="world"/>
+
+  <!-- ===== Collision matrix ===== -->
+  <!-- Adjacent links are always in contact at their shared joint. -->
+  <disable_collisions link1="base_link" link2="shoulder" reason="Adjacent"/>
+  <disable_collisions link1="shoulder"  link2="elbow"    reason="Adjacent"/>
+  <disable_collisions link1="elbow"     link2="forearm"  reason="Adjacent"/>
+  <disable_collisions link1="forearm"   link2="wrist"    reason="Adjacent"/>
+
+</robot>
