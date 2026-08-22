@@ -146,11 +146,11 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 3.5
+      Distance: 2.2
       Focal Point:
-        X: 0.8
-        Y: -1.2
-        Z: 1.4
+        X: 0
+        Y: 0.15
+        Z: 0.65
       Name: Current View
       Near Clip Distance: 0.01
       Pitch: 0.4

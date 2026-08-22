@@ -9,7 +9,10 @@
   <joint name="world_to_base" type="fixed">
     <parent link="world"/>
     <child  link="base_link"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <!-- Center the exported base mesh on the world origin and put its lowest
+         point on the Z=0 ground plane. The STL vertices retain the original
+         SolidWorks assembly coordinates. -->
+    <origin xyz="-0.800105 1.643392 -0.749746" rpy="0 0 0"/>
   </joint>
   <link
     name="base_link">
