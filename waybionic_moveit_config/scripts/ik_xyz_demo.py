@@ -347,8 +347,16 @@ class IkXyzDemo(Node):
                     f"z={target.pose.position.z:.3f}"
                 )
                 solution = self._solve_ik(target)
-                if solution is not None:
-                    self._send_joint_positions(solution, move_seconds)
+                if solution is None:
+                    self.get_logger().error(
+                        f"XYZ IK demo aborted at {label}: no IK solution"
+                    )
+                    return
+                if not self._send_joint_positions(solution, move_seconds):
+                    self.get_logger().error(
+                        f"XYZ IK demo aborted at {label}: trajectory failed"
+                    )
+                    return
                 if self._stop.wait(pause):
                     return
 
