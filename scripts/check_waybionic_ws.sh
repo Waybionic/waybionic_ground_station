@@ -16,7 +16,7 @@ echo "2. Checking dependencies with rosdep..."
 rosdep install --from-paths src --ignore-src -r -y
 
 echo "3. Building Waybionic packages..."
-colcon build --packages-select waybionic_description waybionic_bringup
+colcon build
 
 echo "4. Sourcing workspace..."
 source install/setup.bash
