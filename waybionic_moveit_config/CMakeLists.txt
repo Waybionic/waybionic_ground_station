@@ -7,4 +7,9 @@ install(DIRECTORY config launch rviz srdf urdf
   DESTINATION share/${PROJECT_NAME}
 )
 
+install(PROGRAMS
+  scripts/ik_xyz_demo.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()

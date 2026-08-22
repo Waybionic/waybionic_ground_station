@@ -15,6 +15,18 @@ RViz opens with the MotionPlanning display already configured for the `arm`
 group. Use the **Planning** tab: pick a start/goal state (or a named pose),
 press **Plan**, then **Execute**.
 
+For an automatic Cartesian demonstration, run:
+
+```bash
+./scripts/macos.sh run ros2 launch waybionic_moveit_config demo.launch.py auto_demo:=true
+```
+
+The arm first moves to its ready pose, then uses MoveIt's `/compute_ik`
+service to move the wrist along X, Y, and Z. RViz shows a red X axis, green Y
+axis, blue Z axis, and a yellow target. After the sequence, use the goal-state
+interactive marker for manual IK: drag a colored arrow, then click **Plan &
+Execute**.
+
 Headless (no RViz), useful for testing:
 
 ```bash
@@ -79,7 +91,9 @@ existing URDF unchanged and layers `<ros2_control>` on top.
   ```
   Load `urdf/waybionic_moveit.urdf.xacro`, then use the Self-Collisions pane.
 - **Collision geometry is the full visual STL** for every link. It works, but
-  convex hulls or primitives would be considerably faster.
+  the demo strips those placeholder collision meshes before loading MoveIt.
+  The visual STL model is unchanged. Add simplified convex collision meshes
+  before using this configuration for collision-aware planning.
 - **No end effector is defined** — there is no gripper in the URDF.
 - `No 3D sensor plugin(s) defined for octomap updates` is logged as an ERROR at
   startup. It is harmless: there is no depth camera in this setup.

@@ -7,22 +7,19 @@ Brings up, in one shot:
 No physical hardware is required.
 """
 import os
+import xml.etree.ElementTree as ET
 
-import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, RegisterEventHandler
 from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
-from launch.substitutions import (
-    Command,
-    FindExecutable,
-    LaunchConfiguration,
-    PathJoinSubstitution,
-)
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
+import xacro
+import yaml
 
 PKG = "waybionic_moveit_config"
 
@@ -33,8 +30,29 @@ def load_yaml(package_name, file_path):
         return yaml.safe_load(handle)
 
 
+def load_demo_robot_description():
+    """Load the arm while omitting unsafe placeholder collision meshes.
+
+    The SolidWorks STL files are kept for the visual model.  They have not yet
+    been converted into collision-safe geometry, and macOS FCL crashes while
+    constructing BVHs from them.  The IK demo therefore runs without collision
+    geometry until simplified convex collision meshes are supplied.
+    """
+    xacro_path = os.path.join(
+        get_package_share_directory(PKG),
+        "urdf",
+        "waybionic_moveit.urdf.xacro",
+    )
+    root = ET.fromstring(xacro.process_file(xacro_path).toxml())
+    for link in root.findall("link"):
+        for collision in link.findall("collision"):
+            link.remove(collision)
+    return ET.tostring(root, encoding="unicode")
+
+
 def generate_launch_description():
     use_rviz = LaunchConfiguration("use_rviz")
+    auto_demo = LaunchConfiguration("auto_demo")
     rviz_config_file = LaunchConfiguration("rviz_config_file")
 
     declared_arguments = [
@@ -43,6 +61,12 @@ def generate_launch_description():
             default_value="true",
             choices=["true", "false"],
             description="Start RViz with the MotionPlanning display",
+        ),
+        DeclareLaunchArgument(
+            "auto_demo",
+            default_value="false",
+            choices=["true", "false"],
+            description="Automatically demonstrate Cartesian X/Y/Z IK motion",
         ),
         DeclareLaunchArgument(
             "rviz_config_file",
@@ -54,15 +78,7 @@ def generate_launch_description():
     ]
 
     # --- robot_description (URDF + ros2_control) ---
-    robot_description_content = Command(
-        [
-            PathJoinSubstitution([FindExecutable(name="xacro")]),
-            " ",
-            PathJoinSubstitution(
-                [FindPackageShare(PKG), "urdf", "waybionic_moveit.urdf.xacro"]
-            ),
-        ]
-    )
+    robot_description_content = load_demo_robot_description()
     robot_description = {
         "robot_description": ParameterValue(robot_description_content, value_type=str)
     }
@@ -77,7 +93,9 @@ def generate_launch_description():
     robot_description_kinematics = {
         "robot_description_kinematics": load_yaml(PKG, "config/kinematics.yaml")
     }
-    joint_limits = {"robot_description_planning": load_yaml(PKG, "config/joint_limits.yaml")}
+    joint_limits = {
+        "robot_description_planning": load_yaml(PKG, "config/joint_limits.yaml")
+    }
 
     ompl_yaml = load_yaml(PKG, "config/ompl_planning.yaml")
     planning_pipeline_config = {
@@ -169,6 +187,14 @@ def generate_launch_description():
         ],
     )
 
+    ik_xyz_demo_node = Node(
+        package=PKG,
+        executable="ik_xyz_demo.py",
+        name="ik_xyz_demo",
+        output="screen",
+        condition=IfCondition(auto_demo),
+    )
+
     # Load arm_controller only once joint_state_broadcaster is up, so the
     # controller_manager is guaranteed ready.
     delayed_arm_controller = RegisterEventHandler(
@@ -187,5 +213,6 @@ def generate_launch_description():
             delayed_arm_controller,
             move_group_node,
             rviz_node,
+            ik_xyz_demo_node,
         ]
     )
