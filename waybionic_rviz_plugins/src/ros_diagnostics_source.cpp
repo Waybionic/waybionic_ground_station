@@ -71,7 +71,7 @@ DiagnosticMessage toDiagnosticMessage(
 
   const auto normalized_status = mapLevel(status.level);
   std::optional<std::string> alert_message;
-  if (hasContent(status.message) && normalized_status != DiagnosticStatus::Ok) {
+  if (hasContent(status.message)) {
     alert_message = status.message;
   }
 
