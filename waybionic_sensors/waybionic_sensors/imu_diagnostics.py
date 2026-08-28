@@ -39,9 +39,9 @@ class ImuDiagnosticsBuilder:
     """
     Turns the publisher's recent activity into diagnostic statuses.
 
-    ``stale_timeout_sec`` is the sample age past which the heartbeat is reported
-    STALE. It should comfortably exceed one publish period so ordinary jitter
-    does not flap the status.
+    ``stale_timeout_sec`` is the sample age past which heartbeat, rate, and
+    telemetry rows are reported STALE. It should comfortably exceed one publish
+    period so ordinary jitter does not flap the status.
 
     ``expected_rate_hz`` is the configured publish rate, reported alongside the
     measured rate so a reviewer can see shortfalls.
@@ -73,12 +73,16 @@ class ImuDiagnosticsBuilder:
         publish rate observed since the last report, and ``source_description``
         a short description of the active data source.
         """
+        sample_is_stale = self._is_stale(now_ns, last_reading)
+
         array = DiagnosticArray()
         array.header.stamp = to_time_msg(now_ns)
         array.status.append(
             self._heartbeat_status(now_ns, last_reading, source_description)
         )
-        array.status.append(self._rate_status(measured_rate_hz, last_reading is not None))
+        array.status.append(
+            self._rate_status(measured_rate_hz, last_reading is not None, sample_is_stale)
+        )
 
         if last_reading is not None:
             array.status.append(
@@ -87,6 +91,7 @@ class ImuDiagnosticsBuilder:
                     _magnitude(last_reading.angular_velocity),
                     'rad/s',
                     'Gyroscope magnitude',
+                    stale=sample_is_stale,
                 )
             )
             array.status.append(
@@ -95,10 +100,18 @@ class ImuDiagnosticsBuilder:
                     _magnitude(last_reading.linear_acceleration),
                     'm/s^2',
                     'Accelerometer magnitude, including gravity',
+                    stale=sample_is_stale,
                 )
             )
 
         return array
+
+    def _is_stale(self, now_ns: int, last_reading: Optional[ImuReading]) -> bool:
+        """Return True when no sample exists or the newest sample is too old."""
+        if last_reading is None:
+            return True
+        age_sec = max(0.0, (now_ns - last_reading.stamp_ns) / 1e9)
+        return age_sec > self._stale_timeout_sec
 
     def _heartbeat_status(
         self,
@@ -132,16 +145,28 @@ class ImuDiagnosticsBuilder:
 
         return status
 
-    def _rate_status(self, measured_rate_hz: float, has_data: bool) -> DiagnosticStatus:
+    def _rate_status(
+        self,
+        measured_rate_hz: float,
+        has_data: bool,
+        sample_is_stale: bool,
+    ) -> DiagnosticStatus:
         """Build the ``imu.rate`` row comparing measured against expected rate."""
         status = DiagnosticStatus()
         status.name = RATE_NAME
         status.hardware_id = HARDWARE_ID
         status.values = _key_values(f'{measured_rate_hz:.1f}', 'Hz')
 
-        if not has_data:
+        if not has_data or sample_is_stale:
             status.level = DiagnosticStatus.STALE
-            status.message = 'No IMU samples to measure'
+            status.message = (
+                'No IMU samples to measure'
+                if not has_data
+                else (
+                    f'Publishing at {measured_rate_hz:.1f} Hz; '
+                    'IMU samples are stale'
+                )
+            )
             return status
 
         # Anything below about 80% of the configured rate is worth surfacing but
@@ -164,12 +189,18 @@ class ImuDiagnosticsBuilder:
         value: float,
         unit: str,
         message: str,
+        *,
+        stale: bool = False,
     ) -> DiagnosticStatus:
-        """Build an informational telemetry row with an unambiguous unit."""
+        """Build a telemetry row; mark it STALE when the last sample is old."""
         status = DiagnosticStatus()
         status.name = name
         status.hardware_id = HARDWARE_ID
-        status.level = DiagnosticStatus.OK
-        status.message = message
         status.values = _key_values(f'{value:.3f}', unit)
+        if stale:
+            status.level = DiagnosticStatus.STALE
+            status.message = f'{message} (stale)'
+        else:
+            status.level = DiagnosticStatus.OK
+            status.message = message
         return status

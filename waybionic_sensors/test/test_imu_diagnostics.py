@@ -126,6 +126,30 @@ def test_telemetry_rows_report_vector_magnitudes():
     ) < 0.001
 
 
+def test_telemetry_rows_are_ok_when_samples_are_fresh():
+    array = build(make_reading(0.02))
+    assert status_named(array, ANGULAR_VELOCITY_NAME).level == DiagnosticStatus.OK
+    assert status_named(array, LINEAR_ACCELERATION_NAME).level == DiagnosticStatus.OK
+    assert status_named(array, RATE_NAME).level == DiagnosticStatus.OK
+
+
+def test_telemetry_rows_go_stale_when_sample_ages_out():
+    array = build(make_reading(2.5))
+    gyro = status_named(array, ANGULAR_VELOCITY_NAME)
+    accel = status_named(array, LINEAR_ACCELERATION_NAME)
+    assert gyro.level == DiagnosticStatus.STALE
+    assert accel.level == DiagnosticStatus.STALE
+    assert 'stale' in gyro.message
+    assert 'stale' in accel.message
+    assert float(value_of(gyro)) == 3.0
+    assert abs(float(value_of(accel)) - GRAVITY_M_S2) < 0.001
+
+
+def test_rate_row_is_stale_when_sample_is_stale():
+    status = status_named(build(make_reading(2.5), measured_rate_hz=0.0), RATE_NAME)
+    assert status.level == DiagnosticStatus.STALE
+
+
 def test_telemetry_rows_are_omitted_before_any_sample():
     array = build(None)
     assert status_named(array, ANGULAR_VELOCITY_NAME) is None

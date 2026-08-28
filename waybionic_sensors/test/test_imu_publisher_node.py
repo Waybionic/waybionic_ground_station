@@ -16,8 +16,13 @@ from rclpy.parameter import Parameter
 from sensor_msgs.msg import Imu
 from tf2_msgs.msg import TFMessage
 
-from waybionic_sensors.imu_diagnostics import HEARTBEAT_NAME
-from waybionic_sensors.imu_messages import ORIENTATION_UNAVAILABLE
+from waybionic_sensors.imu_diagnostics import (
+    ANGULAR_VELOCITY_NAME,
+    HEARTBEAT_NAME,
+    LINEAR_ACCELERATION_NAME,
+    RATE_NAME,
+)
+from waybionic_sensors.imu_messages import ORIENTATION_UNAVAILABLE, UNKNOWN_COVARIANCE
 from waybionic_sensors.imu_publisher_node import ImuPublisher
 
 RAW_TOPIC = '/test/imu/data_raw'
@@ -129,11 +134,20 @@ def test_raw_messages_mark_orientation_unavailable():
         )
 
 
-def test_raw_messages_carry_non_zero_measurement_covariance():
+def test_raw_messages_carry_unknown_measurement_covariance_by_default():
     with Harness() as collector:
         message = collector.raw[0]
-        assert message.angular_velocity_covariance[0] > 0.0
-        assert message.linear_acceleration_covariance[0] > 0.0
+        assert list(message.angular_velocity_covariance) == UNKNOWN_COVARIANCE
+        assert list(message.linear_acceleration_covariance) == UNKNOWN_COVARIANCE
+
+
+def test_raw_messages_use_stddev_when_explicitly_configured():
+    with Harness(
+        angular_velocity_stddev=0.01, linear_acceleration_stddev=0.05
+    ) as collector:
+        message = collector.raw[0]
+        assert message.angular_velocity_covariance[0] == pytest.approx(0.01 ** 2)
+        assert message.linear_acceleration_covariance[0] == pytest.approx(0.05 ** 2)
 
 
 def test_publish_rate_follows_the_parameter():
@@ -197,6 +211,15 @@ def test_heartbeat_is_ok_while_the_mock_streams():
         assert DiagnosticStatus.OK in levels
 
 
+def _status_levels_by_name(collector):
+    """Return the last diagnostic level seen for each IMU signal name."""
+    latest = {}
+    for array in collector.diagnostics:
+        for status in array.status:
+            latest[status.name] = status.level
+    return latest
+
+
 def test_heartbeat_goes_stale_after_the_mock_stalls():
     with Harness(
         duration_sec=2.5, mock_stall_after_sec=0.4, stale_timeout_sec=0.5
@@ -209,6 +232,30 @@ def test_heartbeat_goes_stale_after_the_mock_stalls():
         ]
         assert DiagnosticStatus.OK in levels
         assert levels[-1] == DiagnosticStatus.STALE
+
+
+def test_stale_stall_marks_heartbeat_rate_and_telemetry():
+    with Harness(
+        duration_sec=2.5, mock_stall_after_sec=0.4, stale_timeout_sec=0.5
+    ) as collector:
+        streaming_ok = False
+        for array in collector.diagnostics:
+            by_name = {status.name: status.level for status in array.status}
+            if (
+                by_name.get(HEARTBEAT_NAME) == DiagnosticStatus.OK
+                and by_name.get(RATE_NAME) == DiagnosticStatus.OK
+                and by_name.get(ANGULAR_VELOCITY_NAME) == DiagnosticStatus.OK
+                and by_name.get(LINEAR_ACCELERATION_NAME) == DiagnosticStatus.OK
+            ):
+                streaming_ok = True
+                break
+        assert streaming_ok
+
+        last = _status_levels_by_name(collector)
+        assert last[HEARTBEAT_NAME] == DiagnosticStatus.STALE
+        assert last[RATE_NAME] == DiagnosticStatus.STALE
+        assert last[ANGULAR_VELOCITY_NAME] == DiagnosticStatus.STALE
+        assert last[LINEAR_ACCELERATION_NAME] == DiagnosticStatus.STALE
 
 
 def test_live_mode_without_hardware_reports_stale_and_publishes_nothing():

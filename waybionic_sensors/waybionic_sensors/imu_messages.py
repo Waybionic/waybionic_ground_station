@@ -6,17 +6,23 @@ fused orientation rules, can be asserted directly in unit tests.
 
 Covariance layout
 -----------------
-Each covariance field is a row-major 3x3 matrix. Only the diagonal is populated:
-the mock axes are modelled as uncorrelated, so the off-diagonal terms are zero
-because they are genuinely believed to be zero, not because they are unknown.
-Real per-axis values should come from the sensor datasheet or from a bench
-characterisation once the hardware is chosen.
+Each covariance field is a row-major 3x3 matrix.
+
+``sensor_msgs/Imu`` treats an all-zero matrix as *unknown*, not as perfect
+certainty. Raw gyroscope and accelerometer covariances therefore stay all-zero
+until electrical supplies a datasheet or calibration value (a positive
+``*_stddev`` parameter). A positive standard deviation yields ``stddev**2`` on
+the diagonal; off-diagonal terms are then zero because the axes are modelled as
+uncorrelated, which is a stated assumption rather than a missing value.
 
 Unavailable orientation
 -----------------------
 ``sensor_msgs/msg/Imu`` defines ``orientation_covariance[0] = -1`` as "this
 message does not contain orientation". The raw topic always sets that, because
 an accelerometer and a gyroscope alone cannot observe absolute heading.
+
+The demo topic may carry a synthetic orientation covariance. That placeholder
+is restricted to demo output and is never copied onto ``data_raw``.
 """
 
 from typing import Tuple
@@ -29,6 +35,9 @@ from waybionic_sensors.imu_reading import ImuReading, Quaternion
 
 ORIENTATION_UNAVAILABLE = -1.0
 """Value placed in ``orientation_covariance[0]`` to mark orientation absent."""
+
+UNKNOWN_COVARIANCE = [0.0] * 9
+"""All-zero 3x3 matrix: ROS ``sensor_msgs/Imu`` encoding for unknown covariance."""
 
 IDENTITY_QUATERNION: Quaternion = (0.0, 0.0, 0.0, 1.0)
 
@@ -48,6 +57,18 @@ def diagonal_covariance(stddev: float) -> list:
     ]
 
 
+def covariance_from_stddev(stddev: float) -> list:
+    """
+    Return ROS covariance for a 3-vector.
+
+    A non-positive ``stddev`` yields :data:`UNKNOWN_COVARIANCE` (all zeros). A
+    positive value yields a diagonal matrix from :func:`diagonal_covariance`.
+    """
+    if float(stddev) <= 0.0:
+        return list(UNKNOWN_COVARIANCE)
+    return diagonal_covariance(stddev)
+
+
 def build_raw_imu_message(
     reading: ImuReading,
     frame_id: str,
@@ -60,6 +81,8 @@ def build_raw_imu_message(
 
     Orientation is always marked unavailable here, even if the reading happens
     to carry one, because this topic is defined as un-fused sensor output.
+    Measurement covariances stay unknown unless a positive standard deviation
+    has been supplied from a datasheet or calibration.
     """
     message = Imu()
     message.header.stamp = to_time_msg(reading.stamp_ns)
@@ -75,12 +98,14 @@ def build_raw_imu_message(
     message.angular_velocity.x = float(reading.angular_velocity[0])
     message.angular_velocity.y = float(reading.angular_velocity[1])
     message.angular_velocity.z = float(reading.angular_velocity[2])
-    message.angular_velocity_covariance = diagonal_covariance(angular_velocity_stddev)
+    message.angular_velocity_covariance = covariance_from_stddev(angular_velocity_stddev)
 
     message.linear_acceleration.x = float(reading.linear_acceleration[0])
     message.linear_acceleration.y = float(reading.linear_acceleration[1])
     message.linear_acceleration.z = float(reading.linear_acceleration[2])
-    message.linear_acceleration_covariance = diagonal_covariance(linear_acceleration_stddev)
+    message.linear_acceleration_covariance = covariance_from_stddev(
+        linear_acceleration_stddev
+    )
 
     return message
 
@@ -99,7 +124,8 @@ def build_demo_orientation_message(
 
     The orientation here is generated for visualisation. It is published on its
     own topic so that nothing subscribing to the raw topic can mistake it for a
-    measured attitude.
+    measured attitude. Synthetic orientation covariance, when used, stays on
+    this topic only.
     """
     message = build_raw_imu_message(
         reading,
@@ -112,7 +138,7 @@ def build_demo_orientation_message(
     message.orientation.y = float(orientation[1])
     message.orientation.z = float(orientation[2])
     message.orientation.w = float(orientation[3])
-    message.orientation_covariance = diagonal_covariance(orientation_stddev)
+    message.orientation_covariance = covariance_from_stddev(orientation_stddev)
 
     return message
 

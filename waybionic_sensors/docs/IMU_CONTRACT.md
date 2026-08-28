@@ -52,19 +52,25 @@ The demo topic exists so RViz has something to show. It is off by default, named
 
 ## Covariance
 
-Each covariance is a row-major 3x3 matrix carrying `stddev^2` on the diagonal.
-Off-diagonal terms are zero because the mock models the axes as uncorrelated,
-which is a stated assumption rather than a missing value.
+`sensor_msgs/Imu` treats an all-zero 3x3 matrix as **unknown**, not as perfect
+certainty. A field that is not present at all uses `covariance[0] = -1`.
+
+Raw gyroscope and accelerometer covariances therefore stay all-zero until
+electrical supplies a datasheet or calibration result. Set
+`angular_velocity_stddev` or `linear_acceleration_stddev` to a positive value
+to populate `stddev^2` on the diagonal. Off-diagonal terms are then zero
+because the axes are modelled as uncorrelated.
+
+`orientation_stddev` is a **demo-topic-only** placeholder. It is never copied
+onto `/waybionic/imu/data_raw`.
 
 | Parameter | Default | Meaning |
 |-----------|---------|---------|
-| `angular_velocity_stddev` | `0.01` | Assumed gyroscope noise, rad/s |
-| `linear_acceleration_stddev` | `0.05` | Assumed accelerometer noise, m/s^2 |
-| `orientation_stddev` | `0.05` | Assumed demo orientation noise, rad |
+| `angular_velocity_stddev` | `0.0` | Unknown gyroscope noise until a datasheet/calibration value is set, rad/s |
+| `linear_acceleration_stddev` | `0.0` | Unknown accelerometer noise until a datasheet/calibration value is set, m/s^2 |
+| `orientation_stddev` | `0.05` | Synthetic demo orientation noise, rad. Not applied to the raw topic. |
 
-These are placeholders chosen to be plausible for a consumer MEMS IMU. They are
-parameters precisely so they can be replaced with datasheet or bench values
-without touching code. See `HARDWARE_INTERFACE.md` question 14.
+See `HARDWARE_INTERFACE.md` question 14.
 
 ## Diagnostics
 
@@ -75,9 +81,9 @@ DiagnosticsPanel renders these without IMU-specific code.
 | Signal | Unit | Levels | Meaning |
 |--------|------|--------|---------|
 | `imu.heartbeat` | `s` | OK, STALE | Age of the newest sample. STALE past `stale_timeout_sec`, or when none ever arrived. |
-| `imu.rate` | `Hz` | OK, WARN, STALE | Measured publish rate. WARN below 80% of the configured rate. |
-| `imu.angular_velocity` | `rad/s` | OK | Gyroscope vector magnitude. |
-| `imu.linear_acceleration` | `m/s^2` | OK | Accelerometer vector magnitude, including gravity. |
+| `imu.rate` | `Hz` | OK, WARN, STALE | Measured publish rate. WARN below 80% of the configured rate while samples are still fresh. STALE when samples have stopped. |
+| `imu.angular_velocity` | `rad/s` | OK, STALE | Gyroscope vector magnitude. STALE when the last sample is older than `stale_timeout_sec`; last value is still shown. |
+| `imu.linear_acceleration` | `m/s^2` | OK, STALE | Accelerometer vector magnitude, including gravity. STALE with the last value when samples stop. |
 
 Published at `diagnostics_rate_hz`, default 2 Hz, which satisfies the
 at-least-1-Hz requirement in issue #4.
@@ -97,8 +103,8 @@ at-least-1-Hz requirement in issue #4.
 | `stale_timeout_sec` | `1.0` | Heartbeat staleness threshold |
 | `publish_demo_orientation` | `false` | Enable the demo topic |
 | `publish_demo_tf` | `false` | Enable the demo TF |
-| `angular_velocity_stddev` | `0.01` | Gyroscope noise assumption |
-| `linear_acceleration_stddev` | `0.05` | Accelerometer noise assumption |
-| `orientation_stddev` | `0.05` | Demo orientation noise assumption |
+| `angular_velocity_stddev` | `0.0` | Gyroscope noise; 0 means unknown covariance |
+| `linear_acceleration_stddev` | `0.0` | Accelerometer noise; 0 means unknown covariance |
+| `orientation_stddev` | `0.05` | Demo-topic-only orientation noise assumption |
 | `mock_stall_after_sec` | `0.0` | Stop the mock to demonstrate stale, 0 disables |
 | `serial_port` | `''` | Reserved for the future driver |

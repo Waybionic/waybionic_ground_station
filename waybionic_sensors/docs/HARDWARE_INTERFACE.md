@@ -53,8 +53,11 @@ guessed serial protocol.
 Until the answers arrive, these stay open and are not guessed anywhere in code:
 
 - Wire protocol and framing. `hardware_reader.py` defines an interface only.
-- Real covariance values. The mock uses placeholder standard deviations exposed
-  as parameters (`angular_velocity_stddev`, `linear_acceleration_stddev`).
+- Real covariance values. Raw/live gyro and accel covariances stay all-zero
+  (ROS "unknown") until question 14 is answered. Set
+  `angular_velocity_stddev` / `linear_acceleration_stddev` to a positive value
+  once a datasheet or calibration result exists. `orientation_stddev` is a
+  demo-topic-only placeholder and is never applied to `data_raw`.
 - Whether a fused orientation will ever be available. Until it is, the raw topic
   marks orientation unavailable.
 - The static transform from `base_link` to `imu_link`. The demo TF is a

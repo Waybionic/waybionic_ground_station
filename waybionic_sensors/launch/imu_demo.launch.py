@@ -3,7 +3,8 @@ Benchtop IMU walkthrough: publisher plus RViz, with demo outputs enabled.
 
 This launch deliberately turns on the synthetic orientation and the rotating TF
 so there is something to look at in RViz. Both are visualisation aids and are
-off by default in imu_publisher.launch.py.
+off by default in imu_publisher.launch.py. The RViz config loads
+``rviz_imu_plugin/Imu`` on ``/waybionic/imu/data_demo``.
 """
 
 from launch import LaunchDescription

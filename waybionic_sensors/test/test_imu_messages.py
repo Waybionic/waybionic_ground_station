@@ -4,9 +4,11 @@ from waybionic_sensors.imu_messages import (
     build_demo_orientation_message,
     build_demo_transform,
     build_raw_imu_message,
+    covariance_from_stddev,
     diagonal_covariance,
     ORIENTATION_UNAVAILABLE,
     to_time_msg,
+    UNKNOWN_COVARIANCE,
 )
 from waybionic_sensors.imu_reading import GRAVITY_M_S2, ImuReading
 
@@ -26,13 +28,13 @@ def make_reading(orientation=None) -> ImuReading:
     )
 
 
-def build_raw():
+def build_raw(angular_velocity_stddev=0.0, linear_acceleration_stddev=0.0):
     """Build the raw message used by most assertions here."""
     return build_raw_imu_message(
         make_reading(),
         'imu_link',
-        angular_velocity_stddev=ANGULAR_STDDEV,
-        linear_acceleration_stddev=LINEAR_STDDEV,
+        angular_velocity_stddev=angular_velocity_stddev,
+        linear_acceleration_stddev=linear_acceleration_stddev,
     )
 
 
@@ -107,16 +109,28 @@ def test_raw_message_copies_linear_acceleration_including_gravity():
     assert message.linear_acceleration.z == GRAVITY_M_S2
 
 
-def test_raw_message_populates_measurement_covariances():
-    message = build_raw()
+def test_covariance_from_stddev_zero_is_unknown():
+    assert covariance_from_stddev(0.0) == UNKNOWN_COVARIANCE
+    assert covariance_from_stddev(-1.0) == UNKNOWN_COVARIANCE
+
+
+def test_covariance_from_stddev_positive_is_diagonal():
+    assert covariance_from_stddev(0.5) == diagonal_covariance(0.5)
+
+
+def test_raw_message_populates_measurement_covariances_when_stddev_is_set():
+    message = build_raw(
+        angular_velocity_stddev=ANGULAR_STDDEV,
+        linear_acceleration_stddev=LINEAR_STDDEV,
+    )
     assert message.angular_velocity_covariance[0] == ANGULAR_STDDEV ** 2
     assert message.linear_acceleration_covariance[0] == LINEAR_STDDEV ** 2
 
 
-def test_raw_message_covariances_are_not_left_at_zero():
+def test_raw_message_uses_unknown_covariance_by_default():
     message = build_raw()
-    assert any(value > 0.0 for value in message.angular_velocity_covariance)
-    assert any(value > 0.0 for value in message.linear_acceleration_covariance)
+    assert list(message.angular_velocity_covariance) == UNKNOWN_COVARIANCE
+    assert list(message.linear_acceleration_covariance) == UNKNOWN_COVARIANCE
 
 
 def test_demo_message_carries_a_usable_orientation():
@@ -125,12 +139,14 @@ def test_demo_message_carries_a_usable_orientation():
         'imu_link',
         (0.0, 0.0, 0.3826834, 0.9238795),
         orientation_stddev=ORIENTATION_STDDEV,
-        angular_velocity_stddev=ANGULAR_STDDEV,
-        linear_acceleration_stddev=LINEAR_STDDEV,
+        angular_velocity_stddev=0.0,
+        linear_acceleration_stddev=0.0,
     )
     assert message.orientation.z == 0.3826834
     assert message.orientation_covariance[0] == ORIENTATION_STDDEV ** 2
     assert message.orientation_covariance[0] != ORIENTATION_UNAVAILABLE
+    assert list(message.angular_velocity_covariance) == UNKNOWN_COVARIANCE
+    assert list(message.linear_acceleration_covariance) == UNKNOWN_COVARIANCE
 
 
 def test_demo_message_keeps_the_same_measurement_fields():

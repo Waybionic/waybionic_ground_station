@@ -38,22 +38,34 @@ Visualization Manager:
         {}
       Update Interval: 0
       Value: true
-    - Class: rviz_default_plugins/Imu
+    - Acceleration properties:
+        Acc. vector alpha: 1
+        Acc. vector color: 204; 51; 204
+        Acc. vector scale: 0.05
+        Derotate acceleration: true
+        Enable acceleration: true
+      Axes properties:
+        Axes scale: 0.2
+        Enable axes: true
+      Box properties:
+        Box alpha: 0.4
+        Box color: 255; 0; 0
+        Enable box: true
+        x_scale: 0.15
+        y_scale: 0.08
+        z_scale: 0.04
+      Class: rviz_imu_plugin/Imu
       Enabled: true
-      Name: IMU acceleration (raw)
+      Name: IMU orientation (demo)
       Topic:
         Depth: 10
         Durability Policy: Volatile
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /waybionic/imu/data_raw
+        Value: /waybionic/imu/data_demo
       Value: true
-      alpha: 1
-      color: 204; 51; 204
-      history_length: 1
-      queue_size: 10
-      scale: 0.1
+      fixed_frame_orientation: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48

@@ -119,10 +119,11 @@ class ImuPublisher(Node):
         # otherwise imply the raw sensor knows its own attitude.
         self.declare_parameter('publish_demo_orientation', False)
         self.declare_parameter('publish_demo_tf', False)
-        # Placeholder noise figures. Replace with datasheet or bench values once
-        # the sensor is chosen; see docs/HARDWARE_INTERFACE.md.
-        self.declare_parameter('angular_velocity_stddev', 0.01)
-        self.declare_parameter('linear_acceleration_stddev', 0.05)
+        # 0.0 means unknown covariance (ROS all-zero matrix). Do not invent
+        # datasheet values; electrical must supply them. See HARDWARE_INTERFACE.md.
+        self.declare_parameter('angular_velocity_stddev', 0.0)
+        self.declare_parameter('linear_acceleration_stddev', 0.0)
+        # Demo topic only: synthetic placeholder, never copied onto data_raw.
         self.declare_parameter('orientation_stddev', 0.05)
         self.declare_parameter('mock_stall_after_sec', 0.0)
         self.declare_parameter('serial_port', '')

@@ -36,6 +36,11 @@ ros2 launch waybionic_sensors imu_demo.launch.py
 This enables the synthetic orientation and the rotating demo TF so there is
 something to look at. Both are off in `imu_publisher.launch.py`.
 
+The demo config uses `rviz_imu_plugin/Imu` (Jazzy does not ship
+`rviz_default_plugins/Imu`) and points the orientation display at
+`/waybionic/imu/data_demo`, not `/waybionic/imu/data_raw`. `rosdep install`
+from this package pulls `rviz_imu_plugin` automatically.
+
 ## Heartbeat in the diagnostics panel
 
 ```bash
@@ -53,8 +58,10 @@ stale without unplugging anything:
 ros2 launch waybionic_sensors imu_publisher.launch.py mock_stall_after_sec:=5.0
 ```
 
-The mock stops after five seconds, and the row turns STALE once the sample age
-passes `stale_timeout_sec`.
+The mock stops after five seconds. Once the sample age passes
+`stale_timeout_sec`, `imu.heartbeat`, `imu.rate`, `imu.angular_velocity`, and
+`imu.linear_acceleration` all report STALE. The last gyro and accel magnitudes
+remain visible so the panel does not look like the sensor is still healthy.
 
 ## What is measured and what is generated
 

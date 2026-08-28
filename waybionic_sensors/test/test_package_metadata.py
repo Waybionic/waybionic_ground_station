@@ -68,6 +68,18 @@ def test_package_declares_diagnostics_dependency():
     assert 'diagnostic_msgs' in read('package.xml')
 
 
+def test_package_declares_rviz_imu_plugin_dependency():
+    assert '<exec_depend>rviz_imu_plugin</exec_depend>' in read('package.xml')
+
+
+def test_demo_rviz_uses_rviz_imu_plugin_on_the_demo_topic():
+    config = read('config/imu_demo.rviz')
+    assert 'rviz_imu_plugin/Imu' in config
+    assert 'rviz_default_plugins/Imu' not in config
+    assert '/waybionic/imu/data_demo' in config
+    assert '/waybionic/imu/data_raw' not in config
+
+
 def test_demo_outputs_default_to_off():
     # A default-on rotating TF would imply the raw sensor knows its attitude.
     launch_source = read('launch/imu_publisher.launch.py')

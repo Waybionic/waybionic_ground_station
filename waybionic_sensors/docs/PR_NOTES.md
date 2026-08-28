@@ -13,16 +13,28 @@ CI, `CONTRIBUTING.md`, and other files that landed in the meantime. Only the
 `waybionic_sensors` directory was carried across, and the publisher was then
 rewritten against the review feedback.
 
+## PR #11 review fixes
+
+Requested changes on the open IMU PR, without expanding scope:
+
+| Request | Fix |
+|---------|-----|
+| Jazzy has no `rviz_default_plugins/Imu` | `imu_demo.rviz` uses `rviz_imu_plugin/Imu`; `package.xml` and `robostack.yaml` declare the dependency so `rosdep install` / macOS setup pull it |
+| Display subscribed to `data_raw` | Orientation display now subscribes to `/waybionic/imu/data_demo` |
+| Stale gyro/accel left OK | When samples age out, `imu.angular_velocity` and `imu.linear_acceleration` report STALE (last values still shown). Rate also goes STALE, not just WARN |
+| No regression for the stall path | `test_stale_stall_marks_heartbeat_rate_and_telemetry` plus unit tests on the diagnostics builder |
+| Placeholder stddev implied confidence | Raw/live gyro and accel covariances default to all-zero (ROS unknown). Positive `*_stddev` is opt-in for datasheet/calibration. Synthetic orientation covariance stays on the demo topic only |
+
 ## What changed relative to the old IMU branch
 
 | Old behaviour | Problem | Now |
 |---------------|---------|-----|
 | Synthetic quaternion published on `data_raw` | Presented generated data as a measurement | Raw topic sets `orientation_covariance[0] = -1`; synthetic orientation moved to `/waybionic/imu/data_demo`, off by default |
 | Rotating TF always broadcast | Implied the sensor knows its own attitude | `publish_demo_tf`, default false; enabled only by `imu_demo.launch.py` |
-| All covariances left at zero | Zero means "perfectly certain" to a consumer | Diagonal covariances from parameterised standard deviations, documented as placeholders |
+| Covariances all zero | Zero was misread as "perfectly certain" | Raw gyro/accel now stay unknown (all-zero) until a datasheet stddev is supplied; demo orientation covariance is synthetic and demo-only |
 | No `/diagnostics` output | Panel could not show IMU health | `imu.heartbeat` plus rate and telemetry rows at 2 Hz |
 | One 120-line node doing everything | Serial work would have to be bolted into the publisher | Six modules: reading type, mock source, hardware boundary, message builder, diagnostics builder, node |
-| Three metadata tests | No behavioural coverage | 83 tests including a runtime suite that spins the node |
+| Three metadata tests | No behavioural coverage | 92 tests including a runtime suite that spins the node |
 | `serial_port` parameter with no reader | Suggested a driver existed | Documented boundary plus a stub that makes the missing driver visible in diagnostics |
 
 ## Raw versus fused orientation
@@ -43,19 +55,19 @@ a real fusion source exists.
 
 ## Covariance
 
-Row-major 3x3 with `stddev^2` on the diagonal. Off-diagonals are zero because
-the mock models the axes as uncorrelated, which is a stated assumption rather
-than an unknown left blank.
+`sensor_msgs/Imu` treats an all-zero matrix as unknown, not as perfect
+certainty. Raw gyroscope and accelerometer covariances therefore default to
+all zeros. A positive `angular_velocity_stddev` or
+`linear_acceleration_stddev` fills `stddev^2` on the diagonal once electrical
+supplies a datasheet or calibration value.
 
 | Parameter | Default | Meaning |
 |-----------|---------|---------|
-| `angular_velocity_stddev` | `0.01` | rad/s |
-| `linear_acceleration_stddev` | `0.05` | m/s^2 |
+| `angular_velocity_stddev` | `0.0` | rad/s; 0 = unknown |
+| `linear_acceleration_stddev` | `0.0` | m/s^2; 0 = unknown |
 | `orientation_stddev` | `0.05` | rad, demo topic only |
 
-Plausible consumer-MEMS placeholders, exposed as parameters so datasheet values
-can replace them without a code change. Tracked as question 14 in
-`docs/HARDWARE_INTERFACE.md`.
+Tracked as question 14 in `docs/HARDWARE_INTERFACE.md`.
 
 ## Module boundaries
 
@@ -105,9 +117,9 @@ header:
 orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
 orientation_covariance: [-1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 angular_velocity: {x: -0.0736..., y: -0.0383..., z: -0.1473...}
-angular_velocity_covariance: [0.0001, 0.0, 0.0, 0.0, 0.0001, 0.0, 0.0, 0.0, 0.0001]
+angular_velocity_covariance: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 linear_acceleration: {x: -0.0368..., y: -0.0153..., z: 9.80665}
-linear_acceleration_covariance: [0.0025, ...]
+linear_acceleration_covariance: [0.0, ...]
 ```
 
 `ros2 topic hz /diagnostics` gives `average rate: 2.000`, comfortably above the
@@ -148,22 +160,23 @@ colcon test --packages-select waybionic_sensors
 colcon test-result --all --verbose
 ```
 
-83 tests, 0 failures.
+92 tests, 0 failures.
 
 | Suite | Count | Covers |
 |-------|-------|--------|
-| `test_imu_messages.py` | 15 | Frame, timestamp, orientation-unavailable marker, covariance diagonals and cross terms, demo message, demo TF |
-| `test_imu_diagnostics.py` | 16 | Heartbeat OK/STALE, custom timeout, never-received, age units, rate WARN, telemetry units, absence of roll/pitch/yaw |
-| `test_imu_publisher_node.py` | 14 | Runtime: rate follows the parameter, monotonic timestamps, frame IDs, demo defaults off, demo TF on request, heartbeat OK then STALE, live mode without hardware |
+| `test_imu_messages.py` | 17 | Frame, timestamp, orientation-unavailable marker, unknown vs datasheet covariance, demo message, demo TF |
+| `test_imu_diagnostics.py` | 19 | Heartbeat OK/STALE, custom timeout, never-received, age units, rate WARN/STALE, telemetry OK then STALE, absence of roll/pitch/yaw |
+| `test_imu_publisher_node.py` | 16 | Runtime: rate, timestamps, frame IDs, demo defaults, unknown covariance, heartbeat OK then STALE, stall marks all four signals, live mode without hardware |
 | `test_mock_source.py` | 13 | Determinism, gravity, amplitude bounds, stall behaviour, quaternion normalisation |
 | `test_hardware_reader.py` | 9 | Interface surface, stub behaviour, a custom reader satisfying the boundary |
-| `test_package_metadata.py` | 14 | Module separation, node delegation, launch defaults, docs, entry point, no invented protocol |
+| `test_package_metadata.py` | 16 | Module separation, node delegation, launch defaults, `rviz_imu_plugin` on `data_demo`, docs, entry point, no invented protocol |
 | `test_flake8.py`, `test_pep257.py` | 2 | Style and docstrings |
 
 ## Known limitations
 
 - No physical IMU driver. Blocked on `docs/HARDWARE_INTERFACE.md`.
-- Covariance values are documented placeholders, not measured noise.
+- Covariance values on the raw topic stay unknown until electrical answers
+  question 14. `orientation_stddev` is a demo-topic-only placeholder.
 - The demo orientation and demo TF are visualisation aids, not estimates.
 - The `base_link` to `imu_link` offset in the demo TF is a placeholder 0.1 m, not
   a mounting claim.
