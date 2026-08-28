@@ -72,6 +72,7 @@ install(
 )
 
 if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_cmake_lint_cmake REQUIRED)
   find_package(ament_cmake_pytest REQUIRED)
   find_package(ament_cmake_xmllint REQUIRED)
@@ -84,6 +85,23 @@ if(BUILD_TESTING)
     test/test_package_metadata.py
     TIMEOUT 60
   )
+
+  # Built from sources directly so the stress test links neither Qt nor RViz and
+  # can run headless.
+  ament_add_gtest(test_ros_diagnostics_source
+    test/test_ros_diagnostics_source.cpp
+    src/ros_diagnostics_source.cpp
+    TIMEOUT 300
+  )
+  if(TARGET test_ros_diagnostics_source)
+    target_include_directories(test_ros_diagnostics_source PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    ament_target_dependencies(test_ros_diagnostics_source
+      diagnostic_msgs
+      rclcpp
+    )
+  endif()
 endif()
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
