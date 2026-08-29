@@ -134,7 +134,7 @@ Close and reopen Terminal. If `mamba --version` still fails, reinstall
 Miniforge and reopen Terminal again:
 
 ```bash
-brew install --cask miniforge
+brew reinstall --cask miniforge
 ```
 
 #### Setup cannot solve the environment or reports missing ROS tools
