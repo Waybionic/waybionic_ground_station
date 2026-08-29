@@ -24,6 +24,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'mock_drives = waybionic_control.node.mock_drives:main',
+            'can_host = waybionic_control.node.can_host:main'
         ],
     },
 )
