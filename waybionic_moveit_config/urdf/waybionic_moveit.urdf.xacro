@@ -1,0 +1,68 @@
+<?xml version="1.0"?>
+<!--
+  Wraps the existing waybionic_description URDF and layers a ros2_control
+  block on top of it. The base URDF is included unmodified, so nothing in
+  waybionic_description has to change to support MoveIt.
+
+  Mock hardware (mock_components/GenericSystem) echoes commands back as state,
+  which lets you plan AND execute in RViz with no physical arm attached.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro"
+       name="full-arm-mar24-urdf-and-meshes">
+
+  <xacro:include filename="$(find waybionic_description)/urdf/full_arm_mar24.urdf"/>
+
+  <ros2_control name="WaybionicMockSystem" type="system">
+    <hardware>
+      <plugin>mock_components/GenericSystem</plugin>
+      <param name="calculate_dynamics">true</param>
+    </hardware>
+
+    <joint name="joint1">
+      <command_interface name="position">
+        <param name="min">-1.5708</param>
+        <param name="max">1.5708</param>
+      </command_interface>
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <joint name="joint2">
+      <command_interface name="position">
+        <param name="min">-1.5708</param>
+        <param name="max">1.5708</param>
+      </command_interface>
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <!-- joint3 is now revolute (was continuous). Bounds must match the URDF
+         or the mock hardware accepts commands the model forbids. -->
+    <joint name="joint3">
+      <command_interface name="position">
+        <param name="min">-1.5708</param>
+        <param name="max">1.5708</param>
+      </command_interface>
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <joint name="joint4">
+      <command_interface name="position">
+        <param name="min">-1.5708</param>
+        <param name="max">1.5708</param>
+      </command_interface>
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity"/>
+    </joint>
+  </ros2_control>
+
+</robot>

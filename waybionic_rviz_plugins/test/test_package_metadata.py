@@ -16,6 +16,22 @@ def test_plugin_xml_registers_diagnostics_panel():
     assert 'DiagnosticsPanel' in plugin_xml
 
 
+def test_plugin_xml_registers_ik_demo_panel():
+    plugin_xml = read_text('plugin_description.xml')
+    assert 'waybionic_rviz_plugins/IkDemoPanel' in plugin_xml
+    assert 'waybionic_rviz_plugins::IkDemoPanel' in plugin_xml
+
+
+def test_ik_demo_panel_build_metadata_is_complete():
+    cmake = read_text('CMakeLists.txt')
+    package_xml = read_text('package.xml')
+
+    assert 'include/waybionic_rviz_plugins/ik_demo_panel.hpp' in cmake
+    assert 'src/ik_demo_panel.cpp' in cmake
+    assert 'find_package(std_srvs REQUIRED)' in cmake
+    assert '<depend>std_srvs</depend>' in package_xml
+
+
 def test_plugin_xml_does_not_register_surgeon_panel():
     plugin_xml = read_text('plugin_description.xml')
     assert 'SurgeonCameraPanel' not in plugin_xml

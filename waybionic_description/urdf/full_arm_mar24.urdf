@@ -1,0 +1,337 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="full-arm-mar24-urdf-and-meshes">
+  <!-- Added dummy link so that KDL/intertial values are not ignored (KDL warning when running ros2 launch waybionic_bringup display.launch.py gone)-->
+  <link name="world"/>
+  <joint name="world_to_base" type="fixed">
+    <parent link="world"/>
+    <child  link="base_link"/>
+    <!-- Center the exported base mesh on the world origin and put its lowest
+         point on the Z=0 ground plane. The STL vertices retain the original
+         SolidWorks assembly coordinates. -->
+    <origin xyz="-0.800105 1.643392 -0.749746" rpy="0 0 0"/>
+  </joint>
+  <link
+    name="base_link">
+    <inertial>
+      <origin
+        xyz="0.8001 -1.6434 0.96967"
+        rpy="0 0 0" />
+      <mass
+        value="3.0245" />
+      <inertia
+        ixx="0.13578"
+        ixy="-3.996E-13"
+        ixz="-3.2341E-12"
+        iyy="0.12646"
+        iyz="-2.0376E-12"
+        izz="0.13578" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://waybionic_description/meshes/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <!-- Lightweight primitives keep collision checking fast and avoid asking
+         FCL to build a BVH from the high-resolution visual mesh. -->
+    <collision name="base_body_collision">
+      <origin
+        xyz="0.800105 -1.643392 1.00172"
+        rpy="0 0 0" />
+      <geometry>
+        <box size="0.54 0.47 0.51" />
+      </geometry>
+    </collision>
+    <collision name="base_top_collision">
+      <origin
+        xyz="0.800105 -1.643392 1.2862"
+        rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.078" length="0.070" />
+      </geometry>
+    </collision>
+  </link>
+  <link
+    name="shoulder">
+    <inertial>
+      <origin
+        xyz="0.018803 -0.01167 8.6599E-06"
+        rpy="0 0 0" />
+      <mass
+        value="0.73934" />
+      <inertia
+        ixx="0.0018615"
+        ixy="-0.0003921"
+        ixz="-1.0719E-07"
+        iyy="0.0015793"
+        iyz="9.4857E-08"
+        izz="0.0021357" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://waybionic_description/meshes/shoulder.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision name="shoulder_body_collision">
+      <origin
+        xyz="0.034 0.035 0"
+        rpy="0 0 0" />
+      <geometry>
+        <box size="0.21 0.235 0.14" />
+      </geometry>
+    </collision>
+    <collision name="shoulder_shaft_collision">
+      <origin
+        xyz="0 -0.107 0"
+        rpy="1.5708 0 0" />
+      <geometry>
+        <cylinder radius="0.040" length="0.070" />
+      </geometry>
+    </collision>
+  </link>
+  <!-- INTERIM LIMITS - UNVERIFIED. Mechanical has not supplied per-joint
+       travel, effort or velocity data. +/-1.5708 rad (+/-90 deg) is a
+       deliberately conservative placeholder chosen as a strict subset of the
+       exporter's original +/-3.14, NOT a measurement. effort and velocity are
+       likewise unverified exporter defaults - they were emitted identically
+       for every joint, which no real mechanism produces. Replace all of these
+       once mechanical confirms real values. Until then, do not treat the
+       workspace RViz displays as actually reachable. -->
+  <joint
+    name="joint1"
+    type="revolute">
+    <origin
+      xyz="0.8001 -1.6434 1.3903"
+      rpy="1.5708 0 -1.1999" />
+    <parent
+      link="base_link" />
+    <child
+      link="shoulder" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="100"
+      velocity="1" />
+  </joint>
+  <link
+    name="elbow">
+    <inertial>
+      <origin
+        xyz="-0.10994 0.2063 0.060408"
+        rpy="0 0 0" />
+      <mass
+        value="1.6571" />
+      <inertia
+        ixx="0.0040049"
+        ixy="9.7618E-05"
+        ixz="2.4251E-05"
+        iyy="0.0020313"
+        iyz="-0.00043052"
+        izz="0.0038422" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://waybionic_description/meshes/elbow.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision name="elbow_proximal_collision">
+      <origin
+        xyz="-0.071 0.044 0.021"
+        rpy="0 0 0" />
+      <geometry>
+        <box size="0.24 0.19 0.14" />
+      </geometry>
+    </collision>
+    <collision name="elbow_link_collision">
+      <origin
+        xyz="-0.140 0.268 0.070"
+        rpy="0 0 0" />
+      <geometry>
+        <box size="0.11 0.34 0.17" />
+      </geometry>
+    </collision>
+    <collision name="elbow_distal_collision">
+      <origin
+        xyz="-0.140 0.440 0.105"
+        rpy="0 0 0" />
+      <geometry>
+        <box size="0.11 0.14 0.115" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="joint2"
+    type="revolute">
+    <origin
+      xyz="0.10285 0.058129 0.011405"
+      rpy="2.8569 0 -3.1416" />
+    <parent
+      link="shoulder" />
+    <child
+      link="elbow" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="100"
+      velocity="1" />
+  </joint>
+  <link
+    name="forearm">
+    <inertial>
+      <origin
+        xyz="1.3362E-05 0.054674 0.026205"
+        rpy="0 0 0" />
+      <mass
+        value="1.1398" />
+      <inertia
+        ixx="0.0017411"
+        ixy="4.9339E-08"
+        ixz="3.3313E-07"
+        iyy="0.0015113"
+        iyz="2.8369E-05"
+        izz="0.0013902" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://waybionic_description/meshes/forearm.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision name="forearm_proximal_collision">
+      <origin
+        xyz="0 0.0175 0.0655"
+        rpy="0 0 0" />
+      <geometry>
+        <box size="0.10 0.135 0.245" />
+      </geometry>
+    </collision>
+    <collision name="forearm_link_collision">
+      <origin
+        xyz="0 0.145 0.0132"
+        rpy="0 0 0" />
+      <geometry>
+        <box size="0.09 0.17 0.12" />
+      </geometry>
+    </collision>
+  </link>
+  <!-- Was type="continuous" (unbounded). The slip ring that could justify
+       endless rotation is in the baseToShoulder assembly, not here: joint3 is
+       the belt-driven elbow-to-forearm joint and is physically bounded. -->
+  <joint
+    name="joint3"
+    type="revolute">
+    <origin
+      xyz="0.00017 0.47022 0.10797"
+      rpy="0.84036 -1.4494 -0.82578" />
+    <parent
+      link="elbow" />
+    <child
+      link="forearm" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="100"
+      velocity="1" />
+  </joint>
+  <link
+    name="wrist">
+    <inertial>
+      <origin
+        xyz="0.00079289 0.048601 1.9326E-06"
+        rpy="0 0 0" />
+      <mass
+        value="0.36714" />
+      <inertia
+        ixx="0.00049207"
+        ixy="-1.7262E-06"
+        ixz="-1.746E-08"
+        iyy="0.00050366"
+        iyz="6.9145E-09"
+        izz="0.00034393" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://waybionic_description/meshes/wrist.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <collision name="wrist_collision">
+      <origin
+        xyz="0 0.054 0"
+        rpy="0 0 0" />
+      <geometry>
+        <box size="0.10 0.115 0.12" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="joint4"
+    type="revolute">
+    <origin
+      xyz="0 0.210000000000002 0.0132179574096474"
+      rpy="0 0 0" />
+    <parent
+      link="forearm" />
+    <child
+      link="wrist" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.5708"
+      upper="1.5708"
+      effort="100"
+      velocity="1" />
+  </joint>
+</robot>

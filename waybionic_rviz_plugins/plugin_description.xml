@@ -7,4 +7,12 @@
       WayBionic ground station diagnostics, telemetry, and alerts panel for RViz2.
     </description>
   </class>
+  <class
+    name="waybionic_rviz_plugins/IkDemoPanel"
+    type="waybionic_rviz_plugins::IkDemoPanel"
+    base_class_type="rviz_common::Panel">
+    <description>
+      Controls the WayBionic Cartesian XYZ inverse-kinematics demonstration.
+    </description>
+  </class>
 </library>
