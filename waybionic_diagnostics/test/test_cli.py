@@ -107,3 +107,30 @@ def test_diagnostics_callback_updates_state():
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
+
+def test_main_forwards_ros_args_to_rclpy_init(monkeypatch):
+    from waybionic_diagnostics import cli
+
+    captured = {}
+
+    class FakeNode:
+        def __init__(self, topic):
+            captured['topic'] = topic
+
+        def destroy_node(self):
+            captured['destroyed'] = True
+
+    monkeypatch.setattr(cli, 'DiagnosticsCliNode', FakeNode)
+    monkeypatch.setattr(cli, 'run_snapshot', lambda node: captured.setdefault('snapshot', node))
+    monkeypatch.setattr(cli.rclpy, 'init', lambda args=None: captured.setdefault('init_args', args))
+    monkeypatch.setattr(cli.rclpy, 'ok', lambda: False)
+    monkeypatch.setattr(cli.rclpy, 'shutdown', lambda: captured.setdefault('shutdown', True))
+
+    cli.main(['--topic', '/diagnostics_custom', '--ros-args', '-r', '__node:=renamed'])
+
+    assert captured['topic'] == '/diagnostics_custom'
+    assert captured['init_args'] == ['--ros-args', '-r', '__node:=renamed']
+    assert 'snapshot' in captured
+    assert captured['destroyed'] is True
+    assert 'shutdown' not in captured
