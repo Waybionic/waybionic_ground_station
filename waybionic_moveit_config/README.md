@@ -1,7 +1,6 @@
 # waybionic_moveit_config
 
-MoveIt 2 configuration for the WayBionic arm, running the 2026-09-05
-mechanical drop as delivered (`full-arm-smaller.urdf`).
+MoveIt 2 configuration for the WayBionic arm (`full_arm_smaller.urdf`).
 
 ## Quickstart
 
@@ -62,28 +61,24 @@ ros2 launch waybionic_moveit_config demo.launch.py use_rviz:=false
 On macOS, prefix the Ubuntu `ros2 launch` examples above with
 `./scripts/macos.sh run`.
 
-## Important: what this config can and cannot do
+## Important: this arm has 5 DOF, and they are all near-vertical
 
-It runs the export **unmodified**, which sets hard limits on what MoveIt can offer.
+`joint1` through `joint5` are all revolute — five degrees of freedom total.
+**A 5-DOF arm cannot reach an arbitrary 6-DOF pose**, so IK is position-only
+(`position_only_ik: true` in `config/kinematics.yaml`) and the RViz config sets
+`MoveIt_Allow_Approximate_IK: true`.
 
-**No Cartesian IK.** KDL builds a solver by walking a serial chain, and the
-export has none — all twelve parts parent straight to the root link
-`Full Arm Smaller`. So the planning group in `srdf/waybionic.srdf` is a **joint
-list**, `config/kinematics.yaml` declares no solver, and `/compute_ik` is
-unavailable. Joint-space goals work; pose goals and the RViz interactive marker
-do not. `scripts/ik_xyz_demo.py` and its test are skipped for this reason.
+Worse, on the 2026-09-05 model every one of those five axes lands within 1.6° of
+vertical, so **the tool tip cannot change height**: it sweeps a 0.51 m × 0.56 m
+plane at z ≈ 0.695 m with 6.8 mm of vertical travel. The Z leg of the XYZ demo
+has no solution, and `test_replay_runs_xyz_ik_and_controller` is skipped because
+of it. The cause is missing source data — the export defines a CAD rotation axis
+only for the three coaxial tool-column parts and none for the shoulder or elbow
+bend. See the header of `waybionic_description/urdf/full_arm_smaller.urdf`.
 
-**Almost nothing can move.** Five of the six joints the export declares movable
-are prismatic with `lower=0 upper=0` — zero stroke. `nema23` (J2's motor) is the
-only one with any range. `m3` is M3 bolt stock the exporter mistook for a joint.
-
-**Self-collision is largely disabled.** The export's root link carries the whole
-assembly as one mesh — the same 218,740 triangles the twelve part meshes already
-provide — so the root permanently contacts every part. All twelve pairs are
-disabled in the SRDF; without that, nothing plans at all.
-
-None of these are config problems. See `docs/model_import_runbook.md` for the
-data mechanical needs to supply.
+This config plans over the **articulated** model, not the raw export. The export
+parents all twelve parts to the assembly root, so no chain group can be built on
+it at all.
 
 ## Joint limits are UNVERIFIED
 

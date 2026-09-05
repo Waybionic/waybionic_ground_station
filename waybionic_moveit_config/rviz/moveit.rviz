@@ -131,24 +131,16 @@ Visualization Manager:
   - Class: rviz_default_plugins/TF
     Enabled: false
     Frames:
-      3rd joint bend:
-        Value: true
       All Enabled: true
-      Full Arm Smaller:
+      base_link:
         Value: true
-      Stepper:
+      bevel_gear:
         Value: true
-      Sweep:
+      elbow:
         Value: true
-      bevel gear:
+      forearm:
         Value: true
-      biomed lock mech:
-        Value: true
-      bottom base assembly:
-        Value: true
-      diff-assembly-pulley:
-        Value: true
-      heatSetInsert:
+      heat_set_insert:
         Value: true
       m3:
         Value: true
@@ -156,26 +148,31 @@ Visualization Manager:
         Value: true
       outerring:
         Value: true
-      shouldersplit:
+      shoulder:
+        Value: true
+      stepper:
+        Value: true
+      sweep:
+        Value: true
+      tool:
         Value: true
       world:
         Value: true
     Name: TF
     Tree:
       world:
-        Full Arm Smaller:
-          3rd joint bend: {}
-          Stepper: {}
-          Sweep: {}
-          bevel gear: {}
-          biomed lock mech: {}
-          bottom base assembly: {}
-          diff-assembly-pulley: {}
-          heatSetInsert: {}
-          m3: {}
-          nema23: {}
-          outerring: {}
-          shouldersplit: {}
+        base_link:
+          sweep:
+            heat_set_insert: {}
+            m3: {}
+            nema23: {}
+            outerring: {}
+            shoulder:
+              elbow:
+                forearm:
+                  tool:
+                    bevel_gear: {}
+            stepper: {}
     Value: false
   Enabled: true
   Global Options:

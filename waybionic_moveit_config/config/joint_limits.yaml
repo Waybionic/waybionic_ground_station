@@ -1,42 +1,38 @@
-# Velocity/acceleration for the six joints the export declares movable.
+# Velocity/effort values mirror the <limit> tags in full_arm_smaller.urdf.
+# The URDF declares no acceleration limits, so conservative values are set here
+# for time-optimal trajectory parameterization.
 #
-# UNVERIFIED. Mechanical has supplied no velocity, acceleration or effort data.
-# The identical 1.0 values below are placeholders, not measurements.
-#
-# Note these are the only limits MoveIt gets from us. The TRAVEL limits come
-# from the export itself, where five of the six joints are pinned at
-# lower=0 upper=0 - zero stroke - and nema23 is unbounded. So most of these
-# joints cannot move at all, regardless of what is written here.
+# UNVERIFIED. Mechanical has not supplied velocity, acceleration or effort data
+# for any joint. The identical 1.0 values below are placeholders, not
+# measurements - no real mechanism has five joints with matching dynamics.
+# Replace them once mechanical confirms real figures. The travel limits in
+# full_arm_smaller.urdf carry the same caveat - as does the CHAIN ORDER
+# itself, which the 2026-09-05 export did not specify.
 default_velocity_scaling_factor: 0.5
 default_acceleration_scaling_factor: 0.5
 
 joint_limits:
-  "3rd joint bend":
+  joint1:
     has_velocity_limits: true
     max_velocity: 1.0
     has_acceleration_limits: true
     max_acceleration: 1.0
-  "m3":
+  joint2:
     has_velocity_limits: true
     max_velocity: 1.0
     has_acceleration_limits: true
     max_acceleration: 1.0
-  "diff-assembly-pulley":
+  joint3:
     has_velocity_limits: true
     max_velocity: 1.0
     has_acceleration_limits: true
     max_acceleration: 1.0
-  "nema23":
+  joint4:
     has_velocity_limits: true
     max_velocity: 1.0
     has_acceleration_limits: true
     max_acceleration: 1.0
-  "bevel gear":
-    has_velocity_limits: true
-    max_velocity: 1.0
-    has_acceleration_limits: true
-    max_acceleration: 1.0
-  "biomed lock mech":
+  joint5:
     has_velocity_limits: true
     max_velocity: 1.0
     has_acceleration_limits: true

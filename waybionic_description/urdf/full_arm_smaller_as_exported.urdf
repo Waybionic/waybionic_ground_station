@@ -1,0 +1,336 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  WayBionic arm - "full-arm-smaller", mechanical drop of 2026-09-05.
+  AS EXPORTED. This file asserts nothing that mechanical did not supply.
+
+  Companion to full_arm_smaller.urdf. That file is a best-effort ARTICULATED
+  model and contains inferred values; this one contains none, and is the
+  reference for "what did we actually receive".
+
+  WHAT THIS FILE CONTAINS
+  =======================
+  Every part, at exactly the transform the export gives it, joined with FIXED
+  joints. Meshes, inertials and colours are byte-for-byte the supplied values.
+  The rendered result reproduces the export to within 1.2e-05 m.
+
+  THIS ARM HAS ZERO DEGREES OF FREEDOM, AND THAT IS THE POINT.
+  It cannot be planned with, and no MoveIt group can be built on it. The
+  2026-09-05 export contains no kinematic information to build one from:
+
+    - no parent/child relationships - all 12 parts hang off the assembly root
+    - no joint pivot locations
+    - no shoulder or elbow rotation axis (only the three coaxial tool-column
+      parts carry a CAD Axis_* frame)
+    - no travel, effort or velocity limits (5 sliders pinned at zero stroke,
+      1 unbounded rotary)
+
+  Producing a movable arm therefore requires GUESSING all of the above. This
+  file declines to guess. Use it to check the geometry, and to show mechanical
+  precisely what the delivery does and does not contain.
+
+  THE THREE THINGS THAT ARE NOT VERBATIM
+  ======================================
+  1. The root aggregate mesh "Full Arm Smaller.STL" is not referenced. It is
+     the entire assembly as one 218740-triangle body, and the 12 part meshes
+     sum to exactly 218740 - it is the same surfaces a second time. Dropping it
+     is arithmetic, not judgement: the 12 parts reproduce its bounding box to
+     5.7e-05 m. Nothing is lost.
+  2. Spaces in names became underscores. "3rd joint bend" would otherwise
+     become a tf frame id containing spaces.
+  3. base_link is a geometry-free frame placed so the assembly is centred on
+     the origin in XY with its lowest point on z=0, because the STL vertices
+     carry raw SolidWorks assembly coordinates ~1.5 m from the origin. This is
+     presentation only - it moves every part by the same rigid transform and
+     changes no relative geometry. base_link is a FRAME, not a claim about
+     which component is the base.
+-->
+<robot name="full-arm-smaller-as-exported">
+
+  <link name="world"/>
+  <joint name="world_to_base" type="fixed">
+    <parent link="world"/>
+    <child link="base_link"/>
+    <origin xyz="-0.726494 1.3411 -0.841727" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Frame only. The export's root link carried the duplicate aggregate mesh;
+       here it carries nothing, so the 12 parts are the only geometry. -->
+  <link name="base_link"/>
+
+  <link name="stepper">
+    <inertial>
+      <origin xyz="0.64313 0.8998 1.2835" rpy="0 0 0"/>
+      <mass value="0.45705"/>
+      <inertia ixx="0.00037382" ixy="1.0743E-07" ixz="9.7233E-06" iyy="0.0005475" iyz="2.5993E-07" izz="0.00038353"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/stepper.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1"/>
+      </material>
+    </visual>
+  </link>
+  <!-- Fixed: the export states where this part sits, not how it moves. -->
+  <joint name="stepper_mount" type="fixed">
+    <origin xyz="-0.53484 -1.9431 0.096726" rpy="1.5708 0 1.5708"/>
+    <parent link="base_link"/>
+    <child link="stepper"/>
+  </joint>
+
+  <link name="sweep">
+    <inertial>
+      <origin xyz="0.67017 0.93495 1.162" rpy="0 0 0"/>
+      <mass value="0.26997"/>
+      <inertia ixx="6.5782E-05" ixy="1.1446E-05" ixz="-2.7313E-09" iyy="8.2674E-05" iyz="-2.7407E-09" izz="8.8451E-05"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/sweep.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1"/>
+      </material>
+    </visual>
+  </link>
+  <!-- Fixed: the export states where this part sits, not how it moves. -->
+  <joint name="sweep_mount" type="fixed">
+    <origin xyz="1.1976 -0.26086 2.2583" rpy="-3.14159 0 -1.0472"/>
+    <parent link="base_link"/>
+    <child link="sweep"/>
+  </joint>
+
+  <link name="third_joint_bend">
+    <inertial>
+      <origin xyz="0.067761 0.038489 -2.4671E-07" rpy="0 0 0"/>
+      <mass value="0.17976"/>
+      <inertia ixx="0.00030235" ixy="-7.4527E-05" ixz="-9.963E-10" iyy="0.00037544" iyz="-5.4808E-10" izz="0.00040872"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/third_joint_bend.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+  </link>
+  <!-- Fixed: the export states where this part sits, not how it moves. -->
+  <joint name="third_joint_bend_mount" type="fixed">
+    <origin xyz="0.67987 -1.3186 1.167" rpy="3.14159 -1.5429 2.5621"/>
+    <parent link="base_link"/>
+    <child link="third_joint_bend"/>
+  </joint>
+
+  <link name="heat_set_insert">
+    <inertial>
+      <origin xyz="0.02981 -0.0047361 0.051895" rpy="0 0 0"/>
+      <mass value="0.00011545"/>
+      <inertia ixx="3.5199E-10" ixy="6.9974E-13" ixz="-5.5737E-14" iyy="3.5037E-10" iyz="-2.0825E-14" izz="3.5866E-10"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/heat_set_insert.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.79216 0.81961 0.93333 1"/>
+      </material>
+    </visual>
+  </link>
+  <!-- Fixed: the export states where this part sits, not how it moves. -->
+  <joint name="heat_set_insert_mount" type="fixed">
+    <origin xyz="0.77873 -1.3217 0.95953" rpy="0 0 2.2045"/>
+    <parent link="base_link"/>
+    <child link="heat_set_insert"/>
+  </joint>
+
+  <link name="m3">
+    <inertial>
+      <origin xyz="-0.060837 -0.13261 -0.0085639" rpy="0 0 0"/>
+      <mass value="0.00029834"/>
+      <inertia ixx="1.068E-08" ixy="-2.7807E-09" ixz="-8.3275E-11" iyy="4.0957E-09" iyz="-2.2672E-10" izz="9.2816E-09"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/m3.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1"/>
+      </material>
+    </visual>
+  </link>
+  <!-- Fixed: the export states where this part sits, not how it moves. -->
+  <joint name="m3_mount" type="fixed">
+    <origin xyz="0.7363 -1.3023 1.2105" rpy="1.5411 -0.3505 1.0015"/>
+    <parent link="base_link"/>
+    <child link="m3"/>
+  </joint>
+
+  <link name="shouldersplit">
+    <inertial>
+      <origin xyz="0.81651 0.88324 1.3436" rpy="0 0 0"/>
+      <mass value="0.19918"/>
+      <inertia ixx="0.00044506" ixy="0.00011586" ixz="-4.3871E-08" iyy="0.00034473" iyz="-4.7682E-08" izz="0.00051429"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/shouldersplit.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1"/>
+      </material>
+    </visual>
+  </link>
+  <!-- Fixed: the export states where this part sits, not how it moves. -->
+  <joint name="shouldersplit_mount" type="fixed">
+    <origin xyz="0.33749 -0.16581 -0.080808" rpy="0 -1.1744 2.5621"/>
+    <parent link="base_link"/>
+    <child link="shouldersplit"/>
+  </joint>
+
+  <link name="bottom_base_assembly">
+    <inertial>
+      <origin xyz="0.71633 0.93281 1.367" rpy="0 0 0"/>
+      <mass value="1.2997"/>
+      <inertia ixx="0.0036992" ixy="-4.7879E-13" ixz="3.5114E-10" iyy="0.007244" iyz="-1.5577E-05" izz="0.0037785"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/bottom_base_assembly.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1"/>
+      </material>
+    </visual>
+  </link>
+  <!-- Fixed: the export states where this part sits, not how it moves. -->
+  <joint name="bottom_base_assembly_mount" type="fixed">
+    <origin xyz="0.062391 0.086339 -0.061769" rpy="1.5708 0 0"/>
+    <parent link="base_link"/>
+    <child link="bottom_base_assembly"/>
+  </joint>
+
+  <link name="diff_assembly_pulley">
+    <inertial>
+      <origin xyz="0.68569 0.11834 1.3207" rpy="0 0 0"/>
+      <mass value="0.86499"/>
+      <inertia ixx="0.00088427" ixy="3.205E-05" ixz="-3.2838E-07" iyy="0.00094021" iyz="-2.3104E-07" izz="0.0010963"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/diff_assembly_pulley.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1"/>
+      </material>
+    </visual>
+  </link>
+  <!-- Fixed: the export states where this part sits, not how it moves. -->
+  <joint name="diff_assembly_pulley_mount" type="fixed">
+    <origin xyz="-0.77443 -1.1236 1.2554" rpy="1.5429 0 0.99133"/>
+    <parent link="base_link"/>
+    <child link="diff_assembly_pulley"/>
+  </joint>
+
+  <link name="nema23">
+    <inertial>
+      <origin xyz="0.10166 0.070102 0.0018368" rpy="0 0 0"/>
+      <mass value="1.0827"/>
+      <inertia ixx="0.0014882" ixy="-0.00023608" ixz="-5.2655E-05" iyy="0.0014342" iyz="-4.7983E-05" izz="0.0015666"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/nema23.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1"/>
+      </material>
+    </visual>
+  </link>
+  <!-- Fixed: the export states where this part sits, not how it moves. -->
+  <joint name="nema23_mount" type="fixed">
+    <origin xyz="0.77873 -1.2817 0.98853" rpy="1.5708 0 -2.1503"/>
+    <parent link="base_link"/>
+    <child link="nema23"/>
+  </joint>
+
+  <link name="outerring">
+    <inertial>
+      <origin xyz="-0.0080961 0.027364 -0.026357" rpy="0 0 0"/>
+      <mass value="0.29137"/>
+      <inertia ixx="0.00023769" ixy="1.4814E-05" ixz="1.3088E-12" iyy="0.00026688" iyz="-1.3596E-12" izz="0.00036814"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/outerring.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.79216 0.81961 0.93333 1"/>
+      </material>
+    </visual>
+  </link>
+  <!-- Fixed: the export states where this part sits, not how it moves. -->
+  <joint name="outerring_mount" type="fixed">
+    <origin xyz="0.71579 -1.3779 1.0572" rpy="1.5708 -0.39637 -0.57947"/>
+    <parent link="base_link"/>
+    <child link="outerring"/>
+  </joint>
+
+  <link name="bevel_gear">
+    <inertial>
+      <origin xyz="-0.023575 -0.00015203 0.00068011" rpy="0 0 0"/>
+      <mass value="0.042026"/>
+      <inertia ixx="9.9802E-06" ixy="-4.8977E-09" ixz="4.0392E-09" iyy="5.3605E-06" iyz="-8.7432E-07" izz="6.9939E-06"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/bevel_gear.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="1 0.94902 0.9098 1"/>
+      </material>
+    </visual>
+  </link>
+  <!-- Fixed: the export states where this part sits, not how it moves. -->
+  <joint name="bevel_gear_mount" type="fixed">
+    <origin xyz="0.70184 -1.2696 1.4868" rpy="2.7387 1.5637 -0.57947"/>
+    <parent link="base_link"/>
+    <child link="bevel_gear"/>
+  </joint>
+
+  <link name="biomed_lock_mech">
+    <inertial>
+      <origin xyz="-0.00050981 0.024759 -7.0336E-05" rpy="0 0 0"/>
+      <mass value="0.053298"/>
+      <inertia ixx="1.3634E-05" ixy="-8.735E-22" ixz="-1.8806E-08" iyy="1.8285E-05" iyz="1.1597E-07" izz="1.3317E-05"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/biomed_lock_mech.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1"/>
+      </material>
+    </visual>
+  </link>
+  <!-- Fixed: the export states where this part sits, not how it moves. -->
+  <joint name="biomed_lock_mech_mount" type="fixed">
+    <origin xyz="0.70162 -1.2695 1.5109" rpy="1.568 -0.0065256 -0.17655"/>
+    <parent link="base_link"/>
+    <child link="biomed_lock_mech"/>
+  </joint>
+
+</robot>

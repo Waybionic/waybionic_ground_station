@@ -178,13 +178,15 @@ class TestIkDemoRuntime(unittest.TestCase):
         self.fail('mock controllers did not become active')
 
     @unittest.skip(
-        'The workspace runs the 2026-09-05 export as delivered, and that '
-        'export has no kinematic chain - all twelve parts parent to the '
-        'assembly root. KDL cannot build an IK solver without a chain, so '
-        'config/kinematics.yaml declares none and /compute_ik is unavailable. '
-        'This demo is Cartesian and needs IK. Five of the six joints are also '
-        'pinned at zero stroke by the export. Un-skip once mechanical supplies '
-        'a link hierarchy and joint axes.'
+        'Blocked on mechanical, not on this code. The 2026-09-05 export '
+        'supplies a CAD rotation axis only for the three tool-column bodies '
+        '(3rd joint bend, diff-assembly-pulley, biomed lock mech), which are '
+        'mutually coaxial, and defines no shoulder or elbow bend axis at all. '
+        'Every axis in full_arm_smaller.urdf therefore lands within 1.6 deg of '
+        'vertical, so the tool tip sweeps a plane at z=0.695 m with 6.8 mm of '
+        'vertical travel. This test steps 40 mm along Z, which has no IK '
+        'solution and cannot have one until mechanical supplies the bend axes. '
+        'Un-skip once they do - the X and Y legs already pass.'
     )
     def test_replay_runs_xyz_ik_and_controller(self):
         """Run one replay and prove all targets completed on mock hardware."""

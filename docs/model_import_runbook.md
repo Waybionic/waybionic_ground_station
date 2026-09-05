@@ -10,6 +10,8 @@ They all live in `waybionic_description/urdf/`:
 
 | File | Role | Meshes |
 |------|------|--------|
+| `full_arm_smaller_as_exported.urdf` | **Launch default.** The 2026-09-05 drop as supplied: every part fixed at its given transform. **Zero DOF** — asserts nothing mechanical did not send. | 12 STLs in `meshes/` |
+| `full_arm_smaller.urdf` | The articulated model — a 6-link serial chain `base_link → sweep → shoulder → elbow → forearm → tool`, five revolute joints. **Chain order, joint pivots, two axes and all limits are inferred, not supplied.** This is what MoveIt loads. | same 12 STLs |
 | `full-arm-smaller.urdf` | **The mechanical drop, run unmodified** — byte-identical to `sep_05_latest_info/full-arm-smaller.urdf`, CRLF and all. Root link `Full Arm Smaller`; 13 links including the aggregate; 6 zero-travel joints. See the note below on how its meshes resolve. | 13 STLs under the delivered names |
 | `waybionic_placeholder.urdf` | Fallback / test asset. A primitive box + cylinder on one revolute joint. | **None** — pure URDF primitives, always loads |
 
@@ -56,6 +58,17 @@ The separate RViz config exists because the export has no `world` or `base_link`
 Expect one warning on startup, which is harmless and comes from the export
 itself: `kdl_parser` reports that the root link has an inertia. Our derived
 models add a dummy `world` link to avoid it.
+
+### Which one should I open?
+
+- Planning, IK, or anything that has to move → `full_arm_smaller.urdf`. Read its
+  header first: it lists line by line what is measured and what is inferred.
+- Checking the geometry arrived intact, in a file that behaves itself →
+  `full_arm_smaller_as_exported.urdf` (the launch default).
+- Showing mechanical exactly what they sent → `full-arm-smaller.urdf`.
+
+All three render identically at the home pose. They differ only in what they
+claim about motion.
 
 ## 1. Import files
 
@@ -112,12 +125,12 @@ last verified run.
 Needs `liburdfdom-tools` (`sudo apt install liburdfdom-tools`).
 
 ```bash
-check_urdf install/waybionic_description/share/waybionic_description/urdf/full-arm-smaller.urdf
+check_urdf install/waybionic_description/share/waybionic_description/urdf/full_arm_smaller.urdf
 check_urdf install/waybionic_description/share/waybionic_description/urdf/waybionic_placeholder.urdf
 ```
 
 **Expect:** `Successfully Parsed XML` and, for the arm, **`root Link: world`** with
-root link **`Full Arm Smaller`** with all twelve parts as its direct children. The `world`
+the chain `world → base_link → sweep → shoulder → elbow → forearm → tool`. The `world`
 root is what stops KDL from ignoring `base_link`'s inertia — if the root prints as
 `base_link`, the massless `world` root link is missing.
 
@@ -150,7 +163,7 @@ fi
 
 kdl_log="$(mktemp)"
 "$rsp_executable" \
-  install/waybionic_description/share/waybionic_description/urdf/full-arm-smaller.urdf \
+  install/waybionic_description/share/waybionic_description/urdf/full_arm_smaller.urdf \
   >"$kdl_log" 2>&1 &
 kdl_pid=$!
 sleep 5

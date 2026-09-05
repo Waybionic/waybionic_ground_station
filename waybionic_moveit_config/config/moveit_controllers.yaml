@@ -10,9 +10,8 @@ moveit_simple_controller_manager:
     action_ns: follow_joint_trajectory
     default: true
     joints:
-      - "3rd joint bend"
-      - "m3"
-      - "diff-assembly-pulley"
-      - "nema23"
-      - "bevel gear"
-      - "biomed lock mech"
+      - joint1
+      - joint2
+      - joint3
+      - joint4
+      - joint5

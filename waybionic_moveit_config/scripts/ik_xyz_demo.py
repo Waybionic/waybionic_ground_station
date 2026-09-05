@@ -23,17 +23,13 @@ from visualization_msgs.msg import Marker, MarkerArray
 
 
 # Tip of the "arm" planning group; must match tip_link in srdf/waybionic.srdf.
-# The export has no dedicated tool frame; this is its most distal link.
-TIP_LINK = "biomed lock mech"
+# Was "wrist" on the retired mar24 arm.
+TIP_LINK = "tool"
 
-# The six joints the 2026-09-05 export declares movable. Must stay in step
-# with the "home" group_state in srdf/waybionic.srdf.
-JOINT_NAMES = [
-    "3rd joint bend", "m3", "diff-assembly-pulley",
-    "nema23", "bevel gear", "biomed lock mech",
-]
-# Only nema23 has any travel in the export; the rest are pinned at 0/0.
-READY_POSITION = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+# Five joints since the 2026-09-05 mechanical drop. READY_POSITION must stay in
+# step with the "ready" group_state in srdf/waybionic.srdf.
+JOINT_NAMES = ["joint1", "joint2", "joint3", "joint4", "joint5"]
+READY_POSITION = [0.0, -0.7854, 0.0, 0.7854, 0.0]
 
 
 class IkXyzDemo(Node):

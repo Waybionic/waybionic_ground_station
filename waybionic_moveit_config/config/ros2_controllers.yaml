@@ -14,12 +14,11 @@ controller_manager:
 arm_controller:
   ros__parameters:
     joints:
-      - "3rd joint bend"
-      - "m3"
-      - "diff-assembly-pulley"
-      - "nema23"
-      - "bevel gear"
-      - "biomed lock mech"
+      - joint1
+      - joint2
+      - joint3
+      - joint4
+      - joint5
     command_interfaces:
       - position
     state_interfaces:

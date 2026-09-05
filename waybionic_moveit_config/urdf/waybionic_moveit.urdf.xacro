@@ -1,37 +1,31 @@
 <?xml version="1.0"?>
 <!--
-  Wraps the mechanical drop's own URDF and layers a ros2_control block on top.
-  The base URDF is included unmodified - urdf/full-arm-smaller.urdf is the
-  2026-09-05 export byte-for-byte.
+  Wraps waybionic_description's articulated model and layers a ros2_control
+  block on top of it. The base URDF is included unmodified, so nothing in
+  waybionic_description has to change to support MoveIt.
 
   Mock hardware (mock_components/GenericSystem) echoes commands back as state,
-  so the stack runs with no physical arm attached.
+  which lets you plan AND execute in RViz with no physical arm attached.
 
-  WHAT YOU GET, AND WHAT YOU DO NOT
-  =================================
-  The joints below are the six the export declares movable, under their own
-  names. Five are prismatic with lower=0 upper=0 - zero stroke - and the sixth
-  (nema23) is continuous with no limits at all. So the stack loads, the
-  controller spins up and state is published, but nothing can travel.
+  This loads full_arm_smaller.urdf, NOT the raw export. The export
+  (urdf/full-arm-smaller.urdf) has no kinematic chain, so no planning group can
+  be built on it - see that file's header for the full list of what is measured
+  and what is inferred here.
 
-  There is also no Cartesian IK. KDL needs a serial chain and the export has
-  none: all twelve parts parent straight to the assembly root. The planning
-  group in the SRDF is therefore a JOINT LIST, and config/kinematics.yaml
-  declares no solver. Joint-space goals work; pose goals and the interactive
-  marker do not.
-
-  Both of those are properties of the delivery, not of this file. See
-  docs/model_import_runbook.md for what mechanical needs to send.
+  Five joints. Command bounds must match the <limit> tags in
+  full_arm_smaller.urdf, or the mock hardware accepts commands the model
+  forbids. Both are the same UNVERIFIED +/-1.5708 placeholder, pending real
+  travel figures from mechanical.
 -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro"
        name="full-arm-smaller">
 
-  <xacro:include filename="$(find waybionic_description)/urdf/full-arm-smaller.urdf"/>
+  <xacro:include filename="$(find waybionic_description)/urdf/full_arm_smaller.urdf"/>
 
-  <!-- Zero-stroke joints, mirroring the export's own <limit> tags. Bounds have
-       to match the URDF or the mock hardware accepts commands the model
-       forbids. -->
-  <xacro:macro name="export_joint" params="name lo:=0 hi:=0">
+  <!-- One identical block per joint; xacro keeps the five in step.
+       lo/hi rather than min/max: those shadow xacro built-ins and emit
+       "redefining global symbol" warnings on every expansion. -->
+  <xacro:macro name="waybionic_joint" params="name lo:=-1.5708 hi:=1.5708">
     <joint name="${name}">
       <command_interface name="position">
         <param name="min">${lo}</param>
@@ -50,17 +44,11 @@
       <param name="calculate_dynamics">true</param>
     </hardware>
 
-    <!-- Names carry spaces because the export's components do. -->
-    <xacro:export_joint name="3rd joint bend"/>
-    <xacro:export_joint name="diff-assembly-pulley"/>
-    <xacro:export_joint name="bevel gear"/>
-    <xacro:export_joint name="biomed lock mech"/>
-    <!-- m3 is M3 bolt stock the exporter mistook for a prismatic joint. It is
-         declared movable in the export, so it is carried here for fidelity. -->
-    <xacro:export_joint name="m3"/>
-    <!-- The one genuinely rotary joint: J2's motor. Continuous in the export,
-         so it is given a full turn rather than zero stroke. -->
-    <xacro:export_joint name="nema23" lo="-3.14159" hi="3.14159"/>
+    <xacro:waybionic_joint name="joint1"/>
+    <xacro:waybionic_joint name="joint2"/>
+    <xacro:waybionic_joint name="joint3"/>
+    <xacro:waybionic_joint name="joint4"/>
+    <xacro:waybionic_joint name="joint5"/>
   </ros2_control>
 
 </robot>

@@ -1,85 +1,74 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  SRDF for the WayBionic arm, running the 2026-09-05 mechanical drop as
-  delivered (waybionic_description/urdf/full-arm-smaller.urdf).
+  SRDF for the WayBionic arm (full_arm_smaller.urdf, mechanical drop 2026-09-05).
 
   The robot name MUST match the <robot name=...> in the URDF, otherwise
   MoveIt refuses to load the semantic description.
 
-  WHY THIS IS A JOINT LIST AND NOT A CHAIN
-  ========================================
-  A <chain base_link=... tip_link=.../> needs a serial path to walk. The export
-  has none: all twelve parts parent directly to the root link "Full Arm
-  Smaller", so the model is a star. Listing the joints explicitly is the only
-  group definition the delivery supports.
+  This plans over the ARTICULATED model, not the raw export. The export
+  (waybionic_description/urdf/full-arm-smaller.urdf) parents all twelve parts
+  to the assembly root, so it has no chain for a group to walk.
 
-  Consequences you will see in RViz:
-    - joint-space goals work; the sliders move the model
-    - pose goals and the interactive marker do NOT - there is no IK solver,
-      because KDL cannot build one without a chain (config/kinematics.yaml)
-    - five of the six joints have lower=0 upper=0 in the export, so they will
-      not travel. nema23 is the only one with any range.
+  NOTE ON DOF: this arm has 5 revolute joints (joint1..joint5). Five DOF cannot
+  reach an arbitrary 6-DOF pose, so IK stays position-only - see
+  config/kinematics.yaml.
 
-  None of that is a limitation of this file. It is what the export contains.
-  Link and joint names carry spaces because the CAD components do.
+  UNVERIFIED - READ THIS BEFORE TRUSTING ANY PLAN. The supplied export gave no
+  parent/child relationships at all. The chain below was inferred, not
+  delivered, as were the joint pivots, joint1's axis and every limit. See the
+  header of waybionic_description/urdf/full_arm_smaller.urdf for exactly what
+  is measured and what is assumed.
 -->
 <robot name="full-arm-smaller">
 
   <!-- ===== Planning group ===== -->
-  <!-- Every joint the export declares movable, in the order the export lists
-       them. m3 is included for fidelity even though it is bolt stock. -->
   <group name="arm">
-    <joint name="3rd joint bend"/>
-    <joint name="m3"/>
-    <joint name="diff-assembly-pulley"/>
-    <joint name="nema23"/>
-    <joint name="bevel gear"/>
-    <joint name="biomed lock mech"/>
+    <chain base_link="base_link" tip_link="tool"/>
   </group>
 
   <!-- ===== Named poses ===== -->
-  <!-- Only nema23 has any travel, so "home" and "ready" can differ in that one
-       joint alone. Every other value is pinned at the export's 0/0 limits. -->
   <group_state name="home" group="arm">
-    <joint name="3rd joint bend" value="0"/>
-    <joint name="m3" value="0"/>
-    <joint name="diff-assembly-pulley" value="0"/>
-    <joint name="nema23" value="0"/>
-    <joint name="bevel gear" value="0"/>
-    <joint name="biomed lock mech" value="0"/>
+    <joint name="joint1" value="0"/>
+    <joint name="joint2" value="0"/>
+    <joint name="joint3" value="0"/>
+    <joint name="joint4" value="0"/>
+    <joint name="joint5" value="0"/>
   </group_state>
 
-  <group_state name="quarter_turn" group="arm">
-    <joint name="3rd joint bend" value="0"/>
-    <joint name="m3" value="0"/>
-    <joint name="diff-assembly-pulley" value="0"/>
-    <joint name="nema23" value="1.5708"/>
-    <joint name="bevel gear" value="0"/>
-    <joint name="biomed lock mech" value="0"/>
+  <group_state name="ready" group="arm">
+    <joint name="joint1" value="0"/>
+    <joint name="joint2" value="-0.7854"/>
+    <joint name="joint3" value="0"/>
+    <joint name="joint4" value="0.7854"/>
+    <joint name="joint5" value="0"/>
   </group_state>
 
   <!-- ===== World attachment ===== -->
-  <!-- The export has no world or base_link; its root is the assembly itself. -->
+  <!-- The URDF root link is "world"; anchor it to the planning frame. -->
   <virtual_joint name="virtual_joint" type="fixed"
-                 parent_frame="world" child_link="Full Arm Smaller"/>
+                 parent_frame="world" child_link="world"/>
 
   <!-- ===== Collision matrix =====
-       The export gives every link a full-mesh collision, and its root link
-       carries the WHOLE assembly as one mesh - the same 218740 triangles the
-       twelve part meshes already provide. So the root is in permanent contact
-       with all twelve parts, and they must all be disabled or nothing can be
-       planned. This is the duplicated-geometry defect, not a real collision. -->
-  <disable_collisions link1="Full Arm Smaller" link2="Stepper" reason="Never"/>
-  <disable_collisions link1="Full Arm Smaller" link2="Sweep" reason="Never"/>
-  <disable_collisions link1="Full Arm Smaller" link2="3rd joint bend" reason="Never"/>
-  <disable_collisions link1="Full Arm Smaller" link2="heatSetInsert" reason="Never"/>
-  <disable_collisions link1="Full Arm Smaller" link2="m3" reason="Never"/>
-  <disable_collisions link1="Full Arm Smaller" link2="shouldersplit" reason="Never"/>
-  <disable_collisions link1="Full Arm Smaller" link2="bottom base assembly" reason="Never"/>
-  <disable_collisions link1="Full Arm Smaller" link2="diff-assembly-pulley" reason="Never"/>
-  <disable_collisions link1="Full Arm Smaller" link2="nema23" reason="Never"/>
-  <disable_collisions link1="Full Arm Smaller" link2="outerring" reason="Never"/>
-  <disable_collisions link1="Full Arm Smaller" link2="bevel gear" reason="Never"/>
-  <disable_collisions link1="Full Arm Smaller" link2="biomed lock mech" reason="Never"/>
+       Only the six structural links carry collision geometry; the drive and
+       fastener links are visual-only, so the checker ignores them and they
+       need no entries here.
+
+       Pairs below were not guessed - they come from an oriented-bounding-box
+       separating-axis test over the URDF's collision boxes. -->
+
+  <!-- Adjacent links are always in contact at their shared joint. -->
+  <disable_collisions link1="base_link" link2="sweep"    reason="Adjacent"/>
+  <disable_collisions link1="sweep"     link2="shoulder" reason="Adjacent"/>
+  <disable_collisions link1="shoulder"  link2="elbow"    reason="Adjacent"/>
+  <disable_collisions link1="elbow"     link2="forearm"  reason="Adjacent"/>
+  <disable_collisions link1="forearm"   link2="tool"     reason="Adjacent"/>
+
+  <!-- Not adjacent, but colliding in 417 of 441 sampled (joint2, joint3) pairs
+       - 95% of the range, including BOTH named states above. The elbow nests
+       inside the sweep gearbox's bounding box, so this is mostly an artifact
+       of approximating both with coarse boxes. Without this entry, planning
+       cannot even start from home. Revisit if mechanical supplies a tighter
+       sweep housing, or if these two links get finer collision geometry. -->
+  <disable_collisions link1="sweep"     link2="elbow"    reason="Never"/>
 
 </robot>

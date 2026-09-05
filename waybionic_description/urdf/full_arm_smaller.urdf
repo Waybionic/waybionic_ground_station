@@ -1,0 +1,416 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  WayBionic arm - "full-arm-smaller", mechanical drop of 2026-09-05.
+
+  REBUILT FROM, NOT EQUAL TO, THE SUPPLIED EXPORT.
+  sep_05_latest_info/full-arm-smaller.urdf could not be used as delivered:
+
+    * Every one of its 12 links parented straight to the assembly root, so it
+      described a star, not a chain. MoveIt has nothing to traverse in a star.
+    * Its root link carried the WHOLE assembly as one mesh - 218740 triangles -
+      while the same 218740 triangles were repeated across the 12 part meshes.
+      Every surface was drawn twice and every pair of links was in permanent
+      self-collision.
+    * Its joints were exporter noise: 6 fixed, 5 prismatic pinned at
+      lower=0 upper=0 effort=0 velocity=0, 1 unbounded continuous. No usable DOF.
+    * Link, joint and mesh names contained spaces, which become tf frame names.
+    * Worst of all, four of its six link frames sat at the ASSEMBLY ORIGIN,
+      1.5-1.8 m away from the part they belonged to. The model renders
+      correctly at the zero pose, so the fault is invisible until something
+      moves - then each joint swings its child through a metre-plus arc.
+
+  What was done: the root aggregate mesh was dropped, the 12 part meshes were
+  re-parented into the serial chain below, and every link frame was moved onto
+  its physical pivot with the visual/collision/inertial origins compensated so
+  the rendered pose is unchanged. Dropping the aggregate is loss-free - the 12
+  parts, placed by their original transforms, reproduce the root mesh bounding
+  box to 5.7e-05 m, and this file reproduces the export's rendered pose at the
+  zero configuration to within 1.3e-05 m.
+
+  WHAT IS MEASURED vs WHAT IS ASSUMED
+  ===================================
+  MEASURED - taken unchanged from the export, trustworthy:
+    - every link's mesh, colour and inertial block
+    - each link's POSE relative to the assembly root, given exactly by the
+      export, which makes the re-parenting arithmetic exact:
+      T_parent->child = T_root->parent^-1 . T_root->child
+    - the axes of joint2..joint5, from the CAD Axis_* coordinate systems
+
+  ASSUMED - INTERIM, UNVERIFIED, pending mechanical:
+    - THE CHAIN ORDER ITSELF. Inferred from measured height up the assembly
+      and from the CSV "SW Components" column. Mechanical has not stated which
+      part drives which. If the order is wrong, so is every reachability and
+      collision result computed from this file.
+    - joint1's axis. No Axis_Sweep exists in the export; the world vertical is
+      used, which is what a base yaw turns about.
+    - EVERY JOINT'S PIVOT LOCATION. The export supplies an axis DIRECTION for
+      some joints but never a point on it, so each pivot is estimated as the
+      midpoint of the closest approach between the parent's and the child's
+      geometry - where the two parts physically meet. Measured interface gaps
+      were 0.0001-0.067 m, so the parts do touch there, but the exact pivot is
+      mechanical's to confirm.
+    - EVERY LIMIT. +/-1.5708 rad (+/-90 deg) is a deliberately conservative
+      placeholder, not a measurement, chosen to match the convention the
+      retired full_arm_mar24.urdf used. effort/velocity likewise.
+    - which structural link each fastener/drive part bolts to (see below).
+
+  KNOWN DEGENERACY - THE ARM CANNOT CHANGE ITS TIP HEIGHT
+  ======================================================
+  All five axes below come out within 1.6 degrees of vertical, and joint3,
+  joint4 and joint5 are mutually coaxial. That is not a modelling slip, it is
+  what the export contains: the only parts carrying a CAD Axis_* frame are
+  3rd joint bend, diff-assembly-pulley and biomed lock mech, which are the
+  three bodies of the tool column, all spinning about that column. The export
+  contains NO shoulder or elbow BEND axis anywhere - the CSV never defines one.
+
+  Consequence, measured over 200000 sampled configurations: the tool tip
+  sweeps a 0.51 m x 0.56 m PLANE at z = 0.695 m, with 6.8 mm of total vertical
+  travel. The arm is a SCARA, not a 5-DOF arm. Anything needing a change of
+  height - including the Z leg of scripts/ik_xyz_demo.py, which steps 40 mm -
+  has no solution and never will until mechanical supplies the bend axes.
+
+  Fixing this needs data, not modelling: ask mechanical for the rotation axis
+  of each joint, as a SolidWorks reference axis on the part that rotates.
+
+  Until mechanical confirms the above, do NOT read the RViz workspace as a
+  statement of what this arm can actually reach.
+-->
+<robot name="full-arm-smaller">
+
+  <!-- Dummy root so KDL does not discard base_link's inertia. -->
+  <link name="world"/>
+  <joint name="world_to_base" type="fixed">
+    <parent link="world"/>
+    <child link="base_link"/>
+    <!-- The STL vertices keep their original SolidWorks assembly coordinates.
+         This centres the assembly on the world origin in XY and drops its
+         lowest point onto the z=0 ground plane. -->
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+  <link name="base_link">
+    <inertial>
+      <origin xyz="0.052227 0.0604364 0.0293091" rpy="1.5708 0 0"/>
+      <mass value="1.2997"/>
+      <inertia ixx="0.0036992" ixy="-4.7879E-13" ixz="3.5114E-10" iyy="0.007244" iyz="-1.5577E-05" izz="0.0037785"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.664103 1.42744 -0.903496" rpy="1.5708 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/bottom_base_assembly.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1"/>
+      </material>
+    </visual>
+    <collision name="base_link_collision">
+      <origin xyz="0.0522358 0.0594201 0.029995" rpy="1.5708 0 0"/>
+      <geometry>
+        <box size="0.1998 0.0600 0.2000"/>
+      </geometry>
+    </collision>
+  </link>
+  <!-- INTERIM LIMITS AND INTERIM TOPOLOGY - UNVERIFIED. Mechanical supplied no
+       travel, effort or velocity figures, and no parent/child relationships at
+       all. +/-1.5708 rad is a conservative placeholder, NOT a measurement; the
+       identical effort/velocity values below are placeholders too - no real
+       mechanism has five joints with matching dynamics. Replace all of these,
+       and re-check the chain order, once mechanical confirms real values. -->
+  <link name="sweep">
+    <inertial>
+      <origin xyz="0.0163929 0.0756448 -0.160886" rpy="0 0 0"/>
+      <mass value="0.26997"/>
+      <inertia ixx="6.5782E-05" ixy="1.1446E-05" ixz="-2.7313E-09" iyy="8.2674E-05" iyz="-2.7407E-09" izz="8.8451E-05"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.653777 -0.859305 -1.32289" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/sweep.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1"/>
+      </material>
+    </visual>
+    <collision name="sweep_collision">
+      <origin xyz="0.0148926 0.0721225 -0.169349" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.0738 0.1785 0.2713"/>
+      </geometry>
+    </collision>
+  </link>
+  <!-- joint1: base yaw. Driven by the sweep gearbox; axis derived from the world
+       vertical because the export defines no Axis_Sweep. -->
+  <joint name="joint1" type="revolute">
+    <origin xyz="0.0538204 0.0844065 0.0936804" rpy="-3.14159 0 -1.0472"/>
+    <parent link="base_link"/>
+    <child link="sweep"/>
+    <axis xyz="0 -7.34641e-06 -1"/>
+    <limit lower="-1.5708" upper="1.5708" effort="10" velocity="1.0"/>
+  </joint>
+
+  <link name="shoulder">
+    <inertial>
+      <origin xyz="-0.00833119 0.0644138 0.0215281" rpy="0 0 0"/>
+      <mass value="0.19918"/>
+      <inertia ixx="0.00044506" ixy="0.00011586" ixz="-4.3871E-08" iyy="0.00034473" iyz="-4.7682E-08" izz="0.00051429"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.824841 -0.818826 -1.32207" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/shouldersplit.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1"/>
+      </material>
+    </visual>
+    <collision name="shoulder_collision">
+      <origin xyz="-0.00976251 0.072516 0.0215282" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.1224 0.1325 0.0800"/>
+      </geometry>
+    </collision>
+  </link>
+  <!-- joint2: shoulder. Axis is the nema23 motor axis - the CSV lists that motor's
+       components as nema23_w_shoulder / j2_nema23_gearbox. -->
+  <joint name="joint2" type="revolute">
+    <origin xyz="0.00732929 0.162696 -0.255115" rpy="-3.14158 1.1744 2.6739"/>
+    <parent link="sweep"/>
+    <child link="shoulder"/>
+    <axis xyz="0.92246 0 0.386093"/>
+    <limit lower="-1.5708" upper="1.5708" effort="10" velocity="1.0"/>
+  </joint>
+
+  <link name="elbow">
+    <inertial>
+      <origin xyz="0.0652637 0.0704856 -0.00263955" rpy="0 0 0"/>
+      <mass value="0.17976"/>
+      <inertia ixx="0.00030235" ixy="-7.4527E-05" ixz="-9.963E-10" iyy="0.00037544" iyz="-5.4808E-10" izz="0.00040872"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.00249731 0.0319966 -0.0026393" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/third_joint_bend.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+    <collision name="elbow_collision">
+      <origin xyz="0.0641974 0.0727466 -0.0026393" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.1365 0.1135 0.0900"/>
+      </geometry>
+    </collision>
+  </link>
+  <!-- joint3: elbow bend. Axis from the CAD Axis_3rd joint bend frame. -->
+  <joint name="joint3" type="revolute">
+    <origin xyz="-0.0248502 -0.0097306 0.00472633" rpy="3.14159 -0.3685 0"/>
+    <parent link="shoulder"/>
+    <child link="elbow"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1.5708" upper="1.5708" effort="10" velocity="1.0"/>
+  </joint>
+
+  <link name="forearm">
+    <inertial>
+      <origin xyz="0.000881305 0.114186 -0.0412555" rpy="0 0 0"/>
+      <mass value="0.86499"/>
+      <inertia ixx="0.00088427" ixy="3.205E-05" ixz="-3.2838E-07" iyy="0.00094021" iyz="-2.3104E-07" izz="0.0010963"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.684809 -0.00415398 -1.36196" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/diff_assembly_pulley.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1"/>
+      </material>
+    </visual>
+    <collision name="forearm_collision">
+      <origin xyz="0.000885343 0.117867 -0.0412673" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.1274 0.2477 0.0953"/>
+      </geometry>
+    </collision>
+  </link>
+  <!-- joint4: differential/forearm roll. Axis from Axis_diff-assembly-pulley. -->
+  <joint name="joint4" type="revolute">
+    <origin xyz="0.126943 0.0836319 -0.0439034" rpy="-3.14159 -3.3663e-05 1.5708"/>
+    <parent link="elbow"/>
+    <child link="forearm"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.5708" upper="1.5708" effort="10" velocity="1.0"/>
+  </joint>
+
+  <link name="tool">
+    <inertial>
+      <origin xyz="-0.0261854 -0.00183018 0.0147985" rpy="0 0 0"/>
+      <mass value="0.053298"/>
+      <inertia ixx="1.3634E-05" ixy="-8.735E-22" ixz="-1.8806E-08" iyy="1.8285E-05" iyz="1.1597E-07" izz="1.3317E-05"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.0256756 -0.0265892 0.0148688" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/biomed_lock_mech.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1"/>
+      </material>
+    </visual>
+    <collision name="tool_collision">
+      <origin xyz="-0.0261702 -0.00899661 0.014685" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.0599 0.0381 0.0599"/>
+      </geometry>
+    </collision>
+  </link>
+  <!-- joint5: tool lock. Axis from Axis_biomed lock mech. -->
+  <joint name="joint5" type="revolute">
+    <origin xyz="0.0251063 0.240781 -0.0220181" rpy="0.0529983 -1.16738 -0.0487647"/>
+    <parent link="forearm"/>
+    <child link="tool"/>
+    <axis xyz="0.0191131 -0.999784 0.00814643"/>
+    <limit lower="-1.5708" upper="1.5708" effort="10" velocity="1.0"/>
+  </joint>
+
+  <!-- ===== Non-structural parts =====
+       Drive and fastener geometry, carried so the arm still renders complete.
+       No collision volume and no DOF: they are cosmetic here.
+       Each is bolted to the structural link whose placed centroid is nearest.
+       CAVEAT: m3 and heat_set_insert are MULTI-INSTANCE meshes - one mesh holds
+       every screw and insert in the assembly, including ones that physically
+       belong to distal links. They ride the sweep link, so they will not track
+       the arm correctly once the distal joints move. Ask mechanical to export
+       fasteners per-link, or to omit them. -->
+  <link name="stepper">
+    <inertial>
+      <origin xyz="0.64313 0.8998 1.2835" rpy="0 0 0"/>
+      <mass value="0.45705"/>
+      <inertia ixx="0.00037382" ixy="1.0743E-07" ixz="9.7233E-06" iyy="0.0005475" iyz="2.5993E-07" izz="0.00038353"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/stepper.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="stepper_mount" type="fixed">
+    <origin xyz="-0.0631287 1.48217 0.83867" rpy="-1.57079 -3.67317e-06 -2.618"/>
+    <parent link="sweep"/>
+    <child link="stepper"/>
+  </joint>
+
+  <link name="nema23">
+    <inertial>
+      <origin xyz="0.10166 0.070102 0.0018368" rpy="0 0 0"/>
+      <mass value="1.0827"/>
+      <inertia ixx="0.0014882" ixy="-0.00023608" ixz="-5.2655E-05" iyy="0.0014342" iyz="-4.7983E-05" izz="0.0015666"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/nema23.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="nema23_mount" type="fixed">
+    <origin xyz="0.0208635 0.0138745 -0.0531229" rpy="-1.5708 6.55747e-06 1.1031"/>
+    <parent link="sweep"/>
+    <child link="nema23"/>
+  </joint>
+
+  <link name="outerring">
+    <inertial>
+      <origin xyz="-0.0080961 0.027364 -0.026357" rpy="0 0 0"/>
+      <mass value="0.29137"/>
+      <inertia ixx="0.00023769" ixy="1.4814E-05" ixz="1.3088E-12" iyy="0.00026688" iyz="-1.3596E-12" izz="0.00036814"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/outerring.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.79216 0.81961 0.93333 1"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="outerring_mount" type="fixed">
+    <origin xyz="0.0727054 0.116482 -0.121794" rpy="-1.5708 0.396367 -0.467733"/>
+    <parent link="sweep"/>
+    <child link="outerring"/>
+  </joint>
+
+  <link name="heat_set_insert">
+    <inertial>
+      <origin xyz="0.02981 -0.0047361 0.051895" rpy="0 0 0"/>
+      <mass value="0.00011545"/>
+      <inertia ixx="3.5199E-10" ixy="6.9974E-13" ixz="-5.5737E-14" iyy="3.5037E-10" iyz="-2.0825E-14" izz="3.5866E-10"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/heat_set_insert.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.79216 0.81961 0.93333 1"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="heat_set_insert_mount" type="fixed">
+    <origin xyz="0.0555045 0.0338746 -0.024123" rpy="-3.14159 8.0726e-07 3.03149"/>
+    <parent link="sweep"/>
+    <child link="heat_set_insert"/>
+  </joint>
+
+  <link name="m3">
+    <inertial>
+      <origin xyz="-0.060837 -0.13261 -0.0085639" rpy="0 0 0"/>
+      <mass value="0.00029834"/>
+      <inertia ixx="1.068E-08" ixy="-2.7807E-09" ixz="-8.3275E-11" iyy="4.0957E-09" iyz="-2.2672E-10" izz="9.2816E-09"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/m3.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="m3_mount" type="fixed">
+    <origin xyz="0.0174887 0.0609183 -0.275093" rpy="-1.60049 0.350493 -2.0487"/>
+    <parent link="sweep"/>
+    <child link="m3"/>
+  </joint>
+
+  <link name="bevel_gear">
+    <inertial>
+      <origin xyz="-0.023575 -0.00015203 0.00068011" rpy="0 0 0"/>
+      <mass value="0.042026"/>
+      <inertia ixx="9.9802E-06" ixy="-4.8977E-09" ixz="4.0392E-09" iyy="5.3605E-06" iyz="-8.7432E-07" izz="6.9939E-06"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://waybionic_description/meshes/bevel_gear.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="1 0.94902 0.9098 1"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="bevel_gear_mount" type="fixed">
+    <origin xyz="-0.0255987 -0.0506903 0.0148612" rpy="1.57081 1.3833e-05 -1.57079"/>
+    <parent link="tool"/>
+    <child link="bevel_gear"/>
+  </joint>
+
+</robot>
