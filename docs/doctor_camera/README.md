@@ -1,12 +1,12 @@
 # Initial Research Documents
 
-These are all still editable and may be changed
+These google docs are still editable and may be changed
 - [Initial Doctor View Research Document](https://docs.google.com/document/d/1OfJ6v8o2l7Od17A9XfhbKtnIbXPvU-SVXBNiBWnNtfE/edit?tab=t.0#heading=h.opf0zp86jmkf)
 - [First Prototype Camera Requirements](https://docs.google.com/document/d/19sTK0wt7DqVyj-hby_aYes9H3HzxA_KSLALwobuXmB0/edit?tab=t.0#heading=h.34oim445jif)
 - [Camera's Mechanical Requirements](https://docs.google.com/document/d/15i2DtYXTZA4_sDSY5-uei4Io7vbqmeA7kBANB8NLVCQ/edit?tab=t.0)
 
 # Current Best Source
-The [camera system design](https://github.com/Waybionic/waybionic_ground_station/blob/research/doctor-camera-pipeline-gianna/docs/doctor_camera_system_design.md) is so far the most up to date document surrounding the camera, constraints, and everything that mechanical and electrical has told us.
+The [camera system design](https://github.com/Waybionic/waybionic_ground_station/blob/research/doctor-camera-pipeline-gianna/docs/doctor_camera/doctor_camera_system_design.md) is so far the most up to date document surrounding the camera, constraints, and everything that mechanical and electrical has told us.
 
 # Current Recomendation (first testing)
 
