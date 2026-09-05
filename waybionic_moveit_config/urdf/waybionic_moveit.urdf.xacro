@@ -1,16 +1,48 @@
 <?xml version="1.0"?>
 <!--
-  Wraps the existing waybionic_description URDF and layers a ros2_control
-  block on top of it. The base URDF is included unmodified, so nothing in
-  waybionic_description has to change to support MoveIt.
+  Wraps the mechanical drop's own URDF and layers a ros2_control block on top.
+  The base URDF is included unmodified - urdf/full-arm-smaller.urdf is the
+  2026-09-05 export byte-for-byte.
 
   Mock hardware (mock_components/GenericSystem) echoes commands back as state,
-  which lets you plan AND execute in RViz with no physical arm attached.
+  so the stack runs with no physical arm attached.
+
+  WHAT YOU GET, AND WHAT YOU DO NOT
+  =================================
+  The joints below are the six the export declares movable, under their own
+  names. Five are prismatic with lower=0 upper=0 - zero stroke - and the sixth
+  (nema23) is continuous with no limits at all. So the stack loads, the
+  controller spins up and state is published, but nothing can travel.
+
+  There is also no Cartesian IK. KDL needs a serial chain and the export has
+  none: all twelve parts parent straight to the assembly root. The planning
+  group in the SRDF is therefore a JOINT LIST, and config/kinematics.yaml
+  declares no solver. Joint-space goals work; pose goals and the interactive
+  marker do not.
+
+  Both of those are properties of the delivery, not of this file. See
+  docs/model_import_runbook.md for what mechanical needs to send.
 -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro"
-       name="full-arm-mar24-urdf-and-meshes">
+       name="full-arm-smaller">
 
-  <xacro:include filename="$(find waybionic_description)/urdf/full_arm_mar24.urdf"/>
+  <xacro:include filename="$(find waybionic_description)/urdf/full-arm-smaller.urdf"/>
+
+  <!-- Zero-stroke joints, mirroring the export's own <limit> tags. Bounds have
+       to match the URDF or the mock hardware accepts commands the model
+       forbids. -->
+  <xacro:macro name="export_joint" params="name lo:=0 hi:=0">
+    <joint name="${name}">
+      <command_interface name="position">
+        <param name="min">${lo}</param>
+        <param name="max">${hi}</param>
+      </command_interface>
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity"/>
+    </joint>
+  </xacro:macro>
 
   <ros2_control name="WaybionicMockSystem" type="system">
     <hardware>
@@ -18,51 +50,17 @@
       <param name="calculate_dynamics">true</param>
     </hardware>
 
-    <joint name="joint1">
-      <command_interface name="position">
-        <param name="min">-1.5708</param>
-        <param name="max">1.5708</param>
-      </command_interface>
-      <state_interface name="position">
-        <param name="initial_value">0.0</param>
-      </state_interface>
-      <state_interface name="velocity"/>
-    </joint>
-
-    <joint name="joint2">
-      <command_interface name="position">
-        <param name="min">-1.5708</param>
-        <param name="max">1.5708</param>
-      </command_interface>
-      <state_interface name="position">
-        <param name="initial_value">0.0</param>
-      </state_interface>
-      <state_interface name="velocity"/>
-    </joint>
-
-    <!-- joint3 is now revolute (was continuous). Bounds must match the URDF
-         or the mock hardware accepts commands the model forbids. -->
-    <joint name="joint3">
-      <command_interface name="position">
-        <param name="min">-1.5708</param>
-        <param name="max">1.5708</param>
-      </command_interface>
-      <state_interface name="position">
-        <param name="initial_value">0.0</param>
-      </state_interface>
-      <state_interface name="velocity"/>
-    </joint>
-
-    <joint name="joint4">
-      <command_interface name="position">
-        <param name="min">-1.5708</param>
-        <param name="max">1.5708</param>
-      </command_interface>
-      <state_interface name="position">
-        <param name="initial_value">0.0</param>
-      </state_interface>
-      <state_interface name="velocity"/>
-    </joint>
+    <!-- Names carry spaces because the export's components do. -->
+    <xacro:export_joint name="3rd joint bend"/>
+    <xacro:export_joint name="diff-assembly-pulley"/>
+    <xacro:export_joint name="bevel gear"/>
+    <xacro:export_joint name="biomed lock mech"/>
+    <!-- m3 is M3 bolt stock the exporter mistook for a prismatic joint. It is
+         declared movable in the export, so it is carried here for fidelity. -->
+    <xacro:export_joint name="m3"/>
+    <!-- The one genuinely rotary joint: J2's motor. Continuous in the export,
+         so it is given a full turn rather than zero stroke. -->
+    <xacro:export_joint name="nema23" lo="-3.14159" hi="3.14159"/>
   </ros2_control>
 
 </robot>

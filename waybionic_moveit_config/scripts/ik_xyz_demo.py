@@ -22,8 +22,18 @@ from trajectory_msgs.msg import JointTrajectoryPoint
 from visualization_msgs.msg import Marker, MarkerArray
 
 
-JOINT_NAMES = ["joint1", "joint2", "joint3", "joint4"]
-READY_POSITION = [0.0, -0.7854, 0.0, 0.7854]
+# Tip of the "arm" planning group; must match tip_link in srdf/waybionic.srdf.
+# The export has no dedicated tool frame; this is its most distal link.
+TIP_LINK = "biomed lock mech"
+
+# The six joints the 2026-09-05 export declares movable. Must stay in step
+# with the "home" group_state in srdf/waybionic.srdf.
+JOINT_NAMES = [
+    "3rd joint bend", "m3", "diff-assembly-pulley",
+    "nema23", "bevel gear", "biomed lock mech",
+]
+# Only nema23 has any travel in the export; the rest are pinned at 0/0.
+READY_POSITION = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 
 class IkXyzDemo(Node):
@@ -161,12 +171,12 @@ class IkXyzDemo(Node):
             return False
         return True
 
-    def _lookup_wrist_pose(self):
+    def _lookup_tip_pose(self):
         deadline = time.monotonic() + 10.0
         while rclpy.ok() and not self._stop.is_set() and time.monotonic() < deadline:
             try:
                 transform = self.tf_buffer.lookup_transform(
-                    "world", "wrist", Time(), timeout=Duration(seconds=0.5)
+                    "world", TIP_LINK, Time(), timeout=Duration(seconds=0.5)
                 )
                 pose = PoseStamped()
                 pose.header.frame_id = "world"
@@ -339,9 +349,11 @@ class IkXyzDemo(Node):
         if self._stop.wait(0.15):
             return
 
-        origin = self._lookup_wrist_pose()
+        origin = self._lookup_tip_pose()
         if origin is None:
-            self.get_logger().error("Could not resolve the wrist pose in the world frame")
+            self.get_logger().error(
+                f"Could not resolve the {TIP_LINK} pose in the world frame"
+            )
             return
 
         step = self.get_parameter("step_m").value

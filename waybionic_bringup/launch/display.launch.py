@@ -38,11 +38,15 @@ def generate_launch_description():
     waybionic_desc_dir = get_package_share_directory('waybionic_description')
     waybionic_bringup_dir = get_package_share_directory('waybionic_bringup')
 
+    # The 2026-09-05 mechanical drop, run as delivered - byte-identical to
+    # sep_05_latest_info/full-arm-smaller.urdf.
     default_model_path = os.path.join(
-        waybionic_desc_dir, 'urdf', 'full_arm_mar24.urdf'
+        waybionic_desc_dir, 'urdf', 'full-arm-smaller.urdf'
     )
+    # The export has no world or base_link; its root link is the assembly
+    # itself, so it needs an RViz config whose Fixed Frame matches.
     default_rviz_config_path = os.path.join(
-        waybionic_bringup_dir, 'rviz', 'waybionic.rviz'
+        waybionic_bringup_dir, 'rviz', 'waybionic_original_export.rviz'
     )
 
     model_arg = DeclareLaunchArgument(

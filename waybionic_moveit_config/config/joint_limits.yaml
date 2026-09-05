@@ -1,32 +1,42 @@
-# Velocity/effort values mirror the <limit> tags in full_arm_mar24.urdf.
-# The URDF declares no acceleration limits, so conservative values are set here
-# for time-optimal trajectory parameterization.
+# Velocity/acceleration for the six joints the export declares movable.
 #
-# UNVERIFIED. Mechanical has not supplied velocity, acceleration or effort data
-# for any joint. The identical 1.0 values below are placeholders, not
-# measurements - no real mechanism has four joints with matching dynamics.
-# Replace them once mechanical confirms real figures. The travel limits in
-# full_arm_mar24.urdf carry the same caveat.
+# UNVERIFIED. Mechanical has supplied no velocity, acceleration or effort data.
+# The identical 1.0 values below are placeholders, not measurements.
+#
+# Note these are the only limits MoveIt gets from us. The TRAVEL limits come
+# from the export itself, where five of the six joints are pinned at
+# lower=0 upper=0 - zero stroke - and nema23 is unbounded. So most of these
+# joints cannot move at all, regardless of what is written here.
 default_velocity_scaling_factor: 0.5
 default_acceleration_scaling_factor: 0.5
 
 joint_limits:
-  joint1:
+  "3rd joint bend":
     has_velocity_limits: true
     max_velocity: 1.0
     has_acceleration_limits: true
     max_acceleration: 1.0
-  joint2:
+  "m3":
     has_velocity_limits: true
     max_velocity: 1.0
     has_acceleration_limits: true
     max_acceleration: 1.0
-  joint3:
+  "diff-assembly-pulley":
     has_velocity_limits: true
     max_velocity: 1.0
     has_acceleration_limits: true
     max_acceleration: 1.0
-  joint4:
+  "nema23":
+    has_velocity_limits: true
+    max_velocity: 1.0
+    has_acceleration_limits: true
+    max_acceleration: 1.0
+  "bevel gear":
+    has_velocity_limits: true
+    max_velocity: 1.0
+    has_acceleration_limits: true
+    max_acceleration: 1.0
+  "biomed lock mech":
     has_velocity_limits: true
     max_velocity: 1.0
     has_acceleration_limits: true

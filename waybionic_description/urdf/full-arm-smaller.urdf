@@ -1,0 +1,708 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="full-arm-smaller">
+  <link
+    name="Full Arm Smaller">
+    <inertial>
+      <origin
+        xyz="0.730911027624958 1.09045147165194 1.31121583845156"
+        rpy="0 0 0" />
+      <mass
+        value="4.74051119511718" />
+      <inertia
+        ixx="0.00786819756943506"
+        ixy="0.000114385447523108"
+        ixz="0.000139756606301968"
+        iyy="0.0113136216856622"
+        iyz="-4.45524137273936E-05"
+        izz="0.00782222845467862" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/Full Arm Smaller.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/Full Arm Smaller.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link
+    name="Stepper">
+    <inertial>
+      <origin
+        xyz="0.64313 0.8998 1.2835"
+        rpy="0 0 0" />
+      <mass
+        value="0.45705" />
+      <inertia
+        ixx="0.00037382"
+        ixy="1.0743E-07"
+        ixz="9.7233E-06"
+        iyy="0.0005475"
+        iyz="2.5993E-07"
+        izz="0.00038353" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/Stepper.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/Stepper.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Stepper"
+    type="fixed">
+    <origin
+      xyz="-0.53484 -1.9431 0.096726"
+      rpy="1.5708 0 1.5708" />
+    <parent
+      link="Full Arm Smaller" />
+    <child
+      link="Stepper" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="Sweep">
+    <inertial>
+      <origin
+        xyz="0.67017 0.93495 1.162"
+        rpy="0 0 0" />
+      <mass
+        value="0.26997" />
+      <inertia
+        ixx="6.5782E-05"
+        ixy="1.1446E-05"
+        ixz="-2.7313E-09"
+        iyy="8.2674E-05"
+        iyz="-2.7407E-09"
+        izz="8.8451E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/Sweep.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/Sweep.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Sweep"
+    type="fixed">
+    <origin
+      xyz="1.1976 -0.26086 2.2583"
+      rpy="3.1416 0 -1.0472" />
+    <parent
+      link="Full Arm Smaller" />
+    <child
+      link="Sweep" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="3rd joint bend">
+    <inertial>
+      <origin
+        xyz="0.067761 0.038489 -2.4671E-07"
+        rpy="0 0 0" />
+      <mass
+        value="0.17976" />
+      <inertia
+        ixx="0.00030235"
+        ixy="-7.4527E-05"
+        ixz="-9.963E-10"
+        iyy="0.00037544"
+        iyz="-5.4808E-10"
+        izz="0.00040872" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/3rd joint bend.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/3rd joint bend.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="3rd joint bend"
+    type="prismatic">
+    <origin
+      xyz="0.67987 -1.3186 1.167"
+      rpy="-3.1416 -1.5429 2.5621" />
+    <parent
+      link="Full Arm Smaller" />
+    <child
+      link="3rd joint bend" />
+    <axis
+      xyz="1 0 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="heatSetInsert">
+    <inertial>
+      <origin
+        xyz="0.02981 -0.0047361 0.051895"
+        rpy="0 0 0" />
+      <mass
+        value="0.00011545" />
+      <inertia
+        ixx="3.5199E-10"
+        ixy="6.9974E-13"
+        ixz="-5.5737E-14"
+        iyy="3.5037E-10"
+        iyz="-2.0825E-14"
+        izz="3.5866E-10" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/heatSetInsert.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/heatSetInsert.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="heatSetInsert"
+    type="fixed">
+    <origin
+      xyz="0.77873 -1.3217 0.95953"
+      rpy="0 0 2.2045" />
+    <parent
+      link="Full Arm Smaller" />
+    <child
+      link="heatSetInsert" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="m3">
+    <inertial>
+      <origin
+        xyz="-0.060837 -0.13261 -0.0085639"
+        rpy="0 0 0" />
+      <mass
+        value="0.00029834" />
+      <inertia
+        ixx="1.068E-08"
+        ixy="-2.7807E-09"
+        ixz="-8.3275E-11"
+        iyy="4.0957E-09"
+        iyz="-2.2672E-10"
+        izz="9.2816E-09" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/m3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/m3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="m3"
+    type="prismatic">
+    <origin
+      xyz="0.7363 -1.3023 1.2105"
+      rpy="1.5411 -0.3505 1.0015" />
+    <parent
+      link="Full Arm Smaller" />
+    <child
+      link="m3" />
+    <axis
+      xyz="0.93915 -0.3435 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="shouldersplit">
+    <inertial>
+      <origin
+        xyz="0.81651 0.88324 1.3436"
+        rpy="0 0 0" />
+      <mass
+        value="0.19918" />
+      <inertia
+        ixx="0.00044506"
+        ixy="0.00011586"
+        ixz="-4.3871E-08"
+        iyy="0.00034473"
+        iyz="-4.7682E-08"
+        izz="0.00051429" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/shouldersplit.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/shouldersplit.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="shouldersplit"
+    type="fixed">
+    <origin
+      xyz="0.33749 -0.16581 -0.080808"
+      rpy="0 -1.1744 2.5621" />
+    <parent
+      link="Full Arm Smaller" />
+    <child
+      link="shouldersplit" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="bottom base assembly">
+    <inertial>
+      <origin
+        xyz="0.71633 0.93281 1.367"
+        rpy="0 0 0" />
+      <mass
+        value="1.2997" />
+      <inertia
+        ixx="0.0036992"
+        ixy="-4.7879E-13"
+        ixz="3.5114E-10"
+        iyy="0.007244"
+        iyz="-1.5577E-05"
+        izz="0.0037785" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/bottom base assembly.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/bottom base assembly.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="bottom base assembly"
+    type="fixed">
+    <origin
+      xyz="0.062391 0.086339 -0.061769"
+      rpy="1.5708 0 0" />
+    <parent
+      link="Full Arm Smaller" />
+    <child
+      link="bottom base assembly" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="diff-assembly-pulley">
+    <inertial>
+      <origin
+        xyz="0.68569 0.11834 1.3207"
+        rpy="0 0 0" />
+      <mass
+        value="0.86499" />
+      <inertia
+        ixx="0.00088427"
+        ixy="3.205E-05"
+        ixz="-3.2838E-07"
+        iyy="0.00094021"
+        iyz="-2.3104E-07"
+        izz="0.0010963" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/diff-assembly-pulley.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/diff-assembly-pulley.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="diff-assembly-pulley"
+    type="prismatic">
+    <origin
+      xyz="-0.77443 -1.1236 1.2554"
+      rpy="1.5429 0 0.99133" />
+    <parent
+      link="Full Arm Smaller" />
+    <child
+      link="diff-assembly-pulley" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="nema23">
+    <inertial>
+      <origin
+        xyz="0.10166 0.070102 0.0018368"
+        rpy="0 0 0" />
+      <mass
+        value="1.0827" />
+      <inertia
+        ixx="0.0014882"
+        ixy="-0.00023608"
+        ixz="-5.2655E-05"
+        iyy="0.0014342"
+        iyz="-4.7983E-05"
+        izz="0.0015666" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/nema23.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/nema23.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="nema23"
+    type="continuous">
+    <origin
+      xyz="0.77873 -1.2817 0.98853"
+      rpy="1.5708 0 -2.1503" />
+    <parent
+      link="Full Arm Smaller" />
+    <child
+      link="nema23" />
+    <axis
+      xyz="0 1 0" />
+  </joint>
+  <link
+    name="outerring">
+    <inertial>
+      <origin
+        xyz="-0.0080961 0.027364 -0.026357"
+        rpy="0 0 0" />
+      <mass
+        value="0.29137" />
+      <inertia
+        ixx="0.00023769"
+        ixy="1.4814E-05"
+        ixz="1.3088E-12"
+        iyy="0.00026688"
+        iyz="-1.3596E-12"
+        izz="0.00036814" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/outerring.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/outerring.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="outerring"
+    type="fixed">
+    <origin
+      xyz="0.71579 -1.3779 1.0572"
+      rpy="1.5708 -0.39637 -0.57947" />
+    <parent
+      link="Full Arm Smaller" />
+    <child
+      link="outerring" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="bevel gear">
+    <inertial>
+      <origin
+        xyz="-0.023575 -0.00015203 0.00068011"
+        rpy="0 0 0" />
+      <mass
+        value="0.042026" />
+      <inertia
+        ixx="9.9802E-06"
+        ixy="-4.8977E-09"
+        ixz="4.0392E-09"
+        iyy="5.3605E-06"
+        iyz="-8.7432E-07"
+        izz="6.9939E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/bevel gear.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 0.94902 0.9098 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/bevel gear.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="bevel gear"
+    type="prismatic">
+    <origin
+      xyz="0.70184 -1.2696 1.4868"
+      rpy="2.7387 1.5637 -0.57947" />
+    <parent
+      link="Full Arm Smaller" />
+    <child
+      link="bevel gear" />
+    <axis
+      xyz="0.99978 0.0081464 -0.019113" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="biomed lock mech">
+    <inertial>
+      <origin
+        xyz="-0.00050981 0.024759 -7.0336E-05"
+        rpy="0 0 0" />
+      <mass
+        value="0.053298" />
+      <inertia
+        ixx="1.3634E-05"
+        ixy="-8.735E-22"
+        ixz="-1.8806E-08"
+        iyy="1.8285E-05"
+        iyz="1.1597E-07"
+        izz="1.3317E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/biomed lock mech.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://full-arm-smaller/meshes/biomed lock mech.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="biomed lock mech"
+    type="prismatic">
+    <origin
+      xyz="0.70162 -1.2695 1.5109"
+      rpy="1.568 -0.0065256 -0.17655" />
+    <parent
+      link="Full Arm Smaller" />
+    <child
+      link="biomed lock mech" />
+    <axis
+      xyz="0.019113 -0.99978 0.0081464" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+</robot>

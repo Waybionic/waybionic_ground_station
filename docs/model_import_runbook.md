@@ -6,15 +6,56 @@ containing `waybionic_bringup/` and `waybionic_description/`.
 
 ## Models in this package
 
-Both live in `waybionic_description/urdf/`:
+They all live in `waybionic_description/urdf/`:
 
 | File | Role | Meshes |
 |------|------|--------|
-| `full_arm_mar24.urdf` | **Default.** The real arm — a 5-link serial chain `base_link → shoulder → elbow → forearm → wrist` with articulated (revolute/continuous) joints. | 5 STLs in `meshes/` |
+| `full-arm-smaller.urdf` | **The mechanical drop, run unmodified** — byte-identical to `sep_05_latest_info/full-arm-smaller.urdf`, CRLF and all. Root link `Full Arm Smaller`; 13 links including the aggregate; 6 zero-travel joints. See the note below on how its meshes resolve. | 13 STLs under the delivered names |
 | `waybionic_placeholder.urdf` | Fallback / test asset. A primitive box + cylinder on one revolute joint. | **None** — pure URDF primitives, always loads |
 
 The real arm's meshes are the only files kept in `waybionic_description/meshes/`:
-`base_link.STL`, `shoulder.STL`, `elbow.STL`, `forearm.STL`, `wrist.STL`.
+`bottom_base_assembly.STL`, `sweep.STL`, `shouldersplit.STL`, `third_joint_bend.STL`,
+`diff_assembly_pulley.STL`, `biomed_lock_mech.STL` (structural) and
+`stepper.STL`, `nema23.STL`, `outerring.STL`, `bevel_gear.STL`,
+`heat_set_insert.STL`, `m3.STL` (visual-only hardware).
+
+The export's `Full Arm Smaller.STL` is deliberately **not** among them: it is the
+whole assembly as one 218,740-triangle body, and the twelve part meshes sum to
+exactly that number. Keeping both would draw every surface twice.
+`test_full_arm_model.py` fails if it reappears.
+
+The retired mar24 arm is in `archived-urdf/` and `archived-meshes/` (as
+`mar24-*.STL`).
+
+### Running the export unmodified
+
+`urdf/full-arm-smaller.urdf` is the delivery itself — not a copy we cleaned up.
+A test fails if it ever differs from `sep_05_latest_info/` by a single byte.
+
+It asks for its meshes as `package://full-arm-smaller/meshes/<Name With Spaces>.STL`,
+which needs two things that do not otherwise exist here. `waybionic_description`'s
+`CMakeLists.txt` provides both:
+
+- **A package called `full-arm-smaller`.** That name is invalid for a real ament
+  package (REP-144 forbids hyphens), so we don't create one — `package://` only
+  needs the ament index to name a prefix, so we install a marker into this
+  package's `resource_index`.
+- **The meshes under their delivered names.** Our `meshes/` is snake_case, so the
+  install step ships a second, space-named copy for the export to find. Same
+  files, renamed at install time.
+
+```bash
+ros2 launch waybionic_bringup display.launch.py \
+  model:=$(ros2 pkg prefix waybionic_description --share)/urdf/full-arm-smaller.urdf \
+  rvizconfig:=$(ros2 pkg prefix waybionic_bringup --share)/rviz/waybionic_original_export.rviz
+```
+
+The separate RViz config exists because the export has no `world` or `base_link`
+— its root is `Full Arm Smaller`, which has to be the Fixed Frame.
+
+Expect one warning on startup, which is harmless and comes from the export
+itself: `kdl_parser` reports that the root link has an inertia. Our derived
+models add a dummy `world` link to avoid it.
 
 ## 1. Import files
 
@@ -71,12 +112,12 @@ last verified run.
 Needs `liburdfdom-tools` (`sudo apt install liburdfdom-tools`).
 
 ```bash
-check_urdf install/waybionic_description/share/waybionic_description/urdf/full_arm_mar24.urdf
+check_urdf install/waybionic_description/share/waybionic_description/urdf/full-arm-smaller.urdf
 check_urdf install/waybionic_description/share/waybionic_description/urdf/waybionic_placeholder.urdf
 ```
 
 **Expect:** `Successfully Parsed XML` and, for the arm, **`root Link: world`** with
-the chain `world → base_link → shoulder → elbow → forearm → wrist`. The `world`
+root link **`Full Arm Smaller`** with all twelve parts as its direct children. The `world`
 root is what stops KDL from ignoring `base_link`'s inertia — if the root prints as
 `base_link`, the massless `world` root link is missing.
 
@@ -109,7 +150,7 @@ fi
 
 kdl_log="$(mktemp)"
 "$rsp_executable" \
-  install/waybionic_description/share/waybionic_description/urdf/full_arm_mar24.urdf \
+  install/waybionic_description/share/waybionic_description/urdf/full-arm-smaller.urdf \
   >"$kdl_log" 2>&1 &
 kdl_pid=$!
 sleep 5
@@ -198,23 +239,35 @@ invisibly — so check disk presence separately.
 ros2 launch waybionic_bringup display.launch.py
 ```
 
-Drive the bounded revolute sliders through their full ranges and move continuous
-`joint3` through representative positive and negative angles. Confirm each link
-rotates about the intended axis. Movable joints in `full_arm_mar24.urdf` (all
-axis `[0 0 1]`, placeholder limits `effort=100 velocity=1`):
+Drive each revolute slider through its full range and confirm the link rotates
+about the intended axis. Movable joints in `full_arm_smaller.urdf` (placeholder
+limits `±1.5708 rad, effort=10, velocity=1`):
 
-| Joint | Type | Moves | Range | Notes / known limitations |
-|-------|------|-------|-------|---------------------------|
-| `joint1` | revolute | `base_link → shoulder` | ±3.14 rad | limits are exporter defaults, not real RoM |
-| `joint2` | revolute | `shoulder → elbow` | ±3.14 rad | limits are exporter defaults, not real RoM |
-| `joint3` | continuous | `elbow → forearm` | unbounded | `continuous` = no limit; bound it if the real joint is limited |
-| `joint4` | revolute | `forearm → wrist` | ±3.14 rad | wrist is a **differential** (pitch+roll) modeled as one joint — may need 2 |
+| Joint | Moves | Axis source | Notes / known limitations |
+|-------|-------|-------------|---------------------------|
+| `joint1` | `base_link → sweep` | derived (world vertical) | no `Axis_Sweep` in the export |
+| `joint2` | `sweep → shoulder` | CAD `Axis_nema23` | nema23 is the J2 motor per the CSV |
+| `joint3` | `shoulder → elbow` | CAD `Axis_3rd joint bend` | coaxial with joint4/joint5 — see below |
+| `joint4` | `elbow → forearm` | CAD `Axis_diff-assembly-pulley` | differential (pitch+roll) as one joint — may need 2 |
+| `joint5` | `forearm → tool` | CAD `Axis_biomed lock mech` | tool lock |
 
 `world_to_base` is `fixed` (not movable). Record any joint that rotates the wrong
 way (bad `<axis>`) or exceeds its true range **by exact joint name**.
 
+> **Known blocker — the arm cannot change its tip height.** All five axes land
+> within 1.6° of vertical, because the only parts carrying a CAD `Axis_*` frame
+> are the three mutually coaxial tool-column bodies; the export defines no
+> shoulder or elbow *bend* axis anywhere. Measured over 200,000 sampled
+> configurations, the tool tip sweeps a 0.51 m × 0.56 m **plane** at z ≈ 0.695 m
+> with 6.8 mm of vertical travel. `test_replay_runs_xyz_ik_and_controller` is
+> skipped for this reason (its Z leg steps 40 mm). This needs data from
+> mechanical — a reference axis on each rotating part — not more modelling.
+
 ---
 
-*Model provenance:* `full_arm_mar24.urdf` was exported from the
-`full-arm-mar24.SLDASM` SolidWorks assembly via the `sw2urdf` exporter. Joint
-axes and limits are authored in the URDF (they can't be recovered from STLs).
+*Model provenance:* `full_arm_smaller.urdf` was **rebuilt from**, not copied
+from, `sep_05_latest_info/full-arm-smaller.urdf` (SolidWorks `sw2urdf` export,
+2026-09-05). That export had no kinematic chain, duplicated all its geometry,
+carried no usable joint limits, and left four of six link frames at the assembly
+origin. The URDF's header comment records exactly which values are measured and
+which are assumed — read it before trusting any reachability result.

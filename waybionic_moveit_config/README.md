@@ -1,6 +1,7 @@
 # waybionic_moveit_config
 
-MoveIt 2 configuration for the WayBionic arm (`full_arm_mar24.urdf`).
+MoveIt 2 configuration for the WayBionic arm, running the 2026-09-05
+mechanical drop as delivered (`full-arm-smaller.urdf`).
 
 ## Quickstart
 
@@ -46,7 +47,7 @@ ros2 launch waybionic_moveit_config demo.launch.py auto_demo:=true
 ```
 
 The arm first moves to its ready pose, then uses MoveIt's `/compute_ik`
-service to move the wrist along X, Y, and Z. RViz shows a red X axis, green Y
+service to move the tool along X, Y, and Z. RViz shows a red X axis, green Y
 axis, blue Z axis, and a yellow target. Click **Replay XYZ Demo** in the IK Demo
 panel to run it again. For manual IK, drag a colored goal-state arrow and click
 **Plan & Execute**. MotionPlanning uses 50% of the model's velocity and
@@ -61,22 +62,28 @@ ros2 launch waybionic_moveit_config demo.launch.py use_rviz:=false
 On macOS, prefix the Ubuntu `ros2 launch` examples above with
 `./scripts/macos.sh run`.
 
-## Important: this arm has 4 DOF
+## Important: what this config can and cannot do
 
-`joint1`, `joint2`, `joint3` and `joint4` are all revolute — four degrees of
-freedom total. **A 4-DOF arm cannot reach an arbitrary 6-DOF pose.**
+It runs the export **unmodified**, which sets hard limits on what MoveIt can offer.
 
-Consequences you need to know about:
+**No Cartesian IK.** KDL builds a solver by walking a serial chain, and the
+export has none — all twelve parts parent straight to the root link
+`Full Arm Smaller`. So the planning group in `srdf/waybionic.srdf` is a **joint
+list**, `config/kinematics.yaml` declares no solver, and `/compute_ik` is
+unavailable. Joint-space goals work; pose goals and the RViz interactive marker
+do not. `scripts/ik_xyz_demo.py` and its test are skipped for this reason.
 
-- IK is configured **position-only** (`position_only_ik: true` in
-  `config/kinematics.yaml`). Goals are matched on XYZ; end-effector orientation
-  is whatever the arm happens to produce.
-- The RViz config sets `MoveIt_Allow_Approximate_IK: true`. Without it, dragging
-  the interactive marker almost never finds a solution.
-- Planning in **joint space** (the Joints tab, or named poses) is fully reliable
-  and is the recommended workflow for this arm.
-- The RViz config also sets `MoveIt_Use_Constraint_Aware_IK: true`, so goal
-  states that put the arm through itself are rejected instead of displayed.
+**Almost nothing can move.** Five of the six joints the export declares movable
+are prismatic with `lower=0 upper=0` — zero stroke. `nema23` (J2's motor) is the
+only one with any range. `m3` is M3 bolt stock the exporter mistook for a joint.
+
+**Self-collision is largely disabled.** The export's root link carries the whole
+assembly as one mesh — the same 218,740 triangles the twelve part meshes already
+provide — so the root permanently contacts every part. All twelve pairs are
+disabled in the SRDF; without that, nothing plans at all.
+
+None of these are config problems. See `docs/model_import_runbook.md` for the
+data mechanical needs to supply.
 
 ## Joint limits are UNVERIFIED
 

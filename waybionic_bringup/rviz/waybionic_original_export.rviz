@@ -62,32 +62,52 @@ Visualization Manager:
       Value: /robot_description
     Enabled: true
     Links:
+      3rd joint bend:
+        Alpha: 1
+        Show Axes: false
+        Show Trail: false
+        Value: true
       All Links Enabled: true
       Expand Joint Details: false
       Expand Link Details: false
       Expand Tree: false
+      Full Arm Smaller:
+        Alpha: 1
+        Show Axes: false
+        Show Trail: false
+        Value: true
       Link Tree Style: Links in Alphabetic Order
-      base_link:
+      Stepper:
         Alpha: 1
         Show Axes: false
         Show Trail: false
         Value: true
-      bevel_gear:
+      Sweep:
         Alpha: 1
         Show Axes: false
         Show Trail: false
         Value: true
-      elbow:
+      bevel gear:
         Alpha: 1
         Show Axes: false
         Show Trail: false
         Value: true
-      forearm:
+      biomed lock mech:
         Alpha: 1
         Show Axes: false
         Show Trail: false
         Value: true
-      heat_set_insert:
+      bottom base assembly:
+        Alpha: 1
+        Show Axes: false
+        Show Trail: false
+        Value: true
+      diff-assembly-pulley:
+        Alpha: 1
+        Show Axes: false
+        Show Trail: false
+        Value: true
+      heatSetInsert:
         Alpha: 1
         Show Axes: false
         Show Trail: false
@@ -107,22 +127,7 @@ Visualization Manager:
         Show Axes: false
         Show Trail: false
         Value: true
-      shoulder:
-        Alpha: 1
-        Show Axes: false
-        Show Trail: false
-        Value: true
-      stepper:
-        Alpha: 1
-        Show Axes: false
-        Show Trail: false
-        Value: true
-      sweep:
-        Alpha: 1
-        Show Axes: false
-        Show Trail: false
-        Value: true
-      tool:
+      shouldersplit:
         Alpha: 1
         Show Axes: false
         Show Trail: false
@@ -141,16 +146,24 @@ Visualization Manager:
     Filter (whitelist): ''
     Frame Timeout: 15
     Frames:
+      3rd joint bend:
+        Value: true
       All Enabled: true
-      base_link:
+      Full Arm Smaller:
         Value: true
-      bevel_gear:
+      Stepper:
         Value: true
-      elbow:
+      Sweep:
         Value: true
-      forearm:
+      bevel gear:
         Value: true
-      heat_set_insert:
+      biomed lock mech:
+        Value: true
+      bottom base assembly:
+        Value: true
+      diff-assembly-pulley:
+        Value: true
+      heatSetInsert:
         Value: true
       m3:
         Value: true
@@ -158,15 +171,7 @@ Visualization Manager:
         Value: true
       outerring:
         Value: true
-      shoulder:
-        Value: true
-      stepper:
-        Value: true
-      sweep:
-        Value: true
-      tool:
-        Value: true
-      world:
+      shouldersplit:
         Value: true
     Marker Scale: 1
     Name: TF
@@ -174,25 +179,25 @@ Visualization Manager:
     Show Axes: true
     Show Names: false
     Tree:
-      world:
-        base_link:
-          sweep:
-            heat_set_insert: {}
-            m3: {}
-            nema23: {}
-            outerring: {}
-            shoulder:
-              elbow:
-                forearm:
-                  tool:
-                    bevel_gear: {}
-            stepper: {}
+      Full Arm Smaller:
+        3rd joint bend: {}
+        Stepper: {}
+        Sweep: {}
+        bevel gear: {}
+        biomed lock mech: {}
+        bottom base assembly: {}
+        diff-assembly-pulley: {}
+        heatSetInsert: {}
+        m3: {}
+        nema23: {}
+        outerring: {}
+        shouldersplit: {}
     Update Interval: 0
     Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
-    Fixed Frame: base_link
+    Fixed Frame: Full Arm Smaller
     Frame Rate: 30
   Name: root
   Tools:

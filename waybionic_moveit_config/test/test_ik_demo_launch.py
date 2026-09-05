@@ -30,7 +30,10 @@ from sensor_msgs.msg import JointState
 from std_srvs.srv import Trigger
 
 
-JOINT_NAMES = ('joint1', 'joint2', 'joint3', 'joint4')
+JOINT_NAMES = (
+    '3rd joint bend', 'm3', 'diff-assembly-pulley',
+    'nema23', 'bevel gear', 'biomed lock mech',
+)
 TARGET_TOLERANCE_M = 0.005
 MOTION_TOLERANCE_RAD = 0.002
 
@@ -174,6 +177,15 @@ class TestIkDemoRuntime(unittest.TestCase):
             time.sleep(0.05)
         self.fail('mock controllers did not become active')
 
+    @unittest.skip(
+        'The workspace runs the 2026-09-05 export as delivered, and that '
+        'export has no kinematic chain - all twelve parts parent to the '
+        'assembly root. KDL cannot build an IK solver without a chain, so '
+        'config/kinematics.yaml declares none and /compute_ik is unavailable. '
+        'This demo is Cartesian and needs IK. Five of the six joints are also '
+        'pinned at zero stroke by the export. Un-skip once mechanical supplies '
+        'a link hierarchy and joint axes.'
+    )
     def test_replay_runs_xyz_ik_and_controller(self):
         """Run one replay and prove all targets completed on mock hardware."""
         self.assertTrue(
