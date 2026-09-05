@@ -1,3 +1,17 @@
+# Copyright 2026 Waybionic
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import time
 
 import can
@@ -16,31 +30,35 @@ class CanHostNode(Node):
         self.joint_pub = self.create_publisher(JointState, '/joint_states', 10)
         self.diag_pub = self.create_publisher(DiagnosticArray, '/diagnostics', 10)
 
-        # Subscribe to incoming commands from the high-level ROS 2 system
         self.cmd_sub = self.create_subscription(
             JointState, '/joint_commands', self.command_callback, 10)
 
-        self.get_logger().info('Host connecting to software virtual CAN bus...')
-        self.bus = can.interface.Bus(bustype='udp_multicast', channel='224.0.0.1')
+        self.declare_parameter('can_interface', 'vcan0')
+        can_interface = self.get_parameter('can_interface').value
 
-        # State tracking for diagnostics
+        self.get_logger().info(f'Host connecting to CAN bus on {can_interface}...')
+        self.bus = can.interface.Bus(bustype='socketcan', channel=can_interface)
+
         self.last_seen = {i: 0.0 for i in range(1, 7)}
         self.faults = {i: 0 for i in range(1, 7)}
         self.last_cmd_time = 0.0
 
-        self.create_timer(0.05, self.read_bus)  # 20 Hz read loop
-        self.create_timer(1.0, self.publish_diagnostics)  # 1 Hz diag loop
+        self.create_timer(0.05, self.read_bus)
+        self.create_timer(1.0, self.publish_diagnostics)
         self.get_logger().info('Host node started. Ready for bidirectional CAN.')
 
     def command_callback(self, msg):
         self.last_cmd_time = time.time()
-        # Parse the incoming ROS command and send it down the CAN bus
         for i, name in enumerate(msg.name):
             if name.startswith('joint_'):
+                if i >= len(msg.position):
+                    self.get_logger().warning(f'Rejecting command {name}: missing position')
+                    continue
+
                 try:
                     joint_id = int(name.split('_')[1])
                     if 1 <= joint_id <= 6:
-                        target_pos = msg.position[i] if i < len(msg.position) else 0.0
+                        target_pos = msg.position[i]
                         target_vel = msg.velocity[i] if i < len(msg.velocity) else 0.0
 
                         data = codec.encode_target_command(target_pos, target_vel)
@@ -55,18 +73,21 @@ class CanHostNode(Node):
                     self.get_logger().error(f'Command error: {e}')
 
     def read_bus(self):
-        while True:
+        # Process max 100 messages per tick to prevent infinite blocking
+        for _ in range(100):
             msg = self.bus.recv(0.0)
             if msg is None:
                 break
 
             if codec.STATE_BASE_ID + 1 <= msg.arbitration_id <= codec.STATE_BASE_ID + 6:
                 joint_id = msg.arbitration_id - codec.STATE_BASE_ID
-                self.last_seen[joint_id] = time.time()
-
-                pos, vel, health, fault = codec.decode_joint_state(msg.data)
-                self.faults[joint_id] = fault
-                self.publish_joint_state(joint_id, pos, vel)
+                try:
+                    pos, vel, health, fault = codec.decode_joint_state(msg.data)
+                    self.last_seen[joint_id] = time.time()
+                    self.faults[joint_id] = fault
+                    self.publish_joint_state(joint_id, pos, vel)
+                except ValueError as e:
+                    self.get_logger().warning(f'Ignored bad state: {e}')
 
     def publish_joint_state(self, joint_id, pos, vel):
         js = JointState()
@@ -81,16 +102,13 @@ class CanHostNode(Node):
         diag_array.header.stamp = self.get_clock().now().to_msg()
         current_time = time.time()
 
-        # 1. Bus Alive Status
         bus_stat = DiagnosticStatus(
-          name='can.bus: Link Status',
-          level=DiagnosticStatus.OK,
-          message='ACTIVE'
+            name='can.bus: Link Status',
+            level=DiagnosticStatus.OK,
+            message='ACTIVE'
         )
-
         diag_array.status.append(bus_stat)
 
-        # 2. Command Age Status
         cmd_stat = DiagnosticStatus(name='can.bus: Command Age')
         cmd_age = current_time - self.last_cmd_time
         if self.last_cmd_time == 0.0:
@@ -104,13 +122,11 @@ class CanHostNode(Node):
             cmd_stat.message = f'ACTIVE ({cmd_age:.1f}s ago)'
         diag_array.status.append(cmd_stat)
 
-        # 3. Individual Joint Status
         for joint_id in range(1, 7):
             status = DiagnosticStatus()
             status.name = f'can.bus: Joint {joint_id} Health'
             status.hardware_id = f'joint_{joint_id}'
 
-            # Add raw fault code as key/value pair
             status.values.append(
                 KeyValue(key='fault_code', value=hex(self.faults[joint_id]))
             )
