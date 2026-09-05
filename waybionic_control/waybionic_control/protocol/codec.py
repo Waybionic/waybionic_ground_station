@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Protocol codec for encoding and decoding provisional Waybionic CAN-FD frames."""
+
 import struct
 
 # Provisional CAN IDs
@@ -20,22 +22,50 @@ CMD_BASE_ID = 0x200
 
 
 def encode_target_command(position, velocity):
-    # Pack 2 floats (8 bytes total)
+    """
+    Encode a target position and velocity into a CAN command frame.
+
+    :param position: Target position.
+    :param velocity: Target velocity.
+    :return: 8-byte packed payload.
+    """
     return struct.pack('<ff', position, velocity)
 
 
 def decode_target_command(data):
+    """
+    Decode a CAN command frame into target position and velocity.
+
+    :param data: Raw byte payload from the CAN frame.
+    :return: Tuple containing (position, velocity).
+    :raises ValueError: If the payload is less than 8 bytes.
+    """
     if len(data) >= 8:
         return struct.unpack('<ff', data[:8])
     raise ValueError('Command payload too short')
 
 
 def encode_joint_state(position, velocity, health, fault):
-    # Pack 2 floats and 2 unsigned bytes (10 bytes total)
+    """
+    Encode actual joint state and health into a CAN-FD state frame.
+
+    :param position: Actual joint position.
+    :param velocity: Actual joint velocity.
+    :param health: Health status byte (e.g., 1 for OK).
+    :param fault: Hardware fault code byte.
+    :return: 10-byte packed payload.
+    """
     return struct.pack('<ffBB', position, velocity, health, fault)
 
 
 def decode_joint_state(data):
+    """
+    Decode a CAN-FD state frame into joint state and health values.
+
+    :param data: Raw byte payload from the CAN frame.
+    :return: Tuple containing (position, velocity, health, fault).
+    :raises ValueError: If the payload is less than 10 bytes.
+    """
     if len(data) >= 10:
         return struct.unpack('<ffBB', data[:10])
     raise ValueError('State payload too short')

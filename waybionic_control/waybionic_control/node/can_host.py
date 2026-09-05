@@ -24,6 +24,8 @@ from waybionic_control.protocol import codec
 
 
 class CanHostNode(Node):
+    """Node that translates ROS JointState messages to CAN frames and monitors health."""
+
     def __init__(self):
         super().__init__('can_host')
 

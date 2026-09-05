@@ -20,7 +20,10 @@ from waybionic_control.protocol import codec
 
 
 class MockDrivesNode(Node):
+    """Node simulating 6 CAN-based joint controllers."""
+
     def __init__(self):
+        """Initialize the MockDrivesNode and connect to the virtual CAN bus."""
         super().__init__('mock_drives')
         self.declare_parameter('simulate_faults', True)
         self.declare_parameter('can_interface', 'vcan0')
