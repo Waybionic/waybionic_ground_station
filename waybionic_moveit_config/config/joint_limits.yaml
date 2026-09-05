@@ -1,6 +1,12 @@
 # Velocity/effort values mirror the <limit> tags in full_arm_mar24.urdf.
 # The URDF declares no acceleration limits, so conservative values are set here
 # for time-optimal trajectory parameterization.
+#
+# UNVERIFIED. Mechanical has not supplied velocity, acceleration or effort data
+# for any joint. The identical 1.0 values below are placeholders, not
+# measurements - no real mechanism has four joints with matching dynamics.
+# Replace them once mechanical confirms real figures. The travel limits in
+# full_arm_mar24.urdf carry the same caveat.
 default_velocity_scaling_factor: 0.5
 default_acceleration_scaling_factor: 0.5
 

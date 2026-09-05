@@ -57,7 +57,7 @@ Visualization Manager:
       MoveIt_Planning_Attempts: 10
       MoveIt_Planning_Time: 5
       MoveIt_Use_Cartesian_Path: false
-      MoveIt_Use_Constraint_Aware_IK: false
+      MoveIt_Use_Constraint_Aware_IK: true
       Velocity_Scaling_Factor: 0.5
       Acceleration_Scaling_Factor: 0.5
       MoveIt_Workspace:
@@ -97,7 +97,7 @@ Visualization Manager:
         Show Weight Limit: false
       Planning Request:
         Colliding Link Color: 255; 0; 0
-        Goal State Alpha: 1
+        Goal State Alpha: 0.35
         Goal State Color: 250; 128; 0
         Interactive Marker Size: 0.15
         Joint Violation Color: 255; 0; 255

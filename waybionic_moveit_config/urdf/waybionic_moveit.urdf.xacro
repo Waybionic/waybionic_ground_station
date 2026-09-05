@@ -20,8 +20,8 @@
 
     <joint name="joint1">
       <command_interface name="position">
-        <param name="min">-3.14</param>
-        <param name="max">3.14</param>
+        <param name="min">-1.5708</param>
+        <param name="max">1.5708</param>
       </command_interface>
       <state_interface name="position">
         <param name="initial_value">0.0</param>
@@ -31,8 +31,8 @@
 
     <joint name="joint2">
       <command_interface name="position">
-        <param name="min">-3.14</param>
-        <param name="max">3.14</param>
+        <param name="min">-1.5708</param>
+        <param name="max">1.5708</param>
       </command_interface>
       <state_interface name="position">
         <param name="initial_value">0.0</param>
@@ -40,9 +40,13 @@
       <state_interface name="velocity"/>
     </joint>
 
-    <!-- joint3 is a continuous joint: unbounded, so no min/max. -->
+    <!-- joint3 is now revolute (was continuous). Bounds must match the URDF
+         or the mock hardware accepts commands the model forbids. -->
     <joint name="joint3">
-      <command_interface name="position"/>
+      <command_interface name="position">
+        <param name="min">-1.5708</param>
+        <param name="max">1.5708</param>
+      </command_interface>
       <state_interface name="position">
         <param name="initial_value">0.0</param>
       </state_interface>
@@ -51,8 +55,8 @@
 
     <joint name="joint4">
       <command_interface name="position">
-        <param name="min">-3.14</param>
-        <param name="max">3.14</param>
+        <param name="min">-1.5708</param>
+        <param name="max">1.5708</param>
       </command_interface>
       <state_interface name="position">
         <param name="initial_value">0.0</param>

@@ -23,3 +23,8 @@ solves position (XYZ) rather than an arbitrary six-degree-of-freedom pose.
 Visuals use the imported STL files. Collision checking uses conservative boxes
 and cylinders so both macOS and Ubuntu avoid loading high-resolution meshes into
 FCL. See the package README for limitations and test commands.
+
+**The joint limits are unverified placeholders.** Mechanical has not supplied
+travel, velocity or effort data, so the reachable workspace shown in RViz is not
+trustworthy and must not be used to drive hardware. See "Joint limits are
+UNVERIFIED" in [`waybionic_moveit_config/README.md`](../waybionic_moveit_config/README.md).

@@ -63,8 +63,8 @@ On macOS, prefix the Ubuntu `ros2 launch` examples above with
 
 ## Important: this arm has 4 DOF
 
-`joint1`, `joint2`, `joint4` are revolute and `joint3` is continuous — four
-degrees of freedom total. **A 4-DOF arm cannot reach an arbitrary 6-DOF pose.**
+`joint1`, `joint2`, `joint3` and `joint4` are all revolute — four degrees of
+freedom total. **A 4-DOF arm cannot reach an arbitrary 6-DOF pose.**
 
 Consequences you need to know about:
 
@@ -75,6 +75,37 @@ Consequences you need to know about:
   the interactive marker almost never finds a solution.
 - Planning in **joint space** (the Joints tab, or named poses) is fully reliable
   and is the recommended workflow for this arm.
+- The RViz config also sets `MoveIt_Use_Constraint_Aware_IK: true`, so goal
+  states that put the arm through itself are rejected instead of displayed.
+
+## Joint limits are UNVERIFIED
+
+**Mechanical has not supplied travel, velocity or effort data for any joint.**
+
+The SolidWorks exporter emitted `lower="-3.14" upper="3.14" effort="100"
+velocity="1"` identically for all four joints, and `joint3` as `continuous`
+(unbounded). Those were placeholders, not measurements — no real mechanism has
+four joints with matching symmetric travel and matching dynamics.
+
+Current state of the model:
+
+- `joint3` is now `revolute` rather than `continuous`. The slip ring that could
+  justify endless rotation is in the `baseToShoulder` assembly (the base), not
+  at the belt-driven elbow-to-forearm joint.
+- All four joints are limited to ±1.5708 rad (±90°). This is a deliberately
+  conservative interim value, chosen because it is a strict subset of the
+  exporter's original ±3.14 and therefore cannot permit any motion the model did
+  not already permit. **It is not a measurement.**
+- `effort` and `velocity` are unchanged exporter defaults and remain unverified.
+
+**Do not treat the workspace RViz displays as actually reachable**, and do not
+drive hardware from these numbers. To replace them, mechanical needs to supply:
+
+1. Per-joint travel for `joint1`–`joint4` in degrees, min and max **separately**
+   — real limits are rarely symmetric.
+2. Whether `joint3` is genuinely bounded, and by what.
+3. Max velocity (rad/s) and effort/torque (N·m) per joint.
+4. Any joint *pairs* that collide before reaching their individual limits.
 
 ## What runs
 
@@ -122,3 +153,5 @@ boxes and cylinders provide portable, fast collision checking.
 - **No end effector is defined** — there is no gripper in the URDF.
 - `No 3D sensor plugin(s) defined for octomap updates` is logged as an ERROR at
   startup. It is harmless: there is no depth camera in this setup.
+
+  

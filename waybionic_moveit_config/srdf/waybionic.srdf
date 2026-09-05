@@ -5,9 +5,14 @@
   The robot name MUST match the <robot name=...> in the URDF, otherwise
   MoveIt refuses to load the semantic description.
 
-  NOTE ON DOF: this arm has 4 revolute joints (joint1, joint2, joint4) plus one
-  continuous joint (joint3). Four DOF cannot reach an arbitrary 6-DOF pose, so
-  IK is configured position-only in config/kinematics.yaml.
+  NOTE ON DOF: this arm has 4 revolute joints (joint1, joint2, joint3, joint4),
+  so four DOF in total. Four DOF cannot reach an arbitrary 6-DOF pose, so IK is
+  configured position-only in config/kinematics.yaml.
+
+  joint3 was previously declared continuous (unbounded); it is now revolute with
+  interim bounds. All joint limits are UNVERIFIED placeholders pending data from
+  mechanical - see the comment above the joints in
+  waybionic_description/urdf/full_arm_mar24.urdf.
 -->
 <robot name="full-arm-mar24-urdf-and-meshes">
 
