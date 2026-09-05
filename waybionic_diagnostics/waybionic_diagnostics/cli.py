@@ -228,10 +228,9 @@ def main(args=None):
         help='Continuously monitor diagnostics.',
     )
 
-    parsed_args = parser.parse_args(args)
+    parsed_args, ros_args = parser.parse_known_args(args)
 
-    rclpy.init(args=None)
-
+    rclpy.init(args=ros_args)
     node = DiagnosticsCliNode(parsed_args.topic)
 
     try:
