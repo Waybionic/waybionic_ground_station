@@ -37,14 +37,13 @@
 | RAM needed | **4GB** |
 
 ## Mechanical Requirements
-> Note: Mechanical has yet to get back about specific requirements... I am going off my own judgement
 
 | Requirement | External | Endoscope |
 | --- | --- | --- |
 | **Approximate Location** | Around the arm | On the arm, as an extra tool |
 | **Working Distance** | 3 feet* | Close to the body/internally |
-| **Field of View** | Birds eye view | Small(?) |
-| **Camera/Lens Envelope** | TBD** | Within the arm |
+| **Field of View** | Birds eye view | 100-170 degrees (based on average endoscopic camera FOV) |
+| **Camera/Lens Envelope** | Somewhere above the arm, for example in the surgery light | Within the arm |
 | **Adjustment Needs** | May be adjusted by zooming in and out | Can be adjusted to look around internally |
 | **Occlusion Risks** | View may be blocked or impacted by the tools of the arm. This needs to be considered in mounting position and arm movement. | Since the camera is so small, tools may have a bigger impact on the occlusion |
 | **Cable Routing** | Similar to motors on the arm | Similar to the motors on the arm |
@@ -53,7 +52,6 @@
 
 > \* for personnel who are NOT scrubbed in... not sure if this applies for our robot
 
-> ** waiting for mechanical to get back for a more conclusive answer
 
 ## Benchtop Testing
 Using the Gemini 2 by Orbbec, we can test the camera formatting of a stereo camera and can also test how it works in harsh, high contrast lighting. First, we can test simply via our laptops to make sure the camera works. Then, we can try implementing it into our UI which can be made easier since we would have the actual camera with camera feed.
