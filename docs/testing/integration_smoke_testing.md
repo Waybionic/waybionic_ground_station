@@ -2,7 +2,9 @@
 
 Use this checklist to validate the stable baseline across active pull requests.
 The primary validation target is Ubuntu or WSL2 with ROS 2 Jazzy. GUI checks
-require a working graphical display.
+require a working graphical display. 
+
+**NOTE**: This document is a comprehensive guide including commands and expected outputs, but a checklist is included at the end for quick reference.
 
 ## 1. Setup and full build/test
 
@@ -161,3 +163,18 @@ Common failure:
 
 To test one fixed state instead of cycling, replace `mode:=cycle` with
 `mode:=normal`, `mode:=fault`, or `mode:=stale`.
+
+# Smoke Testing Checklist:
+- [ ] Run `colcon build` and `colcon test` with no failures.
+- [ ] Launch `ground_station.launch.py` and verify RViz2 and Joint State Publisher
+  windows open with the placeholder robot and mock diagnostics.
+- [ ] Launch `engineer_view.launch.py` with `use_mock_diagnostics:=true` and verify
+  the engineer panel shows mock telemetry.
+- [ ] Launch `temporary_diagnostics_publisher.launch.py` with `mode:=cycle` and verify
+  `/diagnostics` is published.
+  - [ ] verify the same for `mode:=normal`, `mode:=fault`, and `mode:=stale`.
+  - [ ] check `ros2 topic list` for `/diagnostics`
+  - [ ] check `ros2 topic info /diagnostics` for type `diagnostic_msgs/msg/DiagnosticArray` and verify active publisher and subscriber counts.
+  - [ ] check `ros2 topic echo /diagnostics` for changing diagnostic status messages
+- [ ] Launch `engineer_view.launch.py` with `use_mock_diagnostics:=false` and verify
+  the engineer panel shows live telemetry from the temporary publisher.
