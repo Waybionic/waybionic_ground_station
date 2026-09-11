@@ -68,6 +68,13 @@ def test_stall_stops_samples_after_the_configured_delay():
     assert source.read(START_NS + 3 * SECOND_NS) is None
 
 
+def test_stall_stays_latched_if_a_later_read_uses_an_earlier_timestamp():
+    source = MockImuSource(stall_after_sec=2.0)
+    assert source.read(START_NS) is not None
+    assert source.read(START_NS + 3 * SECOND_NS) is None
+    assert source.read(START_NS + 1 * SECOND_NS) is None
+
+
 def test_elapsed_is_measured_from_the_first_sample():
     source = MockImuSource()
     source.read(START_NS)

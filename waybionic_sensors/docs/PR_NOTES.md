@@ -22,8 +22,9 @@ Requested changes on the open IMU PR, without expanding scope:
 | Jazzy has no `rviz_default_plugins/Imu` | `imu_demo.rviz` uses `rviz_imu_plugin/Imu`; `package.xml` and `robostack.yaml` declare the dependency so `rosdep install` / macOS setup pull it |
 | Display subscribed to `data_raw` | Orientation display now subscribes to `/waybionic/imu/data_demo` |
 | Stale gyro/accel left OK | When samples age out, `imu.angular_velocity` and `imu.linear_acceleration` report STALE (last values still shown). Rate also goes STALE, not just WARN |
-| No regression for the stall path | `test_stale_stall_marks_heartbeat_rate_and_telemetry` plus unit tests on the diagnostics builder |
+| No regression for the stall path | `test_stale_stall_marks_heartbeat_rate_and_telemetry` plus unit tests on the diagnostics builder. Mock stall latches so a later earlier-timestamp read cannot unstall |
 | Placeholder stddev implied confidence | Raw/live gyro and accel covariances default to all-zero (ROS unknown). Positive `*_stddev` is opt-in for datasheet/calibration. Synthetic orientation covariance stays on the demo topic only |
+| Docs should be beginner-readable | README and `IMU_CONTRACT.md` explain raw vs demo in plain English before the ROS field names |
 
 ## What changed relative to the old IMU branch
 
@@ -103,55 +104,53 @@ absent sensor.
 
 `ros2 topic hz /waybionic/imu/data_raw`:
 
-```
-average rate: 49.988
-	min: 0.019s max: 0.021s std dev: 0.00030s window: 51
+```text
+average rate: 50.005
+	min: 0.019s max: 0.021s std dev: 0.00026s window: 52
 ```
 
 `ros2 topic echo /waybionic/imu/data_raw --once`:
 
 ```yaml
 header:
-  stamp: {sec: 1785808547, nanosec: 917613821}
+  stamp: {sec: 1789120170, nanosec: 981566836}
   frame_id: imu_link
 orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
 orientation_covariance: [-1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-angular_velocity: {x: -0.0736..., y: -0.0383..., z: -0.1473...}
+angular_velocity: {x: -0.0568..., y: 0.0479..., z: -0.1136...}
 angular_velocity_covariance: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-linear_acceleration: {x: -0.0368..., y: -0.0153..., z: 9.80665}
+linear_acceleration: {x: -0.0284..., y: 0.0192..., z: 9.80665}
 linear_acceleration_covariance: [0.0, ...]
 ```
 
-`ros2 topic hz /diagnostics` gives `average rate: 2.000`, comfortably above the
-1 Hz requirement.
+`ros2 topic hz /diagnostics` is 2 Hz. While streaming, heartbeat/rate/gyro/accel are OK.
 
-Heartbeat while streaming:
+Default launch topic list has `/waybionic/imu/data_raw` and `/diagnostics` only.
+`imu_demo.launch.py launch_rviz:=false` adds `/waybionic/imu/data_demo` and `/tf`.
+Demo orientation covariance is the placeholder `0.05^2 = 0.0025`; gyro/accel stay unknown.
 
-```
+Heartbeat after `mock_stall_after_sec:=2.0` (timeout 1.00 s):
+
+```text
 name: imu.heartbeat
-message: IMU streaming from mock generator
-values: [{key: value, value: '0.00'}, {key: unit, value: s}]
-```
-
-Heartbeat after `mock_stall_after_sec:=3.0`:
-
-```
-name: imu.heartbeat
-message: No IMU sample for 6.64 s (timeout 1.00 s)
-values: [{key: value, value: '6.64'}, {key: unit, value: s}]
+message: No IMU sample for 4.14 s (timeout 1.00 s)
+values: [{key: value, value: '4.14'}, {key: unit, value: s}]
+name: imu.rate
+message: Publishing at 0.0 Hz; IMU samples are stale
+name: imu.angular_velocity
+message: Gyroscope magnitude (stale)
+name: imu.linear_acceleration
+message: Accelerometer magnitude, including gravity (stale)
 ```
 
 Heartbeat with `use_mock:=false`:
 
-```
+```text
 name: imu.heartbeat
 message: No IMU samples received from unconfigured IMU driver; awaiting sensor
          model, transport and packet format from electrical
 values: [{key: value, value: never}, {key: unit, value: s}]
 ```
-
-`/waybionic/imu/data_demo` is absent from `ros2 topic list` on a default launch,
-confirming the demo output is off unless asked for.
 
 ## Tests
 
@@ -160,16 +159,26 @@ colcon test --packages-select waybionic_sensors
 colcon test-result --all --verbose
 ```
 
-92 tests, 0 failures.
+95 tests, 0 failures.
+
+Full workspace on Ubuntu 24.04 / ROS 2 Jazzy / WSL2:
+
+```bash
+colcon build --symlink-install
+colcon test
+colcon test-result --all --verbose
+```
+
+4 packages finished. **136 tests, 0 errors, 0 failures, 0 skipped.**
 
 | Suite | Count | Covers |
 |-------|-------|--------|
 | `test_imu_messages.py` | 17 | Frame, timestamp, orientation-unavailable marker, unknown vs datasheet covariance, demo message, demo TF |
 | `test_imu_diagnostics.py` | 19 | Heartbeat OK/STALE, custom timeout, never-received, age units, rate WARN/STALE, telemetry OK then STALE, absence of roll/pitch/yaw |
 | `test_imu_publisher_node.py` | 16 | Runtime: rate, timestamps, frame IDs, demo defaults, unknown covariance, heartbeat OK then STALE, stall marks all four signals, live mode without hardware |
-| `test_mock_source.py` | 13 | Determinism, gravity, amplitude bounds, stall behaviour, quaternion normalisation |
+| `test_mock_source.py` | 14 | Determinism, gravity, amplitude bounds, stall latch, quaternion normalisation |
 | `test_hardware_reader.py` | 9 | Interface surface, stub behaviour, a custom reader satisfying the boundary |
-| `test_package_metadata.py` | 16 | Module separation, node delegation, launch defaults, `rviz_imu_plugin` on `data_demo`, docs, entry point, no invented protocol |
+| `test_package_metadata.py` | 18 | Module separation, node delegation, launch defaults, `rviz_imu_plugin` on `data_demo`, raw vs demo docs, hardware lifecycle, entry point, no invented protocol |
 | `test_flake8.py`, `test_pep257.py` | 2 | Style and docstrings |
 
 ## Known limitations

@@ -3,6 +3,21 @@
 What `waybionic_sensors` publishes, in what units, and which parts are measured
 versus generated for display.
 
+## Plain English
+
+The IMU tells us how fast it is spinning and how it is accelerating. It does
+not, by itself, know which way the robot is facing.
+
+- **Raw** (`/waybionic/imu/data_raw`) is the honest sensor stream: gyro and
+  accelerometer only. Use this for anything that must not consume invented
+  attitude.
+- **Demo** (`/waybionic/imu/data_demo`) adds a made-up facing direction so RViz
+  has something to draw. It is off unless you launch `imu_demo.launch.py`. Do
+  not feed it to control or localisation.
+
+RViz watches the demo topic. A later fusion node, when one exists, should
+publish its own fused topic rather than overwrite `data_raw`.
+
 ## Topics
 
 | Topic | Type | Default | Meaning |
@@ -35,7 +50,7 @@ localisation node, treat invented data as a measurement.
 
 The raw topic therefore always sets:
 
-```
+```text
 orientation             = (0, 0, 0, 1)   # placeholder, not a measurement
 orientation_covariance[0] = -1.0         # "orientation not available"
 ```

@@ -106,12 +106,15 @@ class ImuDiagnosticsBuilder:
 
         return array
 
+    def _age_sec(self, now_ns: int, last_reading: ImuReading) -> float:
+        """Return the age of ``last_reading`` in seconds, never negative."""
+        return max(0.0, (now_ns - last_reading.stamp_ns) / 1e9)
+
     def _is_stale(self, now_ns: int, last_reading: Optional[ImuReading]) -> bool:
         """Return True when no sample exists or the newest sample is too old."""
         if last_reading is None:
             return True
-        age_sec = max(0.0, (now_ns - last_reading.stamp_ns) / 1e9)
-        return age_sec > self._stale_timeout_sec
+        return self._age_sec(now_ns, last_reading) > self._stale_timeout_sec
 
     def _heartbeat_status(
         self,
@@ -130,7 +133,7 @@ class ImuDiagnosticsBuilder:
             status.values = _key_values('never', 's')
             return status
 
-        age_sec = max(0.0, (now_ns - last_reading.stamp_ns) / 1e9)
+        age_sec = self._age_sec(now_ns, last_reading)
         status.values = _key_values(f'{age_sec:.2f}', 's')
 
         if age_sec > self._stale_timeout_sec:

@@ -108,3 +108,22 @@ def test_no_invented_serial_protocol_is_implemented():
     reader_source = read('waybionic_sensors/hardware_reader.py')
     for token in ('import serial', 'baudrate', 'struct.unpack'):
         assert token not in reader_source
+
+
+def test_readme_explains_raw_versus_demo_topics():
+    readme = read('README.md')
+    assert '/waybionic/imu/data_raw' in readme
+    assert '/waybionic/imu/data_demo' in readme
+    assert 'made-up facing direction' in readme
+    contract = read('docs/IMU_CONTRACT.md')
+    assert 'Plain English' in contract
+    assert '/waybionic/imu/data_raw' in contract
+    assert '/waybionic/imu/data_demo' in contract
+
+
+def test_hardware_docs_match_the_reader_lifecycle():
+    docs = read('docs/HARDWARE_INTERFACE.md')
+    assert 'def start(self)' in docs
+    assert 'def stop(self)' in docs
+    assert 'def open(self)' not in docs
+    assert 'def close(self)' not in docs

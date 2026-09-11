@@ -59,6 +59,7 @@ class MockImuSource:
         self._linear_amplitude = linear_amplitude
         self._stall_after_sec = stall_after_sec
         self._start_ns: Optional[int] = None
+        self._stalled = False
 
     @property
     def stalled_deliberately(self) -> bool:
@@ -73,11 +74,14 @@ class MockImuSource:
 
     def read(self, stamp_ns: int) -> Optional[ImuReading]:
         """Produce the sample for ``stamp_ns``, or ``None`` once stalled."""
+        if self._stalled:
+            return None
         if self._start_ns is None:
             self._start_ns = stamp_ns
 
         elapsed = self.elapsed_sec(stamp_ns)
         if self._stall_after_sec > 0.0 and elapsed > self._stall_after_sec:
+            self._stalled = True
             return None
 
         slow = math.sin(elapsed * 0.5)

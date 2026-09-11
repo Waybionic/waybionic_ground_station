@@ -63,13 +63,31 @@ The mock stops after five seconds. Once the sample age passes
 `imu.linear_acceleration` all report STALE. The last gyro and accel magnitudes
 remain visible so the panel does not look like the sensor is still healthy.
 
-## What is measured and what is generated
+## Raw vs demo data, in plain English
 
-The raw topic carries gyroscope and accelerometer data only. It marks
-orientation unavailable with `orientation_covariance[0] = -1`, because an
-accelerometer and a gyroscope cannot observe absolute heading. The synthetic
-orientation lives on its own `data_demo` topic and is off by default, so nothing
-can mistake it for a measurement.
+An IMU is a small sensor that measures two things:
+
+- **How fast it is spinning** (angular velocity, rad/s)
+- **How it is accelerating**, including gravity (linear acceleration, m/s^2)
+
+It does **not** automatically know which way the robot is facing. Estimating
+that facing direction is a separate step called fusion. Until a real fusion
+source exists, this package keeps the two kinds of data on different topics so
+nobody mixes them up:
+
+| Topic | What it is | Default | Who should use it |
+|-------|------------|---------|-------------------|
+| `/waybionic/imu/data_raw` | Gyro + accelerometer measurements only. No facing direction. | Always on | Downstream code, diagnostics, a future fusion node |
+| `/waybionic/imu/data_demo` | The same measurements **plus a made-up facing direction** so RViz can show a spinning box | Off, unless you run `imu_demo.launch.py` | Humans looking at RViz. Never control or localisation |
+
+The RViz IMU display subscribes to `data_demo`, because that is the only topic
+with an orientation to draw. `data_raw` marks orientation as unavailable
+(`orientation_covariance[0] = -1`).
+
+If we do not yet know how noisy the sensor is, raw gyro and accel covariance
+stays all zeros. In ROS that means **unknown**, not "perfectly certain." Fake
+noise numbers stay on the demo topic only, until electrical supplies a
+datasheet or calibration value.
 
 Full details, units, covariance conventions, and the parameter list are in
 `docs/IMU_CONTRACT.md`.

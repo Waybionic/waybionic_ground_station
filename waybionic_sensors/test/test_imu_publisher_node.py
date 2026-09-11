@@ -151,9 +151,15 @@ def test_raw_messages_use_stddev_when_explicitly_configured():
 
 
 def test_publish_rate_follows_the_parameter():
-    duration = 1.5
-    with Harness(duration_sec=duration, publish_rate_hz=20.0) as collector:
-        measured = len(collector.raw) / duration
+    with Harness(duration_sec=2.0, publish_rate_hz=20.0) as collector:
+        assert len(collector.raw) >= 15
+        stamps = [
+            message.header.stamp.sec + message.header.stamp.nanosec * 1e-9
+            for message in collector.raw
+        ]
+        elapsed = stamps[-1] - stamps[0]
+        assert elapsed > 0.5
+        measured = (len(stamps) - 1) / elapsed
         assert 12.0 < measured < 28.0
 
 
