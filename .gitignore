@@ -1,3 +1,7 @@
+diagnostics-sessions/
+*.db3
+*.mcap
+
 # ROS folders
 build/
 install/
