@@ -22,6 +22,7 @@
 #include "waybionic_rviz_plugins/mock_diagnostics_source.hpp"
 
 class QButtonGroup;
+class QProgressBar;
 class QPushButton;
 
 namespace waybionic_rviz_plugins
@@ -41,6 +42,7 @@ public:
 
 private:
   void buildUi();
+  void buildMovementTestUi(QVBoxLayout * root_layout);
   void configureSource(bool use_mock_diagnostics);
   bool readUseMockDiagnosticsParameter(bool default_value);
   std::string readDiagnosticsTopicParameter(const std::string & default_value);
@@ -85,6 +87,9 @@ private:
   QVBoxLayout * alerts_layout_{nullptr};
   QPushButton * normal_button_{nullptr};
   QPushButton * fault_button_{nullptr};
+  QPushButton * movement_test_button_{nullptr};
+  QLabel * movement_test_status_{nullptr};
+  QProgressBar * movement_test_progress_{nullptr};
   QButtonGroup * mock_state_button_group_{nullptr};
 };
 
