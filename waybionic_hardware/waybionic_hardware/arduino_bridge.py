@@ -176,8 +176,10 @@ class ArduinoBridge(Node):
         elif command == 'STOP':
             self.sequence_active = False
             self.motion_active = False
-            self.send_line('HOLD')
-            self.last_status = 'hold-requested'
+            if self.send_line('HOLD'):
+                self.last_status = 'hold-requested'
+            else:
+                self.last_status = 'hold-request-failed'
         else:
             self.get_logger().warn(f'Ignoring unknown motion command: {command}')
 
