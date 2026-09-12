@@ -67,7 +67,9 @@ install(
 )
 
 install(
-  PROGRAMS scripts/temporary_diagnostics_publisher.py
+  PROGRAMS
+    scripts/temporary_diagnostics_publisher.py
+    scripts/diagnostics_recorder.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -84,6 +86,18 @@ if(BUILD_TESTING)
     test_package_metadata
     test/test_package_metadata.py
     TIMEOUT 60
+  )
+
+  ament_add_pytest_test(
+    test_diagnostics_recorder
+    test/test_diagnostics_recorder.py
+    TIMEOUT 60
+  )
+
+  ament_add_pytest_test(
+    test_diagnostics_recorder_roundtrip
+    test/test_diagnostics_recorder_roundtrip.py
+    TIMEOUT 120
   )
 
   # Built from sources directly so the stress test links neither Qt nor RViz and
