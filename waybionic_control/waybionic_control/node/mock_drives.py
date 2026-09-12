@@ -62,7 +62,7 @@ class MockDrivesNode(Node):
                     self.get_logger().warning(f'Ignored bad command: {e}')
 
         for joint_id in range(1, 7):
-            if simulate_faults and joint_id == 6 and self.count > 30:
+            if simulate_faults and joint_id == 6 and 30 < self.count <= 70:
                 continue
 
             diff = self.targets[joint_id] - self.positions[joint_id]
@@ -72,9 +72,15 @@ class MockDrivesNode(Node):
             health_status = 1
             fault_code = 0
 
-            if simulate_faults and joint_id == 4 and self.count > 50:
-                health_status = 0
-                fault_code = 0xAA
+            if simulate_faults:
+                # arbitrary values for now
+                # scale values up if longer capture desired
+                if joint_id == 4 and 50 < self.count <= 90:
+                    health_status = 0
+                    fault_code = 0xAA
+                elif joint_id == 5 and 60 < self.count <= 100:
+                    health_status = 0
+                    fault_code = 0
 
             data = codec.encode_joint_state(
                 self.positions[joint_id],

@@ -151,6 +151,55 @@ class TestCanControlLogic(unittest.TestCase):
 
         self.assertEqual(self.node.healths[3], 0)
 
+    def test_non_finite_feedback_leaves_state_unchanged(self):
+        self.node.last_seen[2] = 0.0
+        self.node.faults[2] = 0x11
+        self.node.healths[2] = 1
+
+        bad_state = struct.pack('<ffBB', float('nan'), 0.0, 1, 0)
+        bad_msg = can.Message(
+            arbitration_id=codec.STATE_BASE_ID + 2,
+            data=bad_state,
+            is_extended_id=False)
+        self.node.bus.recv.side_effect = [bad_msg, None]
+        self.node.joint_pub.publish = MagicMock()
+
+        self.node.read_bus()
+
+        self.assertEqual(self.node.last_seen[2], 0.0)
+        self.assertEqual(self.node.faults[2], 0x11)
+        self.assertEqual(self.node.healths[2], 1)
+        self.node.joint_pub.publish.assert_not_called()
+
+        good_state = codec.encode_joint_state(1.25, 0.5, 0, 0x22)
+        good_msg = can.Message(
+            arbitration_id=codec.STATE_BASE_ID + 2,
+            data=good_state,
+            is_extended_id=False)
+        self.node.bus.recv.side_effect = [good_msg, None]
+
+        self.node.read_bus()
+
+        self.assertGreater(self.node.last_seen[2], 0.0)
+        self.assertEqual(self.node.faults[2], 0x22)
+        self.assertEqual(self.node.healths[2], 0)
+        self.node.joint_pub.publish.assert_called_once()
+
+    def test_non_finite_command_rejected_then_valid_accepted(self):
+        bad = JointState()
+        bad.name = ['joint_1']
+        bad.position = [float('nan')]
+
+        self.node.command_callback(bad)
+        self.node.bus.send.assert_not_called()
+
+        good = JointState()
+        good.name = ['joint_1']
+        good.position = [0.75]
+
+        self.node.command_callback(good)
+        self.node.bus.send.assert_called_once()
+
 
 if __name__ == '__main__':
     unittest.main()

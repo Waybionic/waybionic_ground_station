@@ -15,8 +15,8 @@ setup(
     zip_safe=True,
     maintainer='hoodu',
     maintainer_email='harold.kim@ucalgary.ca',
-    description='TODO: Package description',
-    license='TODO: License declaration',
+    description='CAN-FD host and mock drive nodes for WayBionic ground station',
+    license='Apache-2.0',
     extras_require={
         'test': [
             'pytest',
