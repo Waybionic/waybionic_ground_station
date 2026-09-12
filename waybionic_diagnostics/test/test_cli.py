@@ -6,6 +6,7 @@ from waybionic_diagnostics.cli import (
     DiagnosticsCliNode,
     extract_value_and_unit,
     overall_status,
+    print_snapshot,
     status_name,
 )
 
@@ -104,6 +105,65 @@ def test_diagnostics_callback_updates_state():
         assert node.last_received_monotonic >= before
         assert node.data_age() is not None
         assert node.data_age() >= 0.0
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+def test_diagnostics_callback_merges_entries_from_multiple_publishers():
+    import rclpy
+    from diagnostic_msgs.msg import DiagnosticArray
+
+    rclpy.init()
+    node = DiagnosticsCliNode('/test_diagnostics')
+
+    try:
+        can_message = DiagnosticArray()
+        can_status = DiagnosticStatus()
+        can_status.name = 'can.bus'
+        can_status.level = DiagnosticStatus.ERROR
+        can_message.status = [can_status]
+
+        imu_message = DiagnosticArray()
+        imu_status = DiagnosticStatus()
+        imu_status.name = 'imu.orientation'
+        imu_status.level = DiagnosticStatus.OK
+        imu_message.status = [imu_status]
+
+        node.diagnostics_callback(can_message)
+        node.diagnostics_callback(imu_message)
+
+        statuses = {status.name: status.level for status in node.latest}
+        assert statuses == {
+            'can.bus': DiagnosticStatus.ERROR,
+            'imu.orientation': DiagnosticStatus.OK,
+        }
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+def test_diagnostics_callback_uses_header_stamp_for_sample_age(monkeypatch, capsys):
+    import rclpy
+    from diagnostic_msgs.msg import DiagnosticArray
+
+    rclpy.init()
+    node = DiagnosticsCliNode('/test_diagnostics')
+
+    try:
+        message = DiagnosticArray()
+        message.header.stamp.sec = 60
+        status = DiagnosticStatus()
+        status.name = 'board.temperature'
+        status.level = DiagnosticStatus.OK
+        message.status = [status]
+
+        monkeypatch.setattr('waybionic_diagnostics.cli.time.time', lambda: 70.0)
+        node.diagnostics_callback(message)
+
+        assert node.status_age(status) == 10.0
+        print_snapshot(node)
+        assert 'STALE' in capsys.readouterr().out
     finally:
         node.destroy_node()
         rclpy.shutdown()

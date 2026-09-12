@@ -55,6 +55,7 @@ class DiagnosticsCliNode(Node):
 
         self.topic = topic
         self.latest: List[DiagnosticStatus] = []
+        self._sample_time_by_name: Dict[str, float] = {}
         self.last_received_monotonic: Optional[float] = None
 
         self.subscription = self.create_subscription(
@@ -65,16 +66,36 @@ class DiagnosticsCliNode(Node):
         )
 
     def diagnostics_callback(self, message: DiagnosticArray):
-        """Store the most recent diagnostic array."""
-        self.latest = list(message.status)
-        self.last_received_monotonic = time.monotonic()
+        """Merge the publisher's entries into the diagnostic cache."""
+        received_monotonic = time.monotonic()
+        received_time = time.time()
+        stamp = message.header.stamp
+        sample_time = stamp.sec + stamp.nanosec * 1e-9
+        if sample_time == 0.0:
+            sample_time = received_time
+
+        latest_by_name = {status.name: status for status in self.latest}
+        for status in message.status:
+            latest_by_name[status.name] = status
+            self._sample_time_by_name[status.name] = sample_time
+
+        self.latest = list(latest_by_name.values())
+        self.last_received_monotonic = received_monotonic
 
     def data_age(self) -> Optional[float]:
-        """Return seconds since the most recent diagnostic message."""
+        """Return seconds since the most recent diagnostic message was received."""
         if self.last_received_monotonic is None:
             return None
 
         return max(0.0, time.monotonic() - self.last_received_monotonic)
+
+    def status_age(self, status: DiagnosticStatus) -> Optional[float]:
+        """Return the sample age for one cached diagnostic status."""
+        sample_time = self._sample_time_by_name.get(status.name)
+        if sample_time is None:
+            return None
+
+        return max(0.0, time.time() - sample_time)
 
 
 def overall_status(statuses: List[str]) -> str:
@@ -121,9 +142,6 @@ def print_snapshot(node: DiagnosticsCliNode, clear: bool = False):
         print('Overall: STALE')
         return
 
-    age = node.data_age()
-    stream_stale = age is not None and age > STALE_AFTER_SECONDS
-
     print(
         f'{"Signal":<32} '
         f'{"Status":<8} '
@@ -137,8 +155,10 @@ def print_snapshot(node: DiagnosticsCliNode, clear: bool = False):
 
     for status in node.latest:
         normalized = status_name(status.level)
+        age = node.status_age(status)
+        sample_stale = age is not None and age > STALE_AFTER_SECONDS
 
-        if stream_stale and normalized in ('OK', 'WARN'):
+        if sample_stale and normalized in ('OK', 'WARN'):
             normalized = 'STALE'
 
         value, unit = extract_value_and_unit(status)
@@ -157,7 +177,7 @@ def print_snapshot(node: DiagnosticsCliNode, clear: bool = False):
 
         message = status.message or '-'
 
-        if stream_stale and status.level in (
+        if sample_stale and status.level in (
             DiagnosticStatus.OK,
             DiagnosticStatus.WARN,
         ):
