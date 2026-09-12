@@ -197,7 +197,7 @@ def print_snapshot(node: DiagnosticsCliNode, clear: bool = False):
     print(f'Overall: {overall_status(rendered_statuses)}')
 
     if age is not None:
-        print(f'Diagnostics stream age: {age:.1f}s')
+        print(f'Diagnostics stream age: {node.data_age():.1f}s')
 
 
 def wait_for_first_message(node: DiagnosticsCliNode, timeout: float = 5.0):
