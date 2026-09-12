@@ -13,6 +13,8 @@ find_package(diagnostic_msgs REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(Qt5 REQUIRED COMPONENTS Widgets)
 find_package(rclcpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(rviz_common REQUIRED)
 find_package(rviz_default_plugins REQUIRED)
 
@@ -20,6 +22,8 @@ set(THIS_PACKAGE_INCLUDE_DEPENDS
   diagnostic_msgs
   pluginlib
   rclcpp
+  sensor_msgs
+  std_msgs
   rviz_common
   rviz_default_plugins
 )
@@ -28,20 +32,32 @@ add_library(${PROJECT_NAME} SHARED
   include/waybionic_rviz_plugins/diagnostics_source.hpp
   include/waybionic_rviz_plugins/diagnostics_panel.hpp
   include/waybionic_rviz_plugins/ros_diagnostics_source.hpp
+  include/waybionic_rviz_plugins/motion_test_panel.hpp
   src/diagnostics_panel.cpp
   src/mock_diagnostics_source.cpp
   src/ros_diagnostics_source.cpp
+  src/motion_test_panel.cpp
 )
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
+
 target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(${PROJECT_NAME} Qt5::Widgets)
-ament_target_dependencies(${PROJECT_NAME} ${THIS_PACKAGE_INCLUDE_DEPENDS})
 
-pluginlib_export_plugin_description_file(rviz_common plugin_description.xml)
+target_link_libraries(${PROJECT_NAME}
+  Qt5::Widgets
+)
+
+ament_target_dependencies(${PROJECT_NAME}
+  ${THIS_PACKAGE_INCLUDE_DEPENDS}
+)
+
+pluginlib_export_plugin_description_file(
+  rviz_common
+  plugin_description.xml
+)
 
 install(
   TARGETS ${PROJECT_NAME}
@@ -86,24 +102,34 @@ if(BUILD_TESTING)
     TIMEOUT 60
   )
 
-  # Built from sources directly so the stress test links neither Qt nor RViz and
-  # can run headless.
-  ament_add_gtest(test_ros_diagnostics_source
+  ament_add_gtest(
+    test_ros_diagnostics_source
     test/test_ros_diagnostics_source.cpp
     src/ros_diagnostics_source.cpp
     TIMEOUT 300
   )
+
   if(TARGET test_ros_diagnostics_source)
     target_include_directories(test_ros_diagnostics_source PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/include
     )
-    ament_target_dependencies(test_ros_diagnostics_source
+
+    ament_target_dependencies(
+      test_ros_diagnostics_source
       diagnostic_msgs
       rclcpp
+      sensor_msgs
     )
   endif()
 endif()
 
-ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
-ament_export_dependencies(${THIS_PACKAGE_INCLUDE_DEPENDS})
+ament_export_targets(
+  export_${PROJECT_NAME}
+  HAS_LIBRARY_TARGET
+)
+
+ament_export_dependencies(
+  ${THIS_PACKAGE_INCLUDE_DEPENDS}
+)
+
 ament_package()
