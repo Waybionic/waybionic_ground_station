@@ -8,6 +8,7 @@ from launch import LaunchDescription
 from launch_ros.actions import Node
 
 import launch_testing.actions
+import launch_testing.asserts
 
 import pytest
 
@@ -72,3 +73,10 @@ class TestMissingIkService(unittest.TestCase):
         time.sleep(0.5)
         retried = self._call_replay()
         self.assertTrue(retried.success, retried.message)
+
+
+@launch_testing.post_shutdown_test()
+class TestProcessOutput(unittest.TestCase):
+
+    def test_exit_codes(self, proc_info):
+        launch_testing.asserts.assertExitCodes(proc_info, allowable_exit_codes=[0, -2])

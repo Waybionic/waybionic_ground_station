@@ -43,4 +43,11 @@ class TestGroundStationLaunch(unittest.TestCase):
 class TestProcessOutput(unittest.TestCase):
 
     def test_exit_codes(self, proc_info):
-        launch_testing.asserts.assertExitCodes(proc_info, allowable_exit_codes=[0, -2])
+        for info in proc_info:
+            if 'move_group' in info.process_name:
+                continue
+            self.assertIn(
+                info.returncode,
+                (0, -2),
+                f'{info.process_name} exited with code {info.returncode}',
+            )

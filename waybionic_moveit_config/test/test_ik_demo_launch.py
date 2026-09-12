@@ -19,6 +19,8 @@ from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 import launch_testing.actions
+# Added asserts
+import launch_testing.asserts
 
 import pytest
 
@@ -232,3 +234,10 @@ class TestIkDemoRuntime(unittest.TestCase):
         self._assert_motion_between_targets(0, 1)
         self._assert_motion_between_targets(2, 3)
         self._assert_motion_between_targets(4, 5)
+
+@launch_testing.post_shutdown_test()
+class TestProcessOutput(unittest.TestCase):
+    
+    def test_exit_codes(self, proc_info):
+        # Only 0 and -2 are allowed as exit codes
+        launch_testing.asserts.assertExitCodes(proc_info, allowable_exit_codes=[0, -2])

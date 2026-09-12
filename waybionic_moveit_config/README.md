@@ -52,6 +52,19 @@ panel to run it again. For manual IK, drag a colored goal-state arrow and click
 **Plan & Execute**. MotionPlanning uses 50% of the model's velocity and
 acceleration limits by default; those sliders can still be adjusted in RViz.
 
+The XYZ demo routes every motion — including the initial ready move and each
+return to center — through `move_group`, so each segment is collision-checked
+planning rather than a direct controller command. The target's IK solution is
+solved with `avoid_collisions` on, and every waypoint of the planned trajectory
+is checked against `/check_state_validity` before the validated trajectory is
+executed. Segment timing follows `config/joint_limits.yaml` scaled by the
+`velocity_scaling` parameter (default `0.5`):
+
+```bash
+ros2 launch waybionic_moveit_config demo.launch.py auto_demo:=true
+ros2 param set /ik_xyz_demo velocity_scaling 0.25   # slower replays
+```
+
 Headless (no RViz), useful for testing:
 
 ```bash

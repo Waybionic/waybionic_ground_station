@@ -5,10 +5,10 @@ import copy
 import threading
 import time
 
-from control_msgs.action import FollowJointTrajectory
 from geometry_msgs.msg import Point, PoseStamped
-from moveit_msgs.msg import MoveItErrorCodes
-from moveit_msgs.srv import GetPositionIK
+from moveit_msgs.action import ExecuteTrajectory, MoveGroup
+from moveit_msgs.msg import Constraints, JointConstraint, MoveItErrorCodes
+from moveit_msgs.srv import GetPositionIK, GetStateValidity
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.duration import Duration
@@ -18,7 +18,6 @@ from rclpy.time import Time
 from sensor_msgs.msg import JointState
 from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformException, TransformListener
-from trajectory_msgs.msg import JointTrajectoryPoint
 from visualization_msgs.msg import Marker, MarkerArray
 
 
@@ -32,7 +31,8 @@ class IkXyzDemo(Node):
     def __init__(self):
         super().__init__("ik_xyz_demo")
         self.declare_parameter("step_m", 0.04)
-        self.declare_parameter("move_seconds", 0.55)
+        # Fraction of the joint_limits.yaml velocity/acceleration limits (0-1].
+        self.declare_parameter("velocity_scaling", 0.5)
         self.declare_parameter("pause_seconds", 0.15)
         self.declare_parameter("cycles", 1)
         self.declare_parameter("run_on_start", False)
@@ -51,10 +51,10 @@ class IkXyzDemo(Node):
         self.create_service(Trigger, "/ik_demo/replay", self._on_replay)
 
         self.ik_client = self.create_client(GetPositionIK, "/compute_ik")
-        self.trajectory_client = ActionClient(
-            self,
-            FollowJointTrajectory,
-            "/arm_controller/follow_joint_trajectory",
+        self.move_client = ActionClient(self, MoveGroup, "/move_action")
+        self.execute_client = ActionClient(self, ExecuteTrajectory, "/execute_trajectory")
+        self.validity_client = self.create_client(
+            GetStateValidity, "/check_state_validity"
         )
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -130,36 +130,113 @@ class IkXyzDemo(Node):
                 return True
         return False
 
-    def _send_joint_positions(self, positions, seconds, rejection_timeout=0.0):
-        goal = FollowJointTrajectory.Goal()
-        goal.trajectory.joint_names = JOINT_NAMES
-        point = JointTrajectoryPoint()
-        point.positions = [float(value) for value in positions]
-        point.time_from_start = Duration(seconds=seconds).to_msg()
-        goal.trajectory.points = [point]
+    def _plan_to_joints(self, positions):
+        """Ask move_group for a collision-checked plan; return the trajectory or None."""
+        goal = MoveGroup.Goal()
+        goal.request.group_name = "arm"
+        # Empty start_state with is_diff=True means "plan from the current state".
+        goal.request.start_state.is_diff = True
+        goal.request.num_planning_attempts = 5
+        goal.request.allowed_planning_time = 2.0
+        scaling = min(1.0, max(0.01, float(self.get_parameter("velocity_scaling").value)))
+        goal.request.max_velocity_scaling_factor = scaling
+        goal.request.max_acceleration_scaling_factor = scaling
+        constraints = Constraints()
+        for name, position in zip(JOINT_NAMES, positions):
+            constraint = JointConstraint()
+            constraint.joint_name = name
+            constraint.position = float(position)
+            constraint.tolerance_above = 0.01
+            constraint.tolerance_below = 0.01
+            constraint.weight = 1.0
+            constraints.joint_constraints.append(constraint)
+        goal.request.goal_constraints = [constraints]
+        goal.planning_options.plan_only = True
 
-        rejection_deadline = time.monotonic() + rejection_timeout
-        send_result = None
-        while rclpy.ok() and not self._stop.is_set():
-            send_result = self._wait_for_future(
-                self.trajectory_client.send_goal_async(goal), 5.0
-            )
-            if send_result is not None and send_result.accepted:
-                break
-            if time.monotonic() >= rejection_deadline:
-                break
-            if self._stop.wait(0.1):
-                return False
-
+        send_result = self._wait_for_future(self.move_client.send_goal_async(goal), 5.0)
         if send_result is None or not send_result.accepted:
-            self.get_logger().error("The arm controller rejected the trajectory")
-            return False
+            self.get_logger().error("move_group rejected the planning goal")
+            return None
+        result = self._wait_for_future(send_result.get_result_async(), 15.0)
+        if result is None:
+            self.get_logger().error("move_group did not return a plan in time")
+            return None
+        if result.result.error_code.val != MoveItErrorCodes.SUCCESS:
+            self.get_logger().error(
+                f"Planning failed with MoveIt error code {result.result.error_code.val}"
+            )
+            return None
+        if not result.result.planned_trajectory.joint_trajectory.points:
+            self.get_logger().error("move_group returned an empty trajectory")
+            return None
+        return result.result.planned_trajectory
 
-        result = self._wait_for_future(send_result.get_result_async(), seconds + 5.0)
-        if result is None or result.result.error_code != 0:
-            self.get_logger().error("The arm controller did not complete the motion")
+    def _trajectory_is_valid(self, trajectory):
+        """Check every waypoint against the planning scene via /check_state_validity."""
+        joint_trajectory = trajectory.joint_trajectory
+        for index, point in enumerate(joint_trajectory.points):
+            request = GetStateValidity.Request()
+            request.group_name = "arm"
+            request.robot_state.joint_state.name = list(joint_trajectory.joint_names)
+            request.robot_state.joint_state.position = list(point.positions)
+            response = self._wait_for_future(
+                self.validity_client.call_async(request), 2.0
+            )
+            if response is None:
+                self.get_logger().error(
+                    f"State validity check timed out at waypoint {index}"
+                )
+                return False
+            if not response.valid:
+                contacts = ", ".join(
+                    f"{contact.contact_body_1}<->{contact.contact_body_2}"
+                    for contact in response.contacts
+                ) or "no contact details"
+                self.get_logger().error(
+                    f"Trajectory waypoint {index} is invalid ({contacts})"
+                )
+                return False
+        return True
+
+    def _execute_trajectory(self, trajectory):
+        goal = ExecuteTrajectory.Goal()
+        goal.trajectory = trajectory
+        send_result = self._wait_for_future(
+            self.execute_client.send_goal_async(goal), 5.0
+        )
+        if send_result is None or not send_result.accepted:
+            self.get_logger().error("move_group rejected the trajectory execution")
+            return False
+        last_point = trajectory.joint_trajectory.points[-1]
+        duration = Duration.from_msg(last_point.time_from_start).nanoseconds / 1e9
+        result = self._wait_for_future(send_result.get_result_async(), duration + 10.0)
+        if result is None or result.result.error_code.val != MoveItErrorCodes.SUCCESS:
+            code = "timeout" if result is None else result.result.error_code.val
+            self.get_logger().error(f"Trajectory execution failed ({code})")
             return False
         return True
+
+    def _plan_and_execute(self, positions, label, retry_seconds=0.0):
+        """Plan, validate every waypoint, then execute the validated trajectory.
+
+        ``retry_seconds`` re-attempts the whole sequence until the deadline, for
+        the first motion when controllers may still be coming up.
+        """
+        deadline = time.monotonic() + retry_seconds
+        while rclpy.ok() and not self._stop.is_set():
+            trajectory = self._plan_to_joints(positions)
+            if trajectory is not None:
+                if not self._trajectory_is_valid(trajectory):
+                    self.get_logger().error(f"{label}: planned trajectory failed validation")
+                    return False
+                if self._execute_trajectory(trajectory):
+                    return True
+            if time.monotonic() >= deadline:
+                self.get_logger().error(f"{label}: motion failed")
+                return False
+            if self._stop.wait(0.5):
+                return False
+        return False
 
     def _lookup_wrist_pose(self):
         deadline = time.monotonic() + 10.0
@@ -188,10 +265,11 @@ class IkXyzDemo(Node):
 
         request = GetPositionIK.Request()
         request.ik_request.group_name = "arm"
+        # Self colliding goal returns an error code
+        request.ik_request.avoid_collisions = True
         request.ik_request.robot_state.joint_state = joint_state
         request.ik_request.pose_stamped = target
         request.ik_request.timeout = Duration(seconds=2.0).to_msg()
-        request.ik_request.avoid_collisions = False
 
         response = self._wait_for_future(self.ik_client.call_async(request), 4.0)
         if response is None:
@@ -301,7 +379,7 @@ class IkXyzDemo(Node):
         return target
 
     def _run_demo(self):
-        self.get_logger().info("Waiting for MoveIt IK and the arm controller...")
+        self.get_logger().info("Waiting for MoveIt IK, planning, and execution...")
         startup_timeout = self.get_parameter("startup_timeout_seconds").value
         if not self._wait_until_available(
             self.ik_client.wait_for_service, startup_timeout
@@ -310,11 +388,25 @@ class IkXyzDemo(Node):
                 self.get_logger().error("MoveIt IK service did not become available")
             return
         if not self._wait_until_available(
-            self.trajectory_client.wait_for_server, startup_timeout
+            self.move_client.wait_for_server, startup_timeout
+        ):
+            if rclpy.ok() and not self._stop.is_set():
+                self.get_logger().error("MoveGroup action did not become available")
+            return
+        if not self._wait_until_available(
+            self.execute_client.wait_for_server, startup_timeout
         ):
             if rclpy.ok() and not self._stop.is_set():
                 self.get_logger().error(
-                    "Arm trajectory action did not become available"
+                    "ExecuteTrajectory action did not become available"
+                )
+            return
+        if not self._wait_until_available(
+            self.validity_client.wait_for_service, startup_timeout
+        ):
+            if rclpy.ok() and not self._stop.is_set():
+                self.get_logger().error(
+                    "State validity service did not become available"
                 )
             return
 
@@ -331,10 +423,7 @@ class IkXyzDemo(Node):
             return
 
         self.get_logger().info("Moving to the ready pose...")
-        move_seconds = max(0.1, float(self.get_parameter("move_seconds").value))
-        if not self._send_joint_positions(
-            READY_POSITION, max(0.8, move_seconds), rejection_timeout=5.0
-        ):
+        if not self._plan_and_execute(READY_POSITION, "Ready pose", retry_seconds=5.0):
             return
         if self._stop.wait(0.15):
             return
@@ -376,7 +465,7 @@ class IkXyzDemo(Node):
                         f"XYZ IK demo aborted at {label}: no IK solution"
                     )
                     return
-                if not self._send_joint_positions(solution, move_seconds):
+                if not self._plan_and_execute(solution, label):
                     self.get_logger().error(
                         f"XYZ IK demo aborted at {label}: trajectory failed"
                     )
