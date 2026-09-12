@@ -43,6 +43,8 @@ class MotionTestNode(Node):
 
         self.declare_parameter('segment_duration', 3.0)
         self.segment_duration = float(self.get_parameter('segment_duration').value)
+        if self.segment_duration <= 0.0:
+            raise ValueError('segment_duration must be positive')
         self.home = model_radians_from_physical(HOME_PHYSICAL_DEGREES)
         self.current = list(self.home)
         self.start = list(self.home)
