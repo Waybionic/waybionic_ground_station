@@ -165,7 +165,7 @@ To test one fixed state instead of cycling, replace `mode:=cycle` with
 `mode:=normal`, `mode:=fault`, or `mode:=stale`.
 
 # Smoke Testing Checklist:
-- [ ] Run `colcon build` and `colcon test` with no failures.
+- [ ] Run `colcon build` and `colcon test` with no failures. Check with `colcon test-result --all --verbose`.
 - [ ] Launch `ground_station.launch.py` and verify RViz2 and Joint State Publisher
   windows open with the placeholder robot and mock diagnostics.
 - [ ] Launch `engineer_view.launch.py` with `use_mock_diagnostics:=true` and verify
@@ -178,3 +178,7 @@ To test one fixed state instead of cycling, replace `mode:=cycle` with
   - [ ] check `ros2 topic echo /diagnostics` for changing diagnostic status messages
 - [ ] Launch `engineer_view.launch.py` with `use_mock_diagnostics:=false` and verify
   the engineer panel shows live telemetry from the temporary publisher.
+
+  ## Recorded Test Runs
+  Main branch:
+  - commit 02d0b90 - ran smoke testing checklist with the aforementioned commands. All tests passed and the engineer view showed live diagnostics from the temporary publisher. Note: Stale mode reported high board temperature instead of unknown, unsure if this is expected behaviour.
