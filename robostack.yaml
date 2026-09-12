@@ -10,6 +10,9 @@ dependencies:
   - ros-jazzy-rviz2
   - ros-jazzy-xacro
   - ros-jazzy-joint-state-publisher-gui
+  - ros-jazzy-moveit
+  - ros-jazzy-ros2-control
+  - ros-jazzy-ros2-controllers
   - colcon-common-extensions
   - compilers
   - cmake
@@ -17,3 +20,4 @@ dependencies:
   - make
   - ninja
   - pytest <9
+  - setuptools <72
