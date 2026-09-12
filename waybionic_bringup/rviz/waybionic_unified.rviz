@@ -32,6 +32,8 @@ Panels:
     Diagnostics Topic: /diagnostics
     Name: DiagnosticsPanel
     Use Mock Diagnostics: true
+  - Class: waybionic_rviz_plugins/MotionTestPanel
+    Name: MotionTestPanel
 Visualization Manager:
   Class: ""
   Displays:

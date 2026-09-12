@@ -15,8 +15,10 @@
 #include <QGridLayout>
 #include <QHeaderView>
 #include <QHBoxLayout>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QSignalBlocker>
+#include <QSizePolicy>
 #include <QStringList>
 #include <QStyle>
 #include <QTableWidgetItem>
@@ -265,8 +267,10 @@ void DiagnosticsPanel::buildUi()
   telemetry_table_->verticalHeader()->setVisible(false);
   telemetry_table_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
   telemetry_table_->horizontalHeader()->setMinimumSectionSize(80);
+  telemetry_table_->setMaximumHeight(220);
+  telemetry_table_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
   table_layout->addWidget(telemetry_table_);
-  root_layout->addWidget(table_card, 1);
+  root_layout->addWidget(table_card);
 
   auto * alerts_card = makeCard();
   auto * alerts_root = new QVBoxLayout(alerts_card);
@@ -281,7 +285,40 @@ void DiagnosticsPanel::buildUi()
   alerts_layout_->setSpacing(6);
   alerts_root->addLayout(alerts_layout_);
   alerts_root->addStretch(1);
-  root_layout->addWidget(alerts_card);
+  root_layout->addWidget(alerts_card, 1);
+
+  buildMovementTestUi(root_layout);
+}
+
+void DiagnosticsPanel::buildMovementTestUi(QVBoxLayout * root_layout)
+{
+  auto * movement_card = makeCard();
+  auto * movement_layout = new QVBoxLayout(movement_card);
+  movement_layout->setSpacing(8);
+
+  movement_layout->addWidget(makeTitle("Movement Test"));
+
+  auto * description = makeMuted(
+    "Run a controlled movement sequence to visually inspect the robot before operation.");
+  description->setWordWrap(true);
+  movement_layout->addWidget(description);
+
+  movement_test_button_ = new QPushButton("▶ Run Movement Test");
+  movement_test_button_->setToolTip(
+    "Run the robot through its predefined movement test sequence.");
+
+  movement_test_progress_ = new QProgressBar();
+  movement_test_progress_->setRange(0, 100);
+  movement_test_progress_->setValue(0);
+  movement_test_progress_->setTextVisible(true);
+
+  movement_test_status_ = makeMuted("Ready to run movement test.");
+
+  movement_layout->addWidget(movement_test_button_);
+  movement_layout->addWidget(movement_test_progress_);
+  movement_layout->addWidget(movement_test_status_);
+
+  root_layout->addWidget(movement_card);
 }
 
 void DiagnosticsPanel::configureSource(const bool use_mock_diagnostics)
