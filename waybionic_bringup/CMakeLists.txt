@@ -18,11 +18,16 @@ if(BUILD_TESTING)
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
+<<<<<<< HEAD
   # colcon tests packages in parallel; a private ROS domain keeps this /tf out of other tests.
   set(isolated RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py")
   add_launch_test(test/test_ground_station_launch.py ${isolated})
   add_launch_test(test/test_arm_model_launch.py ${isolated})
   add_launch_test(test/test_joint_demo_launch.py ${isolated})
+=======
+  add_launch_test(test/test_ground_station_launch.py)
+  add_launch_test(test/test_old_arm_launch.py)
+>>>>>>> e85adbc (Integrate new old-arm model with motion publishers)
 endif()
 
 install(PROGRAMS scripts/joint_demo.py

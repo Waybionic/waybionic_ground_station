@@ -6,7 +6,12 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 
 
-JOINT_NAMES = ['base_yaw', 'shoulder', 'elbow', 'wrist_roll']
+JOINT_NAMES = [
+    'old_arm_base_yaw_joint',
+    'old_arm_shoulder_pitch_joint',
+    'old_arm_elbow_pitch_joint',
+    'old_arm_wrist_roll_joint',
+]
 JOINT_COUNT = len(JOINT_NAMES)
 HOME_PHYSICAL_DEGREES = [33.5, 112.5, 151.5, 27.5]
 SERVO_DIRECTIONS = [1.0, -1.0, 1.0, 1.0]
