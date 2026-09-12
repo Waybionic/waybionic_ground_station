@@ -121,9 +121,9 @@ diagnostics, and the hardware boundary have no dependency on one another.
 ## Hardware status
 
 No physical IMU driver exists yet. `hardware_reader.py` defines the interface
-and deliberately implements no serial protocol, because the sensor model,
-transport, and packet format are unconfirmed. The open questions for electrical
-are tracked in `docs/HARDWARE_INTERFACE.md`.
+and deliberately implements no serial protocol. Sensor model, transport,
+mounting, calibration, and noise values stay pending until Electrical answers
+the questions in `docs/HARDWARE_INTERFACE.md`.
 
 Running with `use_mock:=false` is still meaningful: no samples are published and
 `imu.heartbeat` reports STALE, which is what a missing sensor should look like.
@@ -135,10 +135,11 @@ colcon test --packages-select waybionic_sensors
 colcon test-result --all --verbose
 ```
 
-Coverage spans message semantics and covariance, mock generation and stalling,
-diagnostics levels and units, the hardware boundary, package structure, and a
-runtime suite that spins the node to check timestamps, frame IDs, rate, demo
-defaults, and the heartbeat transitioning from OK to STALE.
+96 tests, 0 failures on Ubuntu 24.04 / ROS 2 Jazzy. Coverage spans message
+semantics and covariance, mock generation and stalling, diagnostics levels and
+units, the hardware boundary, package structure, and a runtime suite that spins
+the node to check timestamps, frame IDs, rate, demo defaults, and the heartbeat
+transitioning from OK to STALE.
 
 ## Related docs
 

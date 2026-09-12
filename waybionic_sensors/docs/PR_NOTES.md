@@ -170,7 +170,7 @@ colcon test
 colcon test-result --all --verbose
 ```
 
-4 packages finished. **136 tests, 0 errors, 0 failures, 0 skipped.**
+4 packages finished. **137 tests, 0 errors, 0 failures, 0 skipped.**
 
 | Suite | Count | Covers |
 |-------|-------|--------|
@@ -184,9 +184,49 @@ colcon test-result --all --verbose
 
 ## Known limitations
 
-- No physical IMU driver. Blocked on `docs/HARDWARE_INTERFACE.md`.
+- No physical IMU driver. Sensor model, transport, mounting, calibration, and
+  noise values stay pending until Electrical answers
+  `docs/HARDWARE_INTERFACE.md`.
 - Covariance values on the raw topic stay unknown until electrical answers
   question 14. `orientation_stddev` is a demo-topic-only placeholder.
 - The demo orientation and demo TF are visualisation aids, not estimates.
 - The `base_link` to `imu_link` offset in the demo TF is a placeholder 0.1 m, not
   a mounting claim.
+
+## Verification (Ubuntu 24.04 / ROS 2 Jazzy / WSL2)
+
+Standard setup, no `-r` and no `--skip-keys`:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+rosdep update
+rosdep install --from-paths . --ignore-src -y
+#All required rosdeps installed successfully
+dpkg -s ros-jazzy-rviz-imu-plugin   # install ok; class rviz_imu_plugin/Imu
+colcon build --symlink-install      # 4 packages finished
+colcon test && colcon test-result --all
+# Summary: 137 tests, 0 errors, 0 failures, 0 skipped
+#   waybionic_sensors: 96 passed
+```
+
+Launch checks from that overlay:
+
+| Command | Result |
+|---------|--------|
+| `ros2 launch waybionic_sensors imu_publisher.launch.py` | 151 raw msgs; `data_demo` absent; `orientation_covariance[0] = -1`; gyro/accel covariance all-zero; heartbeat/rate/gyro/accel OK |
+| `ros2 launch waybionic_sensors imu_demo.launch.py launch_rviz:=false` | raw + 150 demo msgs; demo orientation covariance usable |
+| `ros2 launch waybionic_sensors imu_demo.launch.py` | RViz started (`OpenGl version: 4.5`); config class `rviz_imu_plugin/Imu` on `/waybionic/imu/data_demo`; no plugin load error |
+| `mock_stall_after_sec:=1.0 stale_timeout_sec:=0.5` | heartbeat, rate, angular_velocity, linear_acceleration all STALE (3); last magnitudes still shown |
+| restart default publisher | all four rows recovered to OK |
+| `use_mock:=false` | 0 sensor samples; heartbeat STALE |
+
+### Environment notes (not part of the standard setup)
+
+- A non-interactive WSL user session cannot type a sudo password. The first
+  `rosdep install --from-paths . --ignore-src -y` therefore stopped on
+  `sudo: a password is required`. Installing `ros-jazzy-rviz-imu-plugin` as
+  root after `apt-get update` (the previous apt candidate 404'd on a stale
+  index) made the same rosdep command exit 0 with no `-r` or skip key.
+- Building the checkout under a Windows path that contains a space (`Uni Work`)
+  makes `xacro` split the URDF argument in `waybionic_bringup`'s launch test.
+  Full-workspace evidence above used a copy at `/home/khuzaymah/pr11_ws`.
