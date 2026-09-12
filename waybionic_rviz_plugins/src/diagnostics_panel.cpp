@@ -284,8 +284,9 @@ void DiagnosticsPanel::buildUi()
   alerts_layout_ = new QVBoxLayout();
   alerts_layout_->setSpacing(6);
   alerts_root->addLayout(alerts_layout_);
-  alerts_root->addStretch(1);
-  root_layout->addWidget(alerts_card, 1);
+  alerts_card->setMaximumHeight(180);
+  alerts_card->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  root_layout->addWidget(alerts_card);
 
   buildMovementTestUi(root_layout);
 }
