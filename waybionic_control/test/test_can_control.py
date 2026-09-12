@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import struct
 import time
 import unittest
 from unittest.mock import MagicMock, patch
@@ -36,7 +37,6 @@ class TestCanControlLogic(unittest.TestCase):
         rclpy.shutdown()
 
     def setUp(self):
-        # Prevent the node from opening real network sockets during tests
         self.bus_patcher = patch('can.interface.Bus')
         self.mock_bus = self.bus_patcher.start()
         self.node = CanHostNode()
@@ -91,6 +91,20 @@ class TestCanControlLogic(unittest.TestCase):
         with self.assertRaises(ValueError):
             codec.decode_joint_state(b'\x00' * 9)
 
+    def test_non_finite_values_rejected(self):
+        with self.assertRaises(ValueError):
+            codec.encode_target_command(float('nan'), 0.0)
+        with self.assertRaises(ValueError):
+            codec.encode_joint_state(0.0, float('inf'), 1, 0)
+
+        bad_cmd = struct.pack('<ff', float('nan'), 0.0)
+        with self.assertRaises(ValueError):
+            codec.decode_target_command(bad_cmd)
+
+        bad_state = struct.pack('<ffBB', 0.0, float('-inf'), 1, 0)
+        with self.assertRaises(ValueError):
+            codec.decode_joint_state(bad_state)
+
     def test_six_node_configuration_and_stale_detection(self):
         self.assertEqual(len(self.node.last_seen), 6)
 
@@ -110,6 +124,32 @@ class TestCanControlLogic(unittest.TestCase):
 
         self.assertEqual(statuses['joint_2'].level, DiagnosticStatus.ERROR)
         self.assertEqual(statuses['joint_2'].message, 'STALE (No heartbeat)')
+
+    def test_health_zero_reports_error(self):
+        self.node.last_seen[3] = time.time()
+        self.node.healths[3] = 0
+        self.node.faults[3] = 0
+
+        self.node.diag_pub.publish = MagicMock()
+        self.node.publish_diagnostics()
+
+        published_msg = self.node.diag_pub.publish.call_args[0][0]
+        statuses = {s.hardware_id: s for s in published_msg.status}
+
+        self.assertEqual(statuses['joint_3'].level, DiagnosticStatus.ERROR)
+        self.assertEqual(statuses['joint_3'].message, 'UNHEALTHY (health=0, no fault code)')
+
+    def test_health_byte_preserved_from_bus(self):
+        state = codec.encode_joint_state(1.0, 0.0, 0, 0)
+        msg = can.Message(
+            arbitration_id=codec.STATE_BASE_ID + 3,
+            data=state,
+            is_extended_id=False)
+        self.node.bus.recv.side_effect = [msg, None]
+
+        self.node.read_bus()
+
+        self.assertEqual(self.node.healths[3], 0)
 
 
 if __name__ == '__main__':

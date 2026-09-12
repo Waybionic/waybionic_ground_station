@@ -39,10 +39,16 @@ class CanHostNode(Node):
         can_interface = self.get_parameter('can_interface').value
 
         self.get_logger().info(f'Host connecting to CAN bus on {can_interface}...')
-        self.bus = can.interface.Bus(bustype='socketcan', channel=can_interface)
+
+        try:
+            self.bus = can.interface.Bus(bustype='socketcan', channel=can_interface, fd=True)
+        except Exception as e:
+            self.get_logger().warning(f'SocketCAN failed ({e}), falling back to udp_multicast')
+            self.bus = can.interface.Bus(bustype='udp_multicast', channel='224.0.0.1', fd=True)
 
         self.last_seen = {i: 0.0 for i in range(1, 7)}
         self.faults = {i: 0 for i in range(1, 7)}
+        self.healths = {i: 1 for i in range(1, 7)}
         self.last_cmd_time = 0.0
 
         self.create_timer(0.05, self.read_bus)
@@ -87,6 +93,7 @@ class CanHostNode(Node):
                     pos, vel, health, fault = codec.decode_joint_state(msg.data)
                     self.last_seen[joint_id] = time.time()
                     self.faults[joint_id] = fault
+                    self.healths[joint_id] = health
                     self.publish_joint_state(joint_id, pos, vel)
                 except ValueError as e:
                     self.get_logger().warning(f'Ignored bad state: {e}')
@@ -132,6 +139,9 @@ class CanHostNode(Node):
             status.values.append(
                 KeyValue(key='fault_code', value=hex(self.faults[joint_id]))
             )
+            status.values.append(
+                KeyValue(key='health', value=str(self.healths[joint_id]))
+            )
 
             if current_time - self.last_seen[joint_id] > 0.5:
                 status.level = DiagnosticStatus.ERROR
@@ -139,6 +149,9 @@ class CanHostNode(Node):
             elif self.faults[joint_id] != 0:
                 status.level = DiagnosticStatus.ERROR
                 status.message = f'HARDWARE FAULT (Code: {hex(self.faults[joint_id])})'
+            elif self.healths[joint_id] == 0:
+                status.level = DiagnosticStatus.ERROR
+                status.message = 'UNHEALTHY (health=0, no fault code)'
             else:
                 status.level = DiagnosticStatus.OK
                 status.message = 'OK'

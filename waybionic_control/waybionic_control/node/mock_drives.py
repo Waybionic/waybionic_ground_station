@@ -30,7 +30,12 @@ class MockDrivesNode(Node):
 
         can_interface = self.get_parameter('can_interface').value
         self.get_logger().info(f'Connecting to virtual CAN bus on {can_interface}...')
-        self.bus = can.interface.Bus(bustype='socketcan', channel=can_interface)
+
+        try:
+            self.bus = can.interface.Bus(bustype='socketcan', channel=can_interface, fd=True)
+        except Exception as e:
+            self.get_logger().warning(f'SocketCAN failed ({e}), falling back to udp_multicast')
+            self.bus = can.interface.Bus(bustype='udp_multicast', channel='224.0.0.1', fd=True)
 
         self.positions = {i: 0.0 for i in range(1, 7)}
         self.velocities = {i: 0.0 for i in range(1, 7)}

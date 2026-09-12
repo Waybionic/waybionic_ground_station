@@ -14,6 +14,7 @@
 
 """Protocol codec for encoding and decoding provisional Waybionic CAN-FD frames."""
 
+import math
 import struct
 
 # Provisional CAN IDs
@@ -29,6 +30,8 @@ def encode_target_command(position, velocity):
     :param velocity: Target velocity.
     :return: 8-byte packed payload.
     """
+    if not (math.isfinite(position) and math.isfinite(velocity)):
+        raise ValueError('Command contains NaN or Inf values')
     return struct.pack('<ff', position, velocity)
 
 
@@ -41,7 +44,10 @@ def decode_target_command(data):
     :raises ValueError: If the payload is less than 8 bytes.
     """
     if len(data) >= 8:
-        return struct.unpack('<ff', data[:8])
+        pos, vel = struct.unpack('<ff', data[:8])
+        if not (math.isfinite(pos) and math.isfinite(vel)):
+            raise ValueError('Command contains NaN or Inf values')
+        return pos, vel
     raise ValueError('Command payload too short')
 
 
@@ -55,6 +61,8 @@ def encode_joint_state(position, velocity, health, fault):
     :param fault: Hardware fault code byte.
     :return: 10-byte packed payload.
     """
+    if not (math.isfinite(position) and math.isfinite(velocity)):
+        raise ValueError('State contains NaN or Inf values')
     return struct.pack('<ffBB', position, velocity, health, fault)
 
 
@@ -67,5 +75,8 @@ def decode_joint_state(data):
     :raises ValueError: If the payload is less than 10 bytes.
     """
     if len(data) >= 10:
-        return struct.unpack('<ffBB', data[:10])
+        pos, vel, health, fault = struct.unpack('<ffBB', data[:10])
+        if not (math.isfinite(pos) and math.isfinite(vel)):
+            raise ValueError('State contains NaN or Inf values')
+        return pos, vel, health, fault
     raise ValueError('State payload too short')
