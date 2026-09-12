@@ -24,9 +24,9 @@ def generate_launch_description():
     waybionic_bringup_dir = get_package_share_directory('waybionic_bringup')
 
     default_model_path = os.path.join(
-        waybionic_desc_dir, 'urdf', 'old_arm_prototype.urdf')
+        waybionic_desc_dir, 'urdf', 'waybionic_old_arm.urdf.xacro')
     default_rviz_config_path = os.path.join(
-        waybionic_bringup_dir, 'rviz', 'waybionic_unified.rviz')
+        waybionic_bringup_dir, 'rviz', 'waybionic_old_arm_root.rviz')
 
     # --- Declare Launch Arguments ---
     model_arg = DeclareLaunchArgument(
