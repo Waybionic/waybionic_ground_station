@@ -10,7 +10,7 @@
   "remoteUser": "ubuntu",
   "updateRemoteUserUID": true,
   "init": true,
-  "postCreateCommand": "sudo chown \"$(id -u):$(id -g)\" /waybionic_ws /waybionic_ws/src && bash -c 'source /opt/ros/jazzy/setup.bash && cd /waybionic_ws && colcon build --symlink-install'",
+  "postCreateCommand": "bash -c 'source /opt/ros/jazzy/setup.bash && cd /waybionic_ws && colcon build --symlink-install'",
   "customizations": {
     "vscode": {
       "settings": {

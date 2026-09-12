@@ -127,6 +127,10 @@ colcon test-result --verbose
 
 Source edits persist in your host checkout. Build outputs stay inside the
 container, outside the mounted checkout, and may be discarded when it is rebuilt.
+Copied source in build/test images remains root-owned; only `build`, `install`,
+and `log` are writable in those workspaces. These output directories link to
+the container user's home so Dev Container UID updates work without `sudo`.
+The development source bind mount stays editable.
 After changing package dependencies, run **Dev Containers: Rebuild Container**.
 When adding a package, also add its manifest to the Dockerfile's dependency-stage
 `COPY` instructions. Run the clean Docker test command above before a PR.
@@ -314,13 +318,26 @@ and [ROS 2 Jazzy Ubuntu installation](https://docs.ros.org/en/jazzy/Installation
 
 For the native RViz path, run these commands inside Ubuntu. Keep the workspace in the Linux home directory
 (`~/waybionic_ws`), not under `/mnt/c`. An existing Windows clone does not replace
-this Linux workspace; keep any uncommitted Windows work intact. Skip the clone
-only if the repository already exists at `~/waybionic_ws/src/waybionic_ground_station`.
+this Linux workspace; keep any uncommitted Windows work intact. Choose the path
+below that matches your native workspace.
+
+### New clone
+
+Run this only when `~/waybionic_ws/src/waybionic_ground_station` does not exist:
 
 ```bash
 mkdir -p ~/waybionic_ws/src
 cd ~/waybionic_ws/src
 git clone https://github.com/Waybionic/waybionic_ground_station.git
+cd ~/waybionic_ws
+```
+
+### Existing workspace
+
+If `~/waybionic_ws/src/waybionic_ground_station` already exists, use it without
+cloning again. Leave any local changes intact and continue from the workspace root:
+
+```bash
 cd ~/waybionic_ws
 ```
 

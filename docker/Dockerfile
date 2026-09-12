@@ -9,7 +9,6 @@ COPY waybionic_bringup/package.xml src/waybionic_ground_station/waybionic_bringu
 COPY waybionic_rviz_plugins/package.xml src/waybionic_ground_station/waybionic_rviz_plugins/package.xml
 
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends sudo \
 	&& rosdep update --rosdistro jazzy \
 	&& rosdep install --from-paths src --ignore-src --rosdistro jazzy -y \
 	&& rm -rf /var/lib/apt/lists/*
@@ -17,9 +16,8 @@ RUN apt-get update \
 RUN if ! id -u ubuntu >/dev/null 2>&1; then \
 	  useradd --create-home --user-group --uid 1000 --shell /bin/bash ubuntu; \
 	fi \
-	&& printf 'ubuntu ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/ubuntu \
-	&& chmod 0440 /etc/sudoers.d/ubuntu \
-	&& chown -R ubuntu:ubuntu /waybionic_ws
+	&& install -d -o ubuntu -g ubuntu /home/ubuntu/.waybionic_ws/{build,install,log} \
+	&& ln -s /home/ubuntu/.waybionic_ws/{build,install,log} /waybionic_ws/
 
 COPY --chmod=755 docker/entrypoint.sh /entrypoint.sh
 
@@ -31,7 +29,7 @@ CMD ["bash"]
 
 FROM development AS build
 
-COPY --chown=ubuntu:ubuntu . /waybionic_ws/src/waybionic_ground_station
+COPY . /waybionic_ws/src/waybionic_ground_station
 
 RUN source /opt/ros/jazzy/setup.bash \
 	&& colcon build --symlink-install
