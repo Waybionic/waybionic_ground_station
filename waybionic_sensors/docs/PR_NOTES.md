@@ -25,6 +25,7 @@ Requested changes on the open IMU PR, without expanding scope:
 | No regression for the stall path | `test_stale_stall_marks_heartbeat_rate_and_telemetry` plus unit tests on the diagnostics builder. Mock stall latches so a later earlier-timestamp read cannot unstall |
 | Placeholder stddev implied confidence | Raw/live gyro and accel covariances default to all-zero (ROS unknown). Positive `*_stddev` is opt-in for datasheet/calibration. Synthetic orientation covariance stays on the demo topic only |
 | Docs should be beginner-readable | README and `IMU_CONTRACT.md` explain raw vs demo in plain English before the ROS field names |
+| `ament_python` has no Jazzy rosdep key | Removed `<buildtool_depend>ament_python</buildtool_depend>`; retained `<build_type>ament_python</build_type>`. Strict `rosdep install` no longer needs `-r` or `--skip-keys ament_python` for this package |
 
 ## What changed relative to the old IMU branch
 
@@ -35,7 +36,7 @@ Requested changes on the open IMU PR, without expanding scope:
 | Covariances all zero | Zero was misread as "perfectly certain" | Raw gyro/accel now stay unknown (all-zero) until a datasheet stddev is supplied; demo orientation covariance is synthetic and demo-only |
 | No `/diagnostics` output | Panel could not show IMU health | `imu.heartbeat` plus rate and telemetry rows at 2 Hz |
 | One 120-line node doing everything | Serial work would have to be bolted into the publisher | Six modules: reading type, mock source, hardware boundary, message builder, diagnostics builder, node |
-| Three metadata tests | No behavioural coverage | 92 tests including a runtime suite that spins the node |
+| Three metadata tests | No behavioural coverage | 96 tests including a runtime suite that spins the node |
 | `serial_port` parameter with no reader | Suggested a driver existed | Documented boundary plus a stub that makes the missing driver visible in diagnostics |
 
 ## Raw versus fused orientation
@@ -159,7 +160,7 @@ colcon test --packages-select waybionic_sensors
 colcon test-result --all --verbose
 ```
 
-95 tests, 0 failures.
+96 tests, 0 failures.
 
 Full workspace on Ubuntu 24.04 / ROS 2 Jazzy / WSL2:
 
@@ -178,7 +179,7 @@ colcon test-result --all --verbose
 | `test_imu_publisher_node.py` | 16 | Runtime: rate, timestamps, frame IDs, demo defaults, unknown covariance, heartbeat OK then STALE, stall marks all four signals, live mode without hardware |
 | `test_mock_source.py` | 14 | Determinism, gravity, amplitude bounds, stall latch, quaternion normalisation |
 | `test_hardware_reader.py` | 9 | Interface surface, stub behaviour, a custom reader satisfying the boundary |
-| `test_package_metadata.py` | 18 | Module separation, node delegation, launch defaults, `rviz_imu_plugin` on `data_demo`, raw vs demo docs, hardware lifecycle, entry point, no invented protocol |
+| `test_package_metadata.py` | 19 | Module separation, node delegation, launch defaults, `rviz_imu_plugin` on `data_demo`, no ament_python rosdep, raw vs demo docs, hardware lifecycle, entry point, no invented protocol |
 | `test_flake8.py`, `test_pep257.py` | 2 | Style and docstrings |
 
 ## Known limitations

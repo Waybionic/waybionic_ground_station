@@ -68,6 +68,14 @@ def test_package_declares_diagnostics_dependency():
     assert 'diagnostic_msgs' in read('package.xml')
 
 
+def test_package_does_not_declare_ament_python_as_a_rosdep():
+    # ament_python has no Jazzy rosdep key. Declaring it as a buildtool_depend
+    # breaks a strict rosdep install; keep only the ament_python build type.
+    manifest = read('package.xml')
+    assert '<buildtool_depend>ament_python</buildtool_depend>' not in manifest
+    assert '<build_type>ament_python</build_type>' in manifest
+
+
 def test_package_declares_rviz_imu_plugin_dependency():
     assert '<exec_depend>rviz_imu_plugin</exec_depend>' in read('package.xml')
 

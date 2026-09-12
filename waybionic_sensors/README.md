@@ -12,7 +12,7 @@ boundary a real driver will plug into once electrical confirms the sensor.
 ```bash
 source /opt/ros/jazzy/setup.bash
 cd <workspace>
-rosdep install --from-paths src --ignore-src -r -y
+rosdep install --from-paths src --ignore-src -y
 colcon build --packages-select waybionic_sensors --symlink-install
 source install/setup.bash
 
