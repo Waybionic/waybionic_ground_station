@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
-source /waybionic_ws/install/setup.bash
+source /opt/ros/jazzy/setup.bash
+
+if [[ -f /waybionic_ws/install/setup.bash ]]; then
+	source /waybionic_ws/install/setup.bash
+fi
 
 exec "$@"

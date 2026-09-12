@@ -1,0 +1,21 @@
+{
+  "name": "WayBionic ROS 2 Jazzy",
+  "build": {
+    "dockerfile": "../docker/Dockerfile",
+    "context": "..",
+    "target": "development"
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/waybionic_ws/src/waybionic_ground_station,type=bind",
+  "workspaceFolder": "/waybionic_ws/src/waybionic_ground_station",
+  "remoteUser": "ubuntu",
+  "updateRemoteUserUID": true,
+  "init": true,
+  "postCreateCommand": "bash -c 'source /opt/ros/jazzy/setup.bash && cd /waybionic_ws && colcon build --symlink-install'",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.cwd": "/waybionic_ws"
+      }
+    }
+  }
+}

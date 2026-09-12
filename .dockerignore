@@ -1,4 +1,11 @@
-**install
-**build
-**log
-docker/Dockerfile
+.git
+.vscode
+**/build
+**/install
+**/log
+**/__pycache__
+**/*.py[cod]
+**/.env
+**/.env.*
+**/easy_handeye2
+**/ros2_aruco

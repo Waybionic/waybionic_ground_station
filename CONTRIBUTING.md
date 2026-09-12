@@ -67,26 +67,23 @@ Refs #2
 
 ## Before you open a PR
 
-There's no CI yet, so validation is on you. From the workspace root, on a clean build:
+CI builds and tests the shared Dockerfile on Linux x86-64 and ARM64. Run the same
+test target from the **repository root** before opening a PR:
 
-```bash
-source /opt/ros/jazzy/setup.bash
-rosdep install --from-paths . --ignore-src -r -y
-colcon build
-colcon test        # if the package has tests
+```console
+docker build --progress=plain --target test --file docker/Dockerfile --tag waybionic-ground-station:jazzy .
 ```
 
-If you touched Python, lint it:
-
-```bash
-flake8 .           # or: colcon test --packages-select <pkg>  (runs ament_flake8)
-```
+Package lint checks registered with colcon run with the tests. Run any additional
+Python lint checks inside the Dev Container, not against an arbitrary host Python
+environment. For RViz or other visual changes, also validate the relevant
+GUI path in [BuildInstructions.md](./BuildInstructions.md); Docker tests are headless.
 
 Make sure:
 
 - [ ] Branch is up to date with `main` (`git pull origin main` or rebase).
-- [ ] `colcon build` succeeds from a clean tree.
-- [ ] Tests pass (if the package has any).
+- [ ] The Docker `test` target builds successfully from the current source.
+- [ ] Both architecture jobs pass in CI.
 - [ ] No lint errors on Python you changed.
 - [ ] No build artifacts committed (`build/`, `install/`, `log/` are gitignored — keep it that way).
 - [ ] No personal or machine-specific paths committed (absolute paths, local `.vscode` settings, etc.).
@@ -110,12 +107,16 @@ Make sure:
 
 ## Development environment
 
-Full build and launch steps are in [BuildInstructions.md](./BuildInstructions.md). Quick notes:
+Full first-time setup, build, and launch steps are in
+[BuildInstructions.md](./BuildInstructions.md). Quick notes:
 
-- **Target:** ROS 2 **Jazzy** on **Ubuntu 24.04**.
-- **Windows:** use **WSL2** with Ubuntu 24.04.
-- **Linux:** native, no extra setup.
-- **macOS (Apple Silicon):** use the native RoboStack workflow in
+- **Default development/test environment:** Docker with ROS 2 **Jazzy** on
+  **Ubuntu 24.04**, using the repository Dev Container or Docker test target.
+- **Windows Docker backend:** WSL2; a separate Ubuntu/ROS install is unnecessary
+  unless you also need the native RViz path.
+- **Native RViz on Windows/Linux:** Ubuntu 24.04 with ROS 2 Jazzy, under WSL2
+  on Windows.
+- **Native RViz on macOS (Apple Silicon):** use the RoboStack workflow in
   [BuildInstructions.md](./BuildInstructions.md). Do not commit Mac-specific
   local paths into shared config.
 
