@@ -69,7 +69,7 @@
     <origin xyz="0.12 0 0"/>
     <axis xyz="0 1 0"/>
     <!-- physical servo range 90..270 deg, zero 151.5 deg, direction +1 -->
-    <limit lower="-1.073377" upper="2.277655" effort="10" velocity="2.0"/>
+    <limit lower="-1.073377" upper="2.068215" effort="10" velocity="2.0"/>
   </joint>
 
   <link name="wrist_link">
