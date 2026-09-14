@@ -39,6 +39,8 @@ class MotionTestNode(Node):
             '/joint_states',
             10,
         )
+        self.status_publisher = self.create_publisher(
+            String, '/old_arm_motion_test/status', 10)
         self.command_subscription = self.create_subscription(
             String,
             '/old_arm_motion_test/command',
@@ -63,8 +65,10 @@ class MotionTestNode(Node):
             self.home,
         ]
         self.sequence_index = 0
+        self.sequence_playback = False
         self.timer = self.create_timer(0.02, self.update_trajectory)
         self.publish_joint_state()
+        self.publish_status('READY')
 
         self.get_logger().info(
             'Old-arm 4-DOF motion test started; publishing simulated commanded positions.')
@@ -73,13 +77,19 @@ class MotionTestNode(Node):
         command = message.data.strip().upper()
         if command == 'RUN':
             self.sequence_index = 0
+            self.sequence_playback = True
             self.start_segment(self.sequence[self.sequence_index])
+            self.publish_status('RUNNING')
         elif command == 'HOME':
+            self.sequence_playback = False
             self.start_segment(self.home)
+            self.publish_status('HOME')
         elif command == 'STOP':
+            self.sequence_playback = False
             self.segment_active = False
             self.target = list(self.current)
             self.publish_joint_state()
+            self.publish_status('STOPPED')
 
     def start_segment(self, target):
         self.start = list(self.current)
@@ -102,11 +112,17 @@ class MotionTestNode(Node):
 
         if progress >= 1.0:
             self.current = list(self.target)
-            if self.sequence_index < len(self.sequence) - 1:
+            if self.sequence_playback and self.sequence_index < len(self.sequence) - 1:
                 self.sequence_index += 1
                 self.start_segment(self.sequence[self.sequence_index])
             else:
                 self.segment_active = False
+                self.publish_status('COMPLETE')
+
+    def publish_status(self, status):
+        message = String()
+        message.data = status
+        self.status_publisher.publish(message)
 
     def publish_joint_state(self):
         message = JointState()

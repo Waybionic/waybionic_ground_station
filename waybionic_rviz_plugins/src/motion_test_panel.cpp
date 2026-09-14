@@ -1,6 +1,7 @@
 #include "waybionic_rviz_plugins/motion_test_panel.hpp"
 
 #include <QHBoxLayout>
+#include <QMetaObject>
 #include <QVBoxLayout>
 
 #include <pluginlib/class_list_macros.hpp>
@@ -24,6 +25,9 @@ void MotionTestPanel::onInitialize()
 
   command_publisher_ = ros_node_->create_publisher<std_msgs::msg::String>(
     "/old_arm_motion_test/command", rclcpp::QoS(10));
+  status_subscription_ = ros_node_->create_subscription<std_msgs::msg::String>(
+    "/old_arm_motion_test/status", rclcpp::QoS(10),
+    [this](const std_msgs::msg::String::SharedPtr message) { handleStatus(message); });
 }
 void MotionTestPanel::buildUi()
 {
@@ -133,6 +137,28 @@ void MotionTestPanel::publishCommand(const std::string & command)
   std_msgs::msg::String message;
   message.data = command;
   command_publisher_->publish(message);
+}
+
+void MotionTestPanel::handleStatus(const std_msgs::msg::String::SharedPtr message)
+{
+  const QString status = QString::fromStdString(message->data);
+  QMetaObject::invokeMethod(this, [this, status]() {
+    if (status == "COMPLETE" || status == "READY") {
+      test_running_ = false;
+      status_label_->setText("READY");
+      result_label_->setText(status == "COMPLETE" ? "Motion sequence complete." : "Ready.");
+      run_button_->setEnabled(true);
+      home_button_->setEnabled(true);
+      stop_button_->setEnabled(false);
+    } else if (status == "STOPPED" || status == "FAULT" || status == "ERROR") {
+      test_running_ = false;
+      status_label_->setText(status);
+      result_label_->setText("Motion unavailable or stopped.");
+      run_button_->setEnabled(status == "STOPPED");
+      home_button_->setEnabled(status == "STOPPED");
+      stop_button_->setEnabled(false);
+    }
+  }, Qt::QueuedConnection);
 }
 
 }  // namespace waybionic_rviz_plugins
