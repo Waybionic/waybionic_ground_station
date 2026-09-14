@@ -1,1 +1,0 @@
-"""WayBionic hardware transport nodes."""

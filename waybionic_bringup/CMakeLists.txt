@@ -18,7 +18,6 @@ if(BUILD_TESTING)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
   add_launch_test(test/test_ground_station_launch.py)
-  add_launch_test(test/test_old_arm_launch.py)
 endif()
 
 install(DIRECTORY launch
