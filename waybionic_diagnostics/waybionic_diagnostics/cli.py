@@ -9,6 +9,7 @@ from rclpy.node import Node
 
 
 STALE_AFTER_SECONDS = 5.0
+SNAPSHOT_COLLECTION_SECONDS = 0.1
 
 
 def status_name(level: int) -> str:
@@ -55,6 +56,7 @@ class DiagnosticsCliNode(Node):
 
         self.topic = topic
         self.latest: List[DiagnosticStatus] = []
+        self._received_monotonic_by_name: Dict[str, float] = {}
         self._sample_time_by_name: Dict[str, float] = {}
         self.last_received_monotonic: Optional[float] = None
 
@@ -77,6 +79,7 @@ class DiagnosticsCliNode(Node):
         latest_by_name = {status.name: status for status in self.latest}
         for status in message.status:
             latest_by_name[status.name] = status
+            self._received_monotonic_by_name[status.name] = received_monotonic
             self._sample_time_by_name[status.name] = sample_time
 
         self.latest = list(latest_by_name.values())
@@ -92,10 +95,13 @@ class DiagnosticsCliNode(Node):
     def status_age(self, status: DiagnosticStatus) -> Optional[float]:
         """Return the sample age for one cached diagnostic status."""
         sample_time = self._sample_time_by_name.get(status.name)
-        if sample_time is None:
+        received_monotonic = self._received_monotonic_by_name.get(status.name)
+        if sample_time is None or received_monotonic is None:
             return None
 
-        return max(0.0, time.time() - sample_time)
+        sample_age = max(0.0, time.time() - sample_time)
+        receive_age = max(0.0, time.monotonic() - received_monotonic)
+        return max(sample_age, receive_age)
 
 
 def overall_status(statuses: List[str]) -> str:
@@ -196,8 +202,9 @@ def print_snapshot(node: DiagnosticsCliNode, clear: bool = False):
     print('─' * 100)
     print(f'Overall: {overall_status(rendered_statuses)}')
 
-    if age is not None:
-        print(f'Diagnostics stream age: {age:.1f}s')
+    stream_age = node.data_age()
+    if stream_age is not None:
+        print(f'Diagnostics stream age: {stream_age:.1f}s')
 
 
 def wait_for_first_message(node: DiagnosticsCliNode, timeout: float = 5.0):
@@ -215,7 +222,10 @@ def wait_for_first_message(node: DiagnosticsCliNode, timeout: float = 5.0):
 
 def run_snapshot(node: DiagnosticsCliNode):
     """Run one diagnostic snapshot."""
-    wait_for_first_message(node)
+    if wait_for_first_message(node):
+        deadline = time.monotonic() + SNAPSHOT_COLLECTION_SECONDS
+        while rclpy.ok() and time.monotonic() < deadline:
+            rclpy.spin_once(node, timeout_sec=0.0)
     print_snapshot(node)
 
 

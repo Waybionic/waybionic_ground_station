@@ -143,6 +143,38 @@ def test_diagnostics_callback_merges_entries_from_multiple_publishers():
         rclpy.shutdown()
 
 
+def test_run_snapshot_collects_queued_publishers(monkeypatch, capsys):
+    import rclpy
+    from diagnostic_msgs.msg import DiagnosticArray
+    from waybionic_diagnostics import cli
+
+    rclpy.init()
+    node = DiagnosticsCliNode('/test_diagnostics')
+    can_message = DiagnosticArray()
+    can_status = DiagnosticStatus()
+    can_status.name = 'can.bus'
+    can_status.level = DiagnosticStatus.ERROR
+    can_message.status = [can_status]
+    imu_message = DiagnosticArray()
+    imu_status = DiagnosticStatus()
+    imu_status.name = 'imu.orientation'
+    imu_status.level = DiagnosticStatus.OK
+    imu_message.status = [imu_status]
+
+    try:
+        node.diagnostics_callback(imu_message)
+        node.diagnostics_callback(can_message)
+        monkeypatch.setattr(cli, 'SNAPSHOT_COLLECTION_SECONDS', 0.0)
+        cli.run_snapshot(node)
+
+        output = capsys.readouterr().out
+        assert 'can.bus' in output
+        assert 'Overall: FAULT' in output
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
 def test_diagnostics_callback_uses_header_stamp_for_sample_age(monkeypatch, capsys):
     import rclpy
     from diagnostic_msgs.msg import DiagnosticArray
