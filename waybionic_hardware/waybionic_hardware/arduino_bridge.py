@@ -24,6 +24,15 @@ SEQUENCE = [
     [15.0, 100.0, 130.0, 5.0],
     HOME_PHYSICAL_DEGREES,
 ]
+RESPONSE_TIMEOUT_SECONDS = 1.0
+FAULT_STATUSES = {
+    'arduino-error',
+    'connection-failed',
+    'serial-read-failed',
+    'serial-write-failed',
+    'malformed-response',
+    'target-rejected',
+}
 
 
 def model_radians_from_physical(degrees):
@@ -55,6 +64,8 @@ class ArduinoBridge(Node):
         self.joint_publisher = self.create_publisher(JointState, '/joint_states', 10)
         self.diagnostics_publisher = self.create_publisher(
             DiagnosticArray, '/diagnostics', 10)
+        self.status_publisher = self.create_publisher(
+            String, '/old_arm_motion_test/status', 10)
         self.command_subscription = self.create_subscription(
             String, '/old_arm_motion_test/command', self.handle_command, 10)
 
@@ -63,8 +74,11 @@ class ArduinoBridge(Node):
         self.serial_reader = None
         self.serial_stop = threading.Event()
         self.connected = False
+        self.ready = False
+        self.faulted = False
         self.last_status = 'starting'
         self.last_error = ''
+        self.last_response_monotonic = None
         self.current = list(HOME_PHYSICAL_DEGREES)
         self.start = list(self.current)
         self.target = list(self.current)
@@ -82,6 +96,8 @@ class ArduinoBridge(Node):
     def connect_to_arduino(self):
         if self.dry_run:
             self.connected = True
+            self.ready = True
+            self.last_response_monotonic = time.monotonic()
             self.last_status = 'dry-run'
             self.get_logger().warn('Running in dry-run mode; no Arduino commands will be sent.')
             return
@@ -97,6 +113,8 @@ class ArduinoBridge(Node):
 
             self.serial_port = serial.Serial(self.port, self.baud, timeout=0.1)
             self.connected = True
+            self.ready = False
+            self.last_response_monotonic = time.monotonic()
             self.last_status = 'connected'
             self.serial_reader = threading.Thread(target=self.read_serial, daemon=True)
             self.serial_reader.start()
@@ -112,23 +130,44 @@ class ArduinoBridge(Node):
             try:
                 line = self.serial_port.readline().decode('ascii', errors='replace').strip()
                 if line:
+                    self.last_response_monotonic = time.monotonic()
                     self.process_serial_line(line)
             except Exception as error:
-                self.connected = False
-                self.last_error = str(error)
-                self.last_status = 'serial-read-failed'
+                self._latch_fault('serial-read-failed', str(error))
                 return
+
+    def _write_hold(self):
+        if self.dry_run or self.serial_port is None:
+            return True
+        try:
+            with self.serial_lock:
+                self.serial_port.write(b'HOLD\n')
+            return True
+        except Exception as error:
+            self.last_error = str(error)
+            return False
+
+    def _latch_fault(self, status, error):
+        self._write_hold()
+        self.motion_active = False
+        self.sequence_active = False
+        self.faulted = True
+        self.connected = False
+        self.ready = False
+        self.last_error = error
+        self.last_status = status
 
     def process_serial_line(self, line):
         self.get_logger().debug(f'Arduino: {line}')
         if line.startswith('READY,IK4,1'):
+            self.connected = True
+            self.ready = True
+            self.faulted = False
+            self.last_error = ''
             self.last_status = 'ready'
             return
         if line.startswith('ERROR,'):
-            self.motion_active = False
-            self.sequence_active = False
-            self.last_error = line[6:]
-            self.last_status = 'arduino-error'
+            self._latch_fault('arduino-error', line[6:])
             return
         if line == 'OK,ARRIVED':
             self.current = list(self.target)
@@ -148,6 +187,9 @@ class ArduinoBridge(Node):
             self.motion_active = False
             self.sequence_active = False
             self.last_status = 'held'
+            return
+
+        self._latch_fault('malformed-response', f'Unexpected response: {line}')
 
     def send_line(self, line):
         if self.dry_run:
@@ -161,15 +203,13 @@ class ArduinoBridge(Node):
                 self.serial_port.write((line + '\n').encode('ascii'))
             return True
         except Exception as error:
-            self.connected = False
-            self.last_error = str(error)
-            self.last_status = 'serial-write-failed'
+            self._latch_fault('serial-write-failed', str(error))
             return False
 
     def handle_command(self, message):
         command = message.data.strip().upper()
         if command == 'RUN':
-            if not self.connected:
+            if not self.connected or not self.ready or self.faulted:
                 self.last_status = 'run-rejected-not-connected'
                 return
             self.sequence_index = 0
@@ -193,10 +233,8 @@ class ArduinoBridge(Node):
             value < lower or value > upper
             for value, (lower, upper) in zip(target, PHYSICAL_LIMITS)
         ):
-            self.last_error = 'Target exceeds Arduino software limits.'
-            self.last_status = 'target-rejected'
-            self.motion_active = False
-            self.sequence_active = False
+            self._latch_fault(
+                'target-rejected', 'Target exceeds Arduino software limits.')
             return
 
         self.start = list(self.current)
@@ -210,6 +248,14 @@ class ArduinoBridge(Node):
             self.last_status = 'move-requested'
 
     def publish_estimated_state(self):
+        if (
+            not self.dry_run and self.connected and
+            self.last_response_monotonic is not None and
+            time.monotonic() - self.last_response_monotonic > RESPONSE_TIMEOUT_SECONDS
+        ):
+            self._latch_fault(
+                'serial-read-failed', 'Arduino response watchdog timed out.')
+
         if self.motion_active:
             progress = min(
                 (time.monotonic() - self.motion_started) / self.motion_duration,
@@ -233,7 +279,11 @@ class ArduinoBridge(Node):
     def publish_diagnostics(self):
         status = DiagnosticStatus()
         status.name = 'waybionic_arduino_bridge'
-        status.level = DiagnosticStatus.OK if self.connected else DiagnosticStatus.ERROR
+        status.level = (
+            DiagnosticStatus.ERROR
+            if self.faulted or not self.connected or self.last_status in FAULT_STATUSES
+            else DiagnosticStatus.OK
+        )
         status.message = self.last_status
         status.values = [
             KeyValue(key='port', value=self.port or 'not configured'),
@@ -246,8 +296,28 @@ class ArduinoBridge(Node):
         message.status = [status]
         self.diagnostics_publisher.publish(message)
 
+        if self.faulted or status.level == DiagnosticStatus.ERROR:
+            motion_status = 'FAULT'
+        elif self.motion_active:
+            motion_status = 'RUNNING'
+        elif self.last_status == 'arrived':
+            motion_status = 'COMPLETE'
+        elif self.last_status == 'held':
+            motion_status = 'STOPPED'
+        else:
+            motion_status = 'READY'
+        status_message = String()
+        status_message.data = motion_status
+        self.status_publisher.publish(status_message)
+
     def destroy_node(self):
+        if self.motion_active and (self.connected or self.serial_port is not None):
+            self._write_hold()
+        self.motion_active = False
+        self.sequence_active = False
         self.serial_stop.set()
+        if self.serial_reader is not None and self.serial_reader.is_alive():
+            self.serial_reader.join(timeout=0.5)
         if self.serial_port is not None:
             try:
                 self.serial_port.close()
