@@ -9,6 +9,7 @@
 
 #include <rclcpp/node.hpp>
 #include <rclcpp/publisher.hpp>
+#include <rclcpp/subscription.hpp>
 #include <std_msgs/msg/string.hpp>
 
 #include <rviz_common/panel.hpp>
@@ -34,6 +35,7 @@ private:
   void stopTest();
 
   void publishCommand(const std::string & command);
+  void handleStatus(const std_msgs::msg::String::SharedPtr message);
 
   QPushButton * run_button_{nullptr};
   QPushButton * home_button_{nullptr};
@@ -45,6 +47,7 @@ private:
 
   rclcpp::Node::SharedPtr ros_node_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr command_publisher_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr status_subscription_;
   bool test_running_{false};
 };
 
