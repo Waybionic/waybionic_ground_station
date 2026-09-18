@@ -13,7 +13,7 @@ echo "1. Sourcing ROS Jazzy..."
 source /opt/ros/jazzy/setup.bash
 
 echo "2. Checking dependencies with rosdep..."
-rosdep install --from-paths src --ignore-src -r -y
+rosdep install --from-paths src --ignore-src -y
 
 echo "3. Building Waybionic packages..."
 colcon build
@@ -21,7 +21,13 @@ colcon build
 echo "4. Sourcing workspace..."
 source install/setup.bash
 
-echo "5. Parsing URDF for syntax errors..."
+echo "5. Running tests..."
+colcon test --return-code-on-test-failure
+
+echo "6. Reporting test results..."
+colcon test-result --all --verbose
+
+echo "7. Parsing URDF for syntax errors..."
 # Find the URDF dynamically regardless of the clone folder name
 URDF_PATH=$(find src -name "waybionic_placeholder.urdf" | head -n 1)
 xacro $URDF_PATH > /dev/null
