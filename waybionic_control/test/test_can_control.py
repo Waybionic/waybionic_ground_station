@@ -24,6 +24,7 @@ from rclpy.parameter import Parameter
 from sensor_msgs.msg import JointState
 
 from waybionic_control.node.can_host import CanHostNode
+from waybionic_control.node.mock_drives import MockDrivesNode
 from waybionic_control.protocol import codec
 
 
@@ -268,6 +269,56 @@ class TestCanControlLogic(unittest.TestCase):
             self.assertIn('udp_multicast', link.message)
         finally:
             node.destroy_node()
+
+    def test_fault_and_stale_recovery(self):
+        self.node.diag_pub.publish = MagicMock()
+
+        self.node.last_seen[4] = time.time() - 10.0
+        self.node.publish_diagnostics()
+        statuses = {s.hardware_id: s
+                    for s in self.node.diag_pub.publish.call_args[0][0].status}
+        self.assertEqual(statuses['joint_4'].message, 'STALE (No heartbeat)')
+
+        faulted = codec.encode_joint_state(0.5, 0.0, 1, 0xAA)
+        self.node.bus.recv.side_effect = [
+            can.Message(arbitration_id=codec.STATE_BASE_ID + 4,
+                        data=faulted, is_extended_id=False), None]
+        self.node.read_bus()
+        self.node.publish_diagnostics()
+        statuses = {s.hardware_id: s
+                    for s in self.node.diag_pub.publish.call_args[0][0].status}
+        self.assertEqual(statuses['joint_4'].level, DiagnosticStatus.ERROR)
+        self.assertIn('HARDWARE FAULT', statuses['joint_4'].message)
+
+        healthy = codec.encode_joint_state(0.5, 0.0, 1, 0)
+        self.node.bus.recv.side_effect = [
+            can.Message(arbitration_id=codec.STATE_BASE_ID + 4,
+                        data=healthy, is_extended_id=False), None]
+        self.node.read_bus()
+        self.node.publish_diagnostics()
+        statuses = {s.hardware_id: s
+                    for s in self.node.diag_pub.publish.call_args[0][0].status}
+        self.assertEqual(statuses['joint_4'].level, DiagnosticStatus.OK)
+        self.assertEqual(statuses['joint_4'].message, 'OK')
+
+    def test_mock_drives_explicit_transport(self):
+        node = MockDrivesNode(parameter_overrides=[
+            Parameter('transport', Parameter.Type.STRING, 'udp_multicast')])
+        try:
+            self.assertEqual(
+                self.mock_bus.call_args.kwargs['bustype'], 'udp_multicast')
+        finally:
+            node.destroy_node()
+
+        self.bus_patcher.stop()
+        with patch('can.interface.Bus', side_effect=OSError('No such device')):
+            degraded = MockDrivesNode()
+        self.mock_bus = self.bus_patcher.start()
+        try:
+            self.assertIsNone(degraded.bus)
+            degraded.timer_callback()
+        finally:
+            degraded.destroy_node()
 
 
 if __name__ == '__main__':

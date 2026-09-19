@@ -22,20 +22,39 @@ from waybionic_control.protocol import codec
 class MockDrivesNode(Node):
     """Node simulating 6 CAN-based joint controllers."""
 
-    def __init__(self):
-        """Initialize the MockDrivesNode and connect to the virtual CAN bus."""
-        super().__init__('mock_drives')
+    def __init__(self, **kwargs):
+        """Initialize the MockDrivesNode and connect to the configured transport."""
+        super().__init__('mock_drives', **kwargs)
         self.declare_parameter('simulate_faults', True)
         self.declare_parameter('can_interface', 'vcan0')
+        self.declare_parameter('transport', 'socketcan')
 
         can_interface = self.get_parameter('can_interface').value
-        self.get_logger().info(f'Connecting to virtual CAN bus on {can_interface}...')
+        self.transport = self.get_parameter('transport').value
+        self.bus = None
 
-        try:
-            self.bus = can.interface.Bus(bustype='socketcan', channel=can_interface, fd=True)
-        except Exception as e:
-            self.get_logger().warning(f'SocketCAN failed ({e}), falling back to udp_multicast')
-            self.bus = can.interface.Bus(bustype='udp_multicast', channel='224.0.0.1', fd=True)
+        if self.transport == 'socketcan':
+            try:
+                self.bus = can.interface.Bus(
+                    bustype='socketcan', channel=can_interface, fd=True)
+                self.get_logger().info(f'SocketCAN active on {can_interface}')
+            except (can.CanError, OSError) as e:
+                self.get_logger().error(
+                    f'SocketCAN init failed on {can_interface}: {e}. Node is '
+                    'degraded; no frames will be published.')
+        elif self.transport == 'udp_multicast':
+            try:
+                self.bus = can.interface.Bus(
+                    bustype='udp_multicast', channel='224.0.0.1', fd=True)
+                self.get_logger().warning(
+                    'udp_multicast transport selected. This is NOT a physical '
+                    'CAN link and must not be used for hardware validation.')
+            except (can.CanError, OSError) as e:
+                self.get_logger().error(f'udp_multicast init failed: {e}')
+        else:
+            self.get_logger().error(
+                f'Unknown transport {self.transport!r}; '
+                "expected 'socketcan' or 'udp_multicast'.")
 
         self.positions = {i: 0.0 for i in range(1, 7)}
         self.velocities = {i: 0.0 for i in range(1, 7)}
@@ -75,9 +94,8 @@ class MockDrivesNode(Node):
             health_status = 1
             fault_code = 0
 
+            # Provisional fault scenarios, pending Electrical confirmation.
             if simulate_faults:
-                # arbitrary values for now
-                # scale values up if longer capture desired
                 if joint_id == 4 and 50 < self.count <= 90:
                     health_status = 0
                     fault_code = 0xAA
@@ -85,22 +103,22 @@ class MockDrivesNode(Node):
                     health_status = 0
                     fault_code = 0
 
-            data = codec.encode_joint_state(
-                self.positions[joint_id],
-                self.velocities[joint_id],
-                health_status,
-                fault_code
-            )
-
-            msg = can.Message(
-                arbitration_id=codec.STATE_BASE_ID + joint_id,
-                data=data,
-                is_extended_id=False,
-                is_fd=True
-            )
-
             try:
+                data = codec.encode_joint_state(
+                    self.positions[joint_id],
+                    self.velocities[joint_id],
+                    health_status,
+                    fault_code
+                )
+                msg = can.Message(
+                    arbitration_id=codec.STATE_BASE_ID + joint_id,
+                    data=data,
+                    is_extended_id=False,
+                    is_fd=True
+                )
                 self.bus.send(msg)
+            except ValueError as e:
+                self.get_logger().warning(f'Skipped bad state for joint {joint_id}: {e}')
             except can.CanError as e:
                 self.get_logger().error(f'CAN error: {e}')
 
