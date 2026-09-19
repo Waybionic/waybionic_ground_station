@@ -1,4 +1,4 @@
-name: ROS 2 Jazzy Docker Build and Test
+name: ROS 2 Jazzy Docker Compose Build and Test
 
 on:
   push:
@@ -17,8 +17,8 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Build and Test Docker Image
-        run: docker build --progress=plain --target test --file docker/Dockerfile --tag waybionic-ground-station:ci .
+      - name: Build and Test with Docker Compose
+        run: docker compose --progress plain build test
 
   build-and-test-arm64:
     runs-on: ubuntu-24.04-arm
@@ -27,5 +27,5 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Build and Test Docker Image
-        run: docker build --progress=plain --target test --file docker/Dockerfile --tag waybionic-ground-station:ci .
+      - name: Build and Test with Docker Compose
+        run: docker compose --progress plain build test

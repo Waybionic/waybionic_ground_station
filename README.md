@@ -13,21 +13,27 @@ Currently, this repository contains the clean foundation and placeholder robot m
 - **`waybionic_rviz_plugins`**
   Engineer diagnostics panel, mock/live diagnostics sources, and a temporary diagnostics publisher.
 
-## Docker Development and Tests
+## Docker Compose Development and Tests
 
-Docker is the default development and headless build/test path. See
+Docker Compose is the default development and headless build/test path. See
 [BuildInstructions.md](./BuildInstructions.md#docker-setup-default) for first-time
 Windows, macOS, or Linux setup; no host ROS installation is required for this path.
 
 From the repository root:
 
 ```console
-docker build --progress=plain --target test --file docker/Dockerfile --tag waybionic-ground-station:jazzy .
+docker compose --progress plain build test
 ```
 
+Start the headless demo with `docker compose up --build`. Stop it with **Ctrl+C**,
+then remove the container with `docker compose down`.
+
 For editing, open the repository with VS Code's **Dev Containers: Reopen in Container**.
-Local development and CI use the same Dockerfile, with CI jobs for x86-64 and ARM64.
-The default container is headless. Windows users can run the
+Local development and CI use [compose.yaml](./compose.yaml) and the same
+Dockerfile, with CI jobs for x86-64 and ARM64.
+The default container is headless. Linux users can launch RViz with
+`./scripts/linux-gui.sh` (see [Linux GUI setup](./BuildInstructions.md#linux-gui-demo)).
+Windows users can run the
 [RViz demo through WSLg](./BuildInstructions.md#windows-wslg-demo); native GUI
 options are also documented below.
 

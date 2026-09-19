@@ -67,11 +67,11 @@ Refs #2
 
 ## Before you open a PR
 
-CI builds and tests the shared Dockerfile on Linux x86-64 and ARM64. Run the same
-test target from the **repository root** before opening a PR:
+CI uses Docker Compose to build and test the shared Dockerfile on Linux x86-64
+and ARM64. Run the same Compose test build from the **repository root** before opening a PR:
 
 ```console
-docker build --progress=plain --target test --file docker/Dockerfile --tag waybionic-ground-station:jazzy .
+docker compose --progress plain build test
 ```
 
 Package lint checks registered with colcon run with the tests. Run any additional
@@ -82,7 +82,7 @@ GUI path in [BuildInstructions.md](./BuildInstructions.md); Docker tests are hea
 Make sure:
 
 - [ ] Branch is up to date with `main` (`git pull origin main` or rebase).
-- [ ] The Docker `test` target builds successfully from the current source.
+- [ ] The Compose `test` service image builds successfully from the current source.
 - [ ] Both architecture jobs pass in CI.
 - [ ] No lint errors on Python you changed.
 - [ ] No build artifacts committed (`build/`, `install/`, `log/` are gitignored — keep it that way).
@@ -111,7 +111,7 @@ Full first-time setup, build, and launch steps are in
 [BuildInstructions.md](./BuildInstructions.md). Quick notes:
 
 - **Default development/test environment:** Docker with ROS 2 **Jazzy** on
-  **Ubuntu 24.04**, using the repository Dev Container or Docker test target.
+  **Ubuntu 24.04**, using the repository Dev Container or Compose test build.
 - **Windows Docker backend:** WSL2; a separate Ubuntu/ROS install is unnecessary
   unless you also need the native RViz path.
 - **Native RViz on Windows/Linux:** Ubuntu 24.04 with ROS 2 Jazzy, under WSL2

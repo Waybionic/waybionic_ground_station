@@ -4,10 +4,11 @@ The ground station currently uses a placeholder robot with a base box and
 moveable cylinder arm. The primary development target is **Ubuntu 24.04 (Noble)
 with ROS 2 Jazzy**.
 
-Use **Docker for development and headless build/test checks**. ROS and its build
+Use **Docker Compose for development and headless build/test checks**. ROS and its build
 tools live inside the container; you do not need a host ROS installation for
-this path. Windows users can [view the demo through WSLg](#windows-wslg-demo)
-without a second ROS installation. Other graphical RViz options are the
+this path. Linux users can [launch the GUI in Docker](#linux-gui-demo), and Windows
+users can [view the demo through WSLg](#windows-wslg-demo) without a second ROS
+installation. Other graphical RViz options are the
 [native Ubuntu/WSL setup](#native-ubuntu-setup-for-rviz) or
 [macOS RoboStack setup](#macos-apple-silicon).
 
@@ -52,14 +53,18 @@ Intel Macs use Linux x86-64 containers. Do not force x86-64 emulation on Apple S
 
 **Linux:** install [Docker Engine](https://docs.docker.com/engine/install/)
 using the instructions for your distribution. Configure Docker access according
-to that guide; never make the Docker socket world-writable.
+to that guide, and install the
+[Compose plugin](https://docs.docker.com/compose/install/linux/); never make the
+Docker socket world-writable.
 
 On every platform, verify that Docker can reach its engine:
 
 ```console
 docker version
+docker compose version
 ```
 
+Docker Desktop includes Compose. The `docker compose version` command must succeed.
 Both **Client** and **Server** information must appear. A missing Server section
 or daemon connection error must be resolved before building.
 
@@ -76,7 +81,7 @@ cd waybionic_ground_station
 From the **repository root**, run this same command in PowerShell, Bash, or zsh:
 
 ```console
-docker build --progress=plain --target test --file docker/Dockerfile --tag waybionic-ground-station:jazzy .
+docker compose --progress plain build test
 ```
 
 The image installs package dependencies, builds all workspace packages, and runs
@@ -84,7 +89,7 @@ their headless tests. A build or test failure fails the Docker build. The first
 build downloads ROS and Qt dependencies; later builds can reuse cached layers.
 Rebuild after source changes because this image contains a snapshot of the source.
 
-[CI](.github/workflows/ros2_build_test.yml) runs this Docker test target on native
+[CI](.github/workflows/ros2_build_test.yml) runs this Compose test build on native
 x86-64 and ARM64 Linux runners. A passing container build does not verify RViz
 windows, camera access, USB devices, GPU acceleration, or networking with a robot.
 
@@ -93,17 +98,22 @@ windows, camera access, USB devices, GPU acceleration, or networking with a robo
 Start the ground station with simulated diagnostics and no GUI:
 
 ```console
-docker run --rm --init --stop-signal SIGINT --name waybionic-demo --env ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST waybionic-ground-station:jazzy ros2 launch waybionic_bringup ground_station.launch.py launch_rviz:=false use_joint_state_publisher_gui:=false start_temporary_diagnostics_publisher:=true
+docker compose up --build demo
 ```
 
 In a second host terminal, read one message from that container:
 
 ```console
-docker exec waybionic-demo /entrypoint.sh ros2 topic echo /diagnostics --once
+docker compose exec demo /entrypoint.sh ros2 topic echo /diagnostics --once
 ```
 
 Expect a timestamped array containing temperature, current, and IMU demo values.
-Press **Ctrl+C** in the first terminal to stop and remove the demo container.
+Press **Ctrl+C** in the first terminal to stop the demo, then run
+`docker compose down` to remove its container and network.
+Plain `docker compose up --build` also starts only the headless demo; development,
+test, Linux GUI, and WSLg services are opt-in profiles or can be targeted by service name.
+ROS discovery is limited to localhost inside each service. Connecting to a robot or
+other containers requires separate network configuration and validation.
 
 ### 3. Develop in VS Code
 
@@ -112,6 +122,7 @@ open the repository folder in VS Code, and run **Dev Containers: Reopen in Conta
 from the Command Palette. Docker must already be running.
 
 The checked-in [configuration](.devcontainer/devcontainer.json) uses the
+`development` service in [compose.yaml](compose.yaml), built from the
 `development` stage of the same [Dockerfile](docker/Dockerfile). It mounts your
 source checkout, uses a non-root Linux user, and builds the workspace on creation.
 Terminals start in `/waybionic_ws` with ROS sourced. After editing, run inside the
@@ -131,9 +142,15 @@ Copied source in build/test images remains root-owned; only `build`, `install`,
 and `log` are writable in those workspaces. These output directories link to
 the container user's home so Dev Container UID updates work without `sudo`.
 The development source bind mount stays editable.
+The Compose source mount uses a shared SELinux label for Fedora and other
+SELinux hosts. VS Code adjusts the container user's UID to match your Linux user.
 After changing package dependencies, run **Dev Containers: Rebuild Container**.
 When adding a package, also add its manifest to the Dockerfile's dependency-stage
 `COPY` instructions. Run the clean Docker test command above before a PR.
+
+For a development shell without VS Code, run `docker compose run --rm development bash`.
+Inside it, use the build and test commands above (including sourcing the install setup
+after building). Build outputs in this temporary container are removed when you exit.
 
 ### Reproducibility and GUI boundaries
 
@@ -152,13 +169,62 @@ image. Sharing an immutable, verified project image is a follow-up once the
 container build has been validated. Base-image updates must pass both CI
 architectures before adoption.
 
-The default container configuration is **headless**. For RViz, use the Windows
-WSLg demo below or a native path. Do not add privileged containers, broad
+The default container configuration is **headless**. For RViz, use the Linux GUI or
+Windows WSLg demo below, or a native path. Do not add privileged containers, broad
 display-server permissions, or device mounts just to get the build working.
+
+## Linux GUI Demo
+
+Use Docker Engine on the Linux desktop with X11 or Wayland with XWayland enabled.
+The launcher was checked on Fedora KDE Wayland with XWayland: RViz initialized
+OpenGL 4.5 and the Joint State Publisher GUI loaded the robot description.
+No host ROS installation is needed. Docker Desktop's VM and remote Docker daemons
+are not supported by this launcher because it mounts the local display socket.
+Install `xauth` if missing: `sudo dnf install xorg-x11-xauth` on Fedora, or
+`sudo apt install xauth` on Ubuntu.
+
+From a desktop terminal, as your normal user with Docker access, run:
+
+```bash
+./scripts/linux-gui.sh
+```
+
+The launcher mounts this checkout into the container and runs an incremental
+`colcon build --symlink-install` before opening the UI. Source changes are picked
+up the next time you start the launcher, without rebuilding the Docker image.
+For the first image build or after changing package dependencies, use `--build`.
+Docker reuses cached image layers where possible. Restart the GUI after editing
+C++ code or launch files; changes are not automatically loaded into a running RViz.
+
+```bash
+./scripts/linux-gui.sh --build       # Build image, build workspace, and launch
+./scripts/linux-gui.sh -d            # Build workspace and run detached
+./scripts/linux-gui.sh --build -d    # Build image and run detached
+./scripts/linux-gui.sh --stop        # Stop this checkout's GUI container
+```
+
+RViz and the Joint State Publisher GUI should open on your desktop. Press **Ctrl+C**
+in foreground mode, or use `--stop` in detached mode, to stop and remove the container.
+Detached windows remain open after you close the terminal. Only one launcher container
+per checkout and host user can run at a time; stop it before launching again.
+The temporary host authentication file is deleted after Compose returns, including
+in detached mode; the running container retains access through its existing file mount.
+Use the launcher each time so the authentication file is recreated for your session.
+
+The service uses Qt's X11 backend (through XWayland on Wayland), a read-only display
+socket and cookie, and software OpenGL rendering. It does not require GPU devices or
+`xhost` changes. On SELinux hosts, label isolation is disabled for this GUI service
+to allow access to the existing desktop socket without relabeling it.
+
+If the launcher reports a missing display or cookie, run it from your logged-in
+desktop terminal without `sudo` and check that `DISPLAY` and `XAUTHORITY` refer to
+that session. A Wayland session must provide XWayland. Software rendering can be
+slower for complex scenes; GPU acceleration can be configured separately if needed.
 
 ## Windows WSLg Demo
 
-This command was verified on Windows 11 with Docker Desktop's WSL2 backend.
+The Compose service preserves the display settings used by the Windows 11 demo
+with Docker Desktop's WSL2 backend.
 It uses the image built in [Docker setup](#docker-setup-default) and WSL's existing
 graphics service; a separate Ubuntu distribution or host ROS install is not needed.
 
@@ -167,11 +233,12 @@ The prompt should start with `PS`, not `docker-desktop:~#`. Do not run this in
 Docker Desktop's internal WSL distribution or inside the Dev Container. If an
 unfinished command leaves you at a `>` prompt, press **Ctrl+C** to cancel it.
 
-Run the following as **one line**. It uses the per-user Docker installation from
-the setup above directly, so it also works in a terminal with an outdated `PATH`:
+From the **repository root**, run the following as **one line**. It uses the
+per-user Docker installation from the setup above directly, so it also works in
+a terminal with an outdated `PATH`:
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin\docker.exe" run --rm -it --init --stop-signal SIGINT --env DISPLAY=:0 --env QT_X11_NO_MITSHM=1 --env LIBGL_ALWAYS_SOFTWARE=1 --env ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST --mount "type=bind,source=/mnt/host/wslg/.X11-unix,target=/tmp/.X11-unix,readonly" waybionic-ground-station:jazzy ros2 launch waybionic_bringup ground_station.launch.py
+& "$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin\docker.exe" compose run --rm --build wslg
 ```
 
 RViz and the Joint State Publisher GUI open as separate windows. Move the slider
