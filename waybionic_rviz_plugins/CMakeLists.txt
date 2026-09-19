@@ -86,6 +86,12 @@ if(BUILD_TESTING)
     TIMEOUT 60
   )
 
+  ament_add_pytest_test(
+    test_temporary_diagnostics_publisher
+    test/test_temporary_diagnostics_publisher.py
+    TIMEOUT 60
+  )
+
   # Built from sources directly so the stress test links neither Qt nor RViz and
   # can run headless.
   ament_add_gtest(test_ros_diagnostics_source
