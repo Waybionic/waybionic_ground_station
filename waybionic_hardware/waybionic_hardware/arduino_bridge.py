@@ -24,7 +24,7 @@ SEQUENCE = [
     [15.0, 100.0, 130.0, 5.0],
     HOME_PHYSICAL_DEGREES,
 ]
-RESPONSE_TIMEOUT_SECONDS = 1.0
+RESPONSE_TIMEOUT_SECONDS = 8.0
 FAULT_STATUSES = {
     'arduino-error',
     'connection-failed',
@@ -250,8 +250,10 @@ class ArduinoBridge(Node):
     def publish_estimated_state(self):
         if (
             not self.dry_run and self.connected and
+            self.motion_active and
             self.last_response_monotonic is not None and
-            time.monotonic() - self.last_response_monotonic > RESPONSE_TIMEOUT_SECONDS
+            time.monotonic() - self.last_response_monotonic > (
+                self.motion_duration + RESPONSE_TIMEOUT_SECONDS)
         ):
             self._latch_fault(
                 'serial-read-failed', 'Arduino response watchdog timed out.')
