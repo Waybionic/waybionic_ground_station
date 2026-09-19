@@ -1,88 +1,269 @@
 Panels:
   - Class: rviz_common/Displays
+    Help Height: 70
     Name: Displays
+    Property Tree Widget:
+      Expanded: ~
+      Splitter Ratio: 0.5
+    Tree Height: 742
   - Class: rviz_common/Views
+    Expanded:
+      - /Current View1
     Name: Views
+    Splitter Ratio: 0.5
   - Class: waybionic_rviz_plugins/DiagnosticsPanel
-    Name: Engineering Monitor
     Diagnostics Topic: /diagnostics
+    Name: Engineering Monitor
     Use Mock Diagnostics: true
+  - Class: waybionic_rviz_plugins/MotionTestPanel
+    Name: MotionTestPanel
 Visualization Manager:
   Class: ""
   Displays:
-    - Class: rviz_default_plugins/Grid
-      Name: Grid (50 mm)
-      Enabled: true
-      Cell Size: 0.05
-      Plane Cell Count: 12
+    - Alpha: 0.44999998807907104
+      Cell Size: 0.05000000074505806
+      Class: rviz_default_plugins/Grid
       Color: 155; 155; 155
-      Alpha: 0.45
-      Reference Frame: <Fixed Frame>
-      Plane: XY
+      Enabled: true
+      Line Style:
+        Line Width: 0.0010000000474974513
+        Value: Lines
+      Name: Grid (50 mm)
+      Normal Cell Count: 0
       Offset:
         X: 0
         Y: 0
-        Z: -0.066
-      Line Style:
-        Value: Lines
-        Line Width: 0.001
-    - Class: rviz_default_plugins/RobotModel
-      Name: Old Arm (Video Reference Model)
-      Enabled: true
-      Visual Enabled: true
+        Z: -0.06599999964237213
+      Plane: XY
+      Plane Cell Count: 12
+      Reference Frame: <Fixed Frame>
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/RobotModel
       Collision Enabled: false
-      Alpha: 1
+      Description File: ""
       Description Source: Topic
       Description Topic:
-        Value: /robot_description
         Depth: 1
         Durability Policy: Transient Local
-        Reliability Policy: Reliable
         History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /robot_description
+      Enabled: true
       Links:
         All Links Enabled: true
         Expand Joint Details: false
         Expand Link Details: false
         Expand Tree: false
         Link Tree Style: Links in Alphabetic Order
+        old_arm_base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_base_servo_body:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_base_servo_cover:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_distal_left_cover:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_distal_left_servo:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_distal_right_cover:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_distal_right_servo:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_elbow_cover_screws:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_elbow_horn:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_elbow_servo_body:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_elbow_servo_cover:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_forearm:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_shoulder_horn:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_shoulder_mount:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_shoulder_servo_body:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_shoulder_servo_cover:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_tool_frame:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        old_arm_upper_arm:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_wrist_hub:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_wrist_marker:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_wrist_marker_cross:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_wrist_roll:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_wrist_servo_body:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_wrist_servo_cover:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+      Mass Properties:
+        Inertia: false
+        Mass: false
+      Name: Old Arm (Video Reference Model)
       TF Prefix: ""
       Update Interval: 0
+      Value: true
+      Visual Enabled: true
     - Class: rviz_default_plugins/Axes
-      Name: Wrist Target Frame
       Enabled: true
+      Length: 0.03500000014901161
+      Name: Wrist Target Frame
+      Radius: 0.001500000013038516
       Reference Frame: old_arm_tool_frame
-      Length: 0.035
-      Radius: 0.0015
+      Value: true
   Enabled: true
   Global Options:
-    Fixed Frame: old_arm_base_link
     Background Color: 238; 240; 242
+    Fixed Frame: old_arm_base_link
     Frame Rate: 30
   Name: root
   Tools:
     - Class: rviz_default_plugins/Interact
+      Hide Inactive Objects: true
     - Class: rviz_default_plugins/MoveCamera
     - Class: rviz_default_plugins/Select
     - Class: rviz_default_plugins/FocusCamera
     - Class: rviz_default_plugins/Measure
+      Line color: 128; 128; 0
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Value: true
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Name: Current View
-      Distance: 0.78
-      Pitch: 0.45
-      Yaw: 0.80
-      Near Clip Distance: 0.005
-      Target Frame: <Fixed Frame>
+      Distance: 0.7799999713897705
+      Enable Stereo Rendering:
+        Stereo Eye Separation: 0.05999999865889549
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+        Value: false
       Focal Point:
-        X: 0.08
+        X: 0.07999999821186066
         Y: 0
-        Z: 0.13
-    Saved: ~
+        Z: 0.12999999523162842
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.05000000074505806
+      Invert Z Axis: false
+      Name: Current View
+      Near Clip Distance: 0.004999999888241291
+      Pitch: 0.024999983608722687
+      Target Frame: <Fixed Frame>
+      Value: Orbit (rviz_default_plugins)
+      Yaw: 2.640000581741333
+    Saved:
+      - Class: rviz_default_plugins/Orbit
+        Distance: 0.7799999713897705
+        Enable Stereo Rendering:
+          Stereo Eye Separation: 0.05999999865889549
+          Stereo Focal Distance: 1
+          Swap Stereo Eyes: false
+          Value: false
+        Focal Point:
+          X: 0.07999999821186066
+          Y: 0
+          Z: 0.12999999523162842
+        Focal Shape Fixed Size: true
+        Focal Shape Size: 0.05000000074505806
+        Invert Z Axis: false
+        Name: Orbit
+        Near Clip Distance: 0.004999999888241291
+        Pitch: 0.024999983608722687
+        Target Frame: <Fixed Frame>
+        Value: Orbit (rviz_default_plugins)
+        Yaw: 2.640000581741333
 Window Geometry:
-  Width: 1440
-  Height: 960
-  X: 40
-  Y: 40
+  Displays:
+    collapsed: false
+  Engineering Monitor:
+    collapsed: false
+  Height: 1143
   Hide Left Dock: false
   Hide Right Dock: false
+  MotionTestPanel:
+    collapsed: false
+  QMainWindow State: 000000ff00000000fd0000000200000000000001a400000421fc0200000002fb000000260045006e00670069006e0065006500720069006e00670020004d006f006e00690074006f0072010000003b0000034f0000034f00fffffffb0000001e004d006f00740069006f006e005400650073007400500061006e0065006c0100000390000000cc000000cc00ffffff000000010000015600000421fc0200000002fb000000100044006900730070006c006100790073010000003b00000367000000c700fffffffb0000000a0056006900650077007301000003a8000000b4000000a000ffffff0000046e0000042100000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  Views:
+    collapsed: false
+  Width: 1908
+  X: -32
+  Y: -32

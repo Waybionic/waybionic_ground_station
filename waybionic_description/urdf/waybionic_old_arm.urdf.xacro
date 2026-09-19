@@ -5,8 +5,8 @@
   <xacro:arg name="upper_arm_length" default="0.120"/>
   <xacro:arg name="forearm_length" default="0.050"/>
   <xacro:arg name="tool_inline" default="0.0"/>
-  <xacro:arg name="base_zero_degrees" default="33.5"/>
-  <xacro:arg name="shoulder_zero_degrees" default="112.5"/>
+  <xacro:arg name="base_zero_degrees" default="90.0"/>
+  <xacro:arg name="shoulder_zero_degrees" default="125.0"/>
   <xacro:arg name="elbow_zero_degrees" default="151.5"/>
   <xacro:arg name="base_direction" default="1"/>
   <xacro:arg name="shoulder_direction" default="-1"/>
