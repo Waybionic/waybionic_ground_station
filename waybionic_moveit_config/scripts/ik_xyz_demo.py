@@ -16,6 +16,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
 from sensor_msgs.msg import JointState
+from std_msgs.msg import String
 from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformException, TransformListener
 from visualization_msgs.msg import Marker, MarkerArray
@@ -47,6 +48,11 @@ class IkXyzDemo(Node):
         self.target_pub = self.create_publisher(
             PoseStamped, "/ik_demo/target", marker_qos
         )
+        # Machine-readable outcome of the last replay: "idle", "running",
+        # "complete", or "aborted at <label>: <reason>". Transient-local so a
+        # late subscriber (a test, a panel) still sees the latest state.
+        self.status_pub = self.create_publisher(String, "/ik_demo/status", marker_qos)
+        self._set_status("idle")
         self.create_subscription(JointState, "/joint_states", self._on_joint_state, 10)
         self.create_service(Trigger, "/ik_demo/replay", self._on_replay)
 
@@ -97,7 +103,7 @@ class IkXyzDemo(Node):
             try:
                 self._run_demo()
             except Exception as error:  # Keep the replay service alive after a failed run.
-                self.get_logger().error(f"XYZ IK demo failed: {error}")
+                self._abort("unexpected error", str(error))
             finally:
                 with self._demo_lock:
                     self._demo_running = False
@@ -216,27 +222,36 @@ class IkXyzDemo(Node):
             return False
         return True
 
-    def _plan_and_execute(self, positions, label, retry_seconds=0.0):
+    def _set_status(self, text):
+        self.status_pub.publish(String(data=text))
+
+    def _abort(self, label, reason):
+        """Log and publish a demo failure; returns None so callers can ``return``."""
+        self.get_logger().error(f"XYZ IK demo aborted at {label}: {reason}")
+        self._set_status(f"aborted at {label}: {reason}")
+
+    def _plan_and_execute(self, positions, retry_seconds=0.0):
         """Plan, validate every waypoint, then execute the validated trajectory.
 
-        ``retry_seconds`` re-attempts the whole sequence until the deadline, for
-        the first motion when controllers may still be coming up.
+        Returns ``None`` on success or a short failure reason. ``retry_seconds``
+        re-attempts the whole sequence until the deadline, for the first motion
+        when controllers may still be coming up.
         """
         deadline = time.monotonic() + retry_seconds
+        reason = "planning failed"
         while rclpy.ok() and not self._stop.is_set():
             trajectory = self._plan_to_joints(positions)
             if trajectory is not None:
                 if not self._trajectory_is_valid(trajectory):
-                    self.get_logger().error(f"{label}: planned trajectory failed validation")
-                    return False
+                    return "trajectory failed validation"
                 if self._execute_trajectory(trajectory):
-                    return True
+                    return None
+                reason = "execution failed"
             if time.monotonic() >= deadline:
-                self.get_logger().error(f"{label}: motion failed")
-                return False
+                return reason
             if self._stop.wait(0.5):
-                return False
-        return False
+                return "stopped"
+        return "stopped"
 
     def _lookup_wrist_pose(self):
         deadline = time.monotonic() + 10.0
@@ -379,36 +394,20 @@ class IkXyzDemo(Node):
         return target
 
     def _run_demo(self):
+        self._set_status("running")
         self.get_logger().info("Waiting for MoveIt IK, planning, and execution...")
         startup_timeout = self.get_parameter("startup_timeout_seconds").value
-        if not self._wait_until_available(
-            self.ik_client.wait_for_service, startup_timeout
-        ):
-            if rclpy.ok() and not self._stop.is_set():
-                self.get_logger().error("MoveIt IK service did not become available")
-            return
-        if not self._wait_until_available(
-            self.move_client.wait_for_server, startup_timeout
-        ):
-            if rclpy.ok() and not self._stop.is_set():
-                self.get_logger().error("MoveGroup action did not become available")
-            return
-        if not self._wait_until_available(
-            self.execute_client.wait_for_server, startup_timeout
-        ):
-            if rclpy.ok() and not self._stop.is_set():
-                self.get_logger().error(
-                    "ExecuteTrajectory action did not become available"
-                )
-            return
-        if not self._wait_until_available(
-            self.validity_client.wait_for_service, startup_timeout
-        ):
-            if rclpy.ok() and not self._stop.is_set():
-                self.get_logger().error(
-                    "State validity service did not become available"
-                )
-            return
+        endpoints = [
+            (self.ik_client.wait_for_service, "MoveIt IK service"),
+            (self.move_client.wait_for_server, "MoveGroup action"),
+            (self.execute_client.wait_for_server, "ExecuteTrajectory action"),
+            (self.validity_client.wait_for_service, "State validity service"),
+        ]
+        for wait_for_endpoint, name in endpoints:
+            if not self._wait_until_available(wait_for_endpoint, startup_timeout):
+                if rclpy.ok() and not self._stop.is_set():
+                    self._abort("startup", f"{name} did not become available")
+                return
 
         deadline = time.monotonic() + 10.0
         ready = False
@@ -419,18 +418,20 @@ class IkXyzDemo(Node):
                 break
             time.sleep(0.1)
         if not ready:
-            self.get_logger().error("Joint states did not become available")
+            self._abort("startup", "joint states did not become available")
             return
 
         self.get_logger().info("Moving to the ready pose...")
-        if not self._plan_and_execute(READY_POSITION, "Ready pose", retry_seconds=5.0):
+        reason = self._plan_and_execute(READY_POSITION, retry_seconds=5.0)
+        if reason:
+            self._abort("Ready pose", reason)
             return
         if self._stop.wait(0.15):
             return
 
         origin = self._lookup_wrist_pose()
         if origin is None:
-            self.get_logger().error("Could not resolve the wrist pose in the world frame")
+            self._abort("Ready pose", "could not resolve the wrist pose in the world frame")
             return
 
         step = self.get_parameter("step_m").value
@@ -461,19 +462,17 @@ class IkXyzDemo(Node):
                 )
                 solution = self._solve_ik(target)
                 if solution is None:
-                    self.get_logger().error(
-                        f"XYZ IK demo aborted at {label}: no IK solution"
-                    )
+                    self._abort(label, "no IK solution")
                     return
-                if not self._plan_and_execute(solution, label):
-                    self.get_logger().error(
-                        f"XYZ IK demo aborted at {label}: trajectory failed"
-                    )
+                reason = self._plan_and_execute(solution)
+                if reason:
+                    self._abort(label, reason)
                     return
                 if self._stop.wait(pause):
                     return
 
         self._publish_markers(origin, origin, "Manual IK ready")
+        self._set_status("complete")
         self.get_logger().info(
             "Automatic demo complete. Drag the red/green/blue goal handles in "
             "RViz, then click Plan & Execute."

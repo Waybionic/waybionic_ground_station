@@ -65,6 +65,18 @@ ros2 launch waybionic_moveit_config demo.launch.py auto_demo:=true
 ros2 param set /ik_xyz_demo velocity_scaling 0.25   # slower replays
 ```
 
+The demo publishes its outcome on `/ik_demo/status` (`std_msgs/String`,
+transient-local): `idle`, `running`, `complete`, or
+`aborted at <label>: <reason>` where the label is `Ready pose`, `X axis +`,
+`Center`, etc. and the reason is `no IK solution`, `planning failed`,
+`trajectory failed validation`, or `execution failed`.
+
+To see a rejection by hand: in RViz open **MotionPlanning → Scene Objects**,
+add a box over the arm and click **Publish Scene**, then press
+**Replay XYZ Demo**. The terminal shows `aborted at …`, the arm does not move,
+and `ros2 topic echo /ik_demo/status` reports the same. Remove the box and
+replay to recover.
+
 Headless (no RViz), useful for testing:
 
 ```bash
@@ -152,6 +164,22 @@ rviz/moveit.rviz                     # MotionPlanning preconfigured for group "a
 The xacro in `urdf/` includes the shared robot description and layers
 `<ros2_control>` on top. High-resolution STL files are visual-only; lightweight
 boxes and cylinders provide portable, fast collision checking.
+
+## Tests
+
+```bash
+colcon test --packages-select waybionic_moveit_config
+colcon test-result --all --verbose
+```
+
+| File | Covers |
+|---|---|
+| `test/test_ik_demo_launch.py` | One replay on an empty scene completes all seven targets on the mock controller. |
+| `test/test_ik_demo_timeout_launch.py` | The replay service releases its busy state when MoveIt never appears. |
+| `test/test_ik_demo_blocked_launch.py` | A control run at a 0.10 m step, then a 0.3 m cube over the ready pose (must abort at `Ready pose` with zero controller goals) and a cube on the X+ target (must abort at `X axis +` with only the ready move executed). |
+
+Every file ends with a post-shutdown test asserting all processes, `move_group`
+included, exit with `0` or `-2`.
 
 ## Known limitations
 
