@@ -2,10 +2,10 @@
   Uno R4 WiFi - Four-servo IK calibration controller
 
   Wiring:
-    Servo 1 signal -> D1   (base yaw)
-    Servo 2 signal -> D2   (shoulder)
-    Servo 3 signal -> D3   (elbow)
-    Servo 4 signal -> D4   (wrist roll)
+    Servo 1 signal -> D3   (base yaw)
+    Servo 2 signal -> D4   (shoulder)
+    Servo 3 signal -> D5   (elbow)
+    Servo 4 signal -> D6   (wrist roll)
     Hold switch    -> D7 and GND (uses INPUT_PULLUP)
 
   Serial at 115200 baud:
@@ -30,9 +30,9 @@ const float PHYSICAL_RANGE = 270.0;
 const int SERVO_PULSE_MIN_US = 544;
 const int SERVO_PULSE_MAX_US = 2400;
 const float SERVO_MIN[SERVO_COUNT] = {0.0, 0.0, 90.0, 0.0};
-const float SERVO_MAX[SERVO_COUNT] = {270.0, 112.5, 270.0, 270.0};
+const float SERVO_MAX[SERVO_COUNT] = {270.0, 270.0, 270.0, 270.0};
 
-float currentAngle[SERVO_COUNT] = {90.0, 35.0, 151.5, 27.5};
+float currentAngle[SERVO_COUNT] = {90.0, 30.0, 155.0, 125.0};
 float startAngle[SERVO_COUNT];
 float targetAngle[SERVO_COUNT];
 
