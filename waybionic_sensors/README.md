@@ -128,6 +128,76 @@ the questions in `docs/HARDWARE_INTERFACE.md`.
 Running with `use_mock:=false` is still meaningful: no samples are published and
 `imu.heartbeat` reports STALE, which is what a missing sensor should look like.
 
+**There is currently no physical IMU driver.** Do not treat mock or demo output
+as a real sensor.
+
+## Runtime handoff
+
+For the integration runner (Malik). Source the workspace overlay first.
+There is no physical IMU driver.
+
+Last full verification of this closeout:
+
+- Commit: `e317df4`
+- Environment: Ubuntu 24.04.4 LTS / ROS 2 Jazzy / Python 3.12.3 / WSL2
+- Install: `rosdep install --from-paths . --ignore-src -y` (no `-r`, no skip keys) → all required rosdeps installed; `ros-jazzy-rviz-imu-plugin` present
+- Tests: `colcon test --packages-select waybionic_sensors` → 96 passed at `e317df4` (runtime also verified there). Docs-guard tests on this closeout raise the IMU suite to 98.
+- Shutdown: Ctrl+C on the launch process. The node calls `stop()` on the reader, then destroys itself. Mock and unconfigured live mode have no extra processes.
+
+### Raw
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 launch waybionic_sensors imu_publisher.launch.py
+```
+
+| | |
+|--|--|
+| Topics | `/waybionic/imu/data_raw` (`sensor_msgs/msg/Imu`), `/diagnostics` (`diagnostic_msgs/msg/DiagnosticArray`). `/waybionic/imu/data_demo` is absent. |
+| Frames | `header.frame_id` = `imu_link`. No demo TF. |
+| Orientation | Unavailable: identity quaternion placeholder, `orientation_covariance[0] = -1`. |
+| Covariance | Gyro and accel 3x3 all zeros (ROS unknown). No datasheet stddev is configured. |
+| Diagnostics | `imu.heartbeat`, `imu.rate`, `imu.angular_velocity`, `imu.linear_acceleration` all OK while streaming. |
+| Check | `ros2 topic echo /waybionic/imu/data_raw --once` |
+
+### Demo
+
+```bash
+ros2 launch waybionic_sensors imu_demo.launch.py
+```
+
+Headless (no GUI): add `launch_rviz:=false`.
+
+| | |
+|--|--|
+| Topics | Raw as above, plus `/waybionic/imu/data_demo` (`sensor_msgs/msg/Imu`) and `/tf`. |
+| Frames | IMU messages: `imu_link`. Demo TF parent: `base_link`. RViz fixed frame: `base_link`. |
+| RViz | Same launch starts `rviz2 -d` `share/waybionic_sensors/config/imu_demo.rviz`. Display class `rviz_imu_plugin/Imu` named "IMU orientation (demo)", topic `/waybionic/imu/data_demo`. Expect a red box / axes wobbling on the grid. Raw semantics stay unchanged (`orientation_covariance[0] = -1` on `data_raw`). |
+| Diagnostics | Same four rows, OK while the mock streams. |
+
+### Stall / mock
+
+```bash
+ros2 launch waybionic_sensors imu_publisher.launch.py mock_stall_after_sec:=5.0
+```
+
+Faster bench check: `mock_stall_after_sec:=1.0 stale_timeout_sec:=0.5`.
+
+| | |
+|--|--|
+| Publication | Mock stops producing samples after the delay and stays stopped (latched). Last gyro/accel magnitudes remain on the diagnostic rows. |
+| Diagnostics | After `stale_timeout_sec`, all four rows go STALE (level 3). Heartbeat age is `now - last sample stamp` (source freshness, not a rewritten clock). |
+| Recovery | Stop the launch (Ctrl+C) and start the default publisher again. All four rows return to OK and `data_raw` resumes. Restart is required; the latch does not un-stall in-process. |
+
+Unconfigured live mode (no fake samples):
+
+```bash
+ros2 launch waybionic_sensors imu_publisher.launch.py use_mock:=false
+```
+
+Zero IMU samples. `imu.heartbeat` is STALE.
+
 ## Tests
 
 ```bash
@@ -135,7 +205,8 @@ colcon test --packages-select waybionic_sensors
 colcon test-result --all --verbose
 ```
 
-96 tests, 0 failures on Ubuntu 24.04 / ROS 2 Jazzy. Coverage spans message
+96 tests, 0 failures on Ubuntu 24.04 / ROS 2 Jazzy at `e317df4`. This closeout
+adds two documentation-guard tests (expected 98). Coverage spans message
 semantics and covariance, mock generation and stalling, diagnostics levels and
 units, the hardware boundary, package structure, and a runtime suite that spins
 the node to check timestamps, frame IDs, rate, demo defaults, and the heartbeat
@@ -143,7 +214,8 @@ transitioning from OK to STALE.
 
 ## Related docs
 
-- `docs/IMU_CONTRACT.md` — topics, units, covariance, and parameters
-- `docs/HARDWARE_INTERFACE.md` — questions for electrical and how to add a driver
+- `docs/IMU_CONTRACT.md` — topics, units, covariance, timestamps, and parameters
+- `docs/HARDWARE_INTERFACE.md` — questions for electrical (owner / OPEN status) and how to add a driver
 - `docs/PR_NOTES.md` — review notes, design rationale, and runtime evidence
+- README **Runtime handoff** — commands for Malik to run raw / demo / stall without reading the code
 - `waybionic_rviz_plugins/docs/DIAGNOSTICS_BACKEND_INTEGRATION.md` — the diagnostics contract this package publishes against

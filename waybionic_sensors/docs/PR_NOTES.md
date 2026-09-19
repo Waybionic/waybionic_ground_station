@@ -179,7 +179,7 @@ colcon test-result --all --verbose
 | `test_imu_publisher_node.py` | 16 | Runtime: rate, timestamps, frame IDs, demo defaults, unknown covariance, heartbeat OK then STALE, stall marks all four signals, live mode without hardware |
 | `test_mock_source.py` | 14 | Determinism, gravity, amplitude bounds, stall latch, quaternion normalisation |
 | `test_hardware_reader.py` | 9 | Interface surface, stub behaviour, a custom reader satisfying the boundary |
-| `test_package_metadata.py` | 19 | Module separation, node delegation, launch defaults, `rviz_imu_plugin` on `data_demo`, no ament_python rosdep, raw vs demo docs, hardware lifecycle, entry point, no invented protocol |
+| `test_package_metadata.py` | 21 | Module separation, node delegation, launch defaults, `rviz_imu_plugin` on `data_demo`, no ament_python rosdep, raw vs demo docs, hardware lifecycle, electrical OPEN items, runtime handoff commands, entry point, no invented protocol |
 | `test_flake8.py`, `test_pep257.py` | 2 | Style and docstrings |
 
 ## Known limitations
@@ -230,3 +230,24 @@ Launch checks from that overlay:
 - Building the checkout under a Windows path that contains a space (`Uni Work`)
   makes `xacro` split the URDF argument in `waybionic_bringup`'s launch test.
   Full-workspace evidence above used a copy at `/home/khuzaymah/pr11_ws`.
+
+Closeout re-run against `e317df4` (Ubuntu 24.04.4 / Jazzy / Python 3.12.3 / WSL2):
+strict `rosdep install --from-paths . --ignore-src -y` succeeded; IMU suite
+**96 passed**; raw/demo/stall/recovery/live-unconfigured/RViz checks succeeded.
+See README **Runtime handoff**.
+
+## FOLLOW-UP AFTER PR #11 MERGES
+
+Do not implement these on this branch. They belong on a later reader-validation
+PR once a real `ImuHardwareReader` exists. Attach tests next to
+`test_hardware_reader.py` / `test_imu_publisher_node.py`, around
+`ImuHardwareReader.read()` and the publisher sample loop:
+
+- no sample
+- delayed sample
+- malformed / non-finite sample
+- reader exception
+- recovery after those failures
+
+`UnconfiguredImuReader.read()` already returns `None` (no fake live samples).
+Do not invent protocol, calibration, noise, axes, or device timestamps there.

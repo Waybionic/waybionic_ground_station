@@ -87,6 +87,14 @@ onto `/waybionic/imu/data_raw`.
 
 See `HARDWARE_INTERFACE.md` question 14.
 
+## Timestamps
+
+`header.stamp` is the source sample time from `ImuReading.stamp_ns`. The mock
+uses the node clock at acquisition. Whether a physical device stamps packets
+itself is OPEN / NEEDS ELECTRICAL CONFIRMATION (`HARDWARE_INTERFACE.md`
+question 10). `imu.heartbeat` reports age as now minus that source stamp. That
+is freshness of the sample, not a replay or observation clock.
+
 ## Diagnostics
 
 Names, `value`/`unit` keys, and level mapping follow

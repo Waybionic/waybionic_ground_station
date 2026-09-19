@@ -8,6 +8,29 @@ arrive.
 package ships a mock source and an unimplemented driver stub rather than a
 guessed serial protocol.
 
+Khuzaymah owns IMU-specific ROS semantics for this package (raw vs demo topics,
+orientation-unavailable marker, unknown covariance until a verified stddev
+exists). Electrical owns every physical-sensor fact below. Assumptions are not
+production defaults.
+
+## Open items (owner / status)
+
+| Item | Owner | Status |
+|------|-------|--------|
+| Physical sensor model | Electrical | OPEN / NEEDS ELECTRICAL CONFIRMATION |
+| Transport / interface | Electrical | OPEN / NEEDS ELECTRICAL CONFIRMATION |
+| Mounting (`base_link` → `imu_link`) | Electrical | OPEN / NEEDS ELECTRICAL CONFIRMATION |
+| Axis convention / orientation | Electrical | OPEN / NEEDS ELECTRICAL CONFIRMATION |
+| Timestamp source / semantics | Electrical | OPEN / NEEDS ELECTRICAL CONFIRMATION |
+| Calibration process / values | Electrical | OPEN / NEEDS ELECTRICAL CONFIRMATION |
+| Sensor noise / standard deviation | Electrical | OPEN / NEEDS ELECTRICAL CONFIRMATION |
+| IMU ROS message semantics (raw vs demo, unavailable orientation, unknown covariance) | Khuzaymah | Implemented in this package; not a hardware claim |
+
+Until Electrical confirms timestamp source, mock and unconfigured live mode use
+the node clock as `ImuReading.stamp_ns`. Diagnostic heartbeat age is
+`now - that stamp` (sample freshness). Do not rewrite stamps to make replayed
+or delayed data look fresh.
+
 ## Questions for electrical
 
 ### Sensor

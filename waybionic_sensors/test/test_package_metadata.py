@@ -135,3 +135,29 @@ def test_hardware_docs_match_the_reader_lifecycle():
     assert 'def stop(self)' in docs
     assert 'def open(self)' not in docs
     assert 'def close(self)' not in docs
+
+
+def test_hardware_docs_mark_electrical_items_open():
+    docs = read('docs/HARDWARE_INTERFACE.md')
+    assert 'OPEN / NEEDS ELECTRICAL CONFIRMATION' in docs
+    for item in (
+        'Physical sensor model',
+        'Transport / interface',
+        'Mounting',
+        'Axis convention',
+        'Timestamp source',
+        'Calibration',
+        'Sensor noise',
+    ):
+        assert item in docs, item
+    assert 'Khuzaymah' in docs
+
+
+def test_readme_has_runtime_handoff_commands():
+    readme = read('README.md')
+    assert 'Runtime handoff' in readme
+    assert 'ros2 launch waybionic_sensors imu_publisher.launch.py' in readme
+    assert 'ros2 launch waybionic_sensors imu_demo.launch.py' in readme
+    assert 'mock_stall_after_sec' in readme
+    assert 'use_mock:=false' in readme
+    assert 'no physical imu driver' in readme.lower()
