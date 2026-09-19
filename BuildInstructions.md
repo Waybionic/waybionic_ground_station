@@ -25,6 +25,29 @@ ros2 launch waybionic_bringup ground_station.launch.py
 - RViz opens pre-configured with `base_link` fixed frame, `RobotModel`, and `TF` displays already loaded
 - Move the slider in the Joint State Publisher GUI (small window) to move the arm
 
+## Validation pipeline
+
+### Native Ubuntu / ROS environment
+Run the repository validation script from any working directory:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+bash ~/waybionic_ws/src/waybionic_ground_station/scripts/check_waybionic_ws.sh
+```
+
+The helper resolves the workspace root dynamically, installs dependencies, builds the workspace, runs `colcon test --return-code-on-test-failure`, prints `colcon test-result --all --verbose`, and exits nonzero automatically if any required stage fails.
+
+### Shared Docker workflow
+Use the repository Dockerfile with the same validation pipeline:
+
+```bash
+docker build -t waybionic-ground-station -f docker/Dockerfile .
+docker run --rm -it waybionic-ground-station bash -lc \
+  'source /opt/ros/jazzy/setup.bash && cd /waybionic_ws && bash scripts/check_waybionic_ws.sh'
+```
+
+This matches the native Ubuntu flow while running in the repo’s Docker environment and keeps the build/test workflow consistent across local and shared CI environments.
+
 ## macOS (Apple Silicon)
 
 The workspace runs natively through RoboStack. Docker and XQuartz are not required.
