@@ -32,6 +32,7 @@ class TestArduinoBridge(unittest.TestCase):
         bridge.serial_port = SimpleNamespace(writes=[])
         bridge.serial_port.write = lambda data: bridge.serial_port.writes.append(data)
         bridge.serial_lock = __import__('threading').Lock()
+        bridge.state_lock = __import__('threading').RLock()
         bridge.dry_run = False
         bridge.connected = True
         bridge.ready = True
@@ -39,6 +40,11 @@ class TestArduinoBridge(unittest.TestCase):
         bridge.motion_active = True
         bridge.motion_duration = 0.0
         bridge.sequence_active = True
+        bridge.command_kind = 'RUN'
+        bridge.stop_requested = False
+        bridge.home_completed = True
+        bridge.awaiting_probe = False
+        bridge.probe_sent_monotonic = None
         bridge.last_error = ''
         bridge.last_status = 'moving'
         bridge.get_logger = lambda: SimpleNamespace(debug=lambda message: None)
@@ -93,6 +99,34 @@ class TestArduinoBridge(unittest.TestCase):
         self.assertEqual(bridge.last_status, 'serial-read-failed')
         self.assertEqual(bridge.serial_port.writes, [b'HOLD\n'])
 
+    def test_arrived_after_stop_does_not_start_next_move(self):
+        from std_msgs.msg import String
+        from waybionic_hardware.arduino_bridge import ArduinoBridge
+
+        bridge = self.make_bridge()
+        bridge.send_move = lambda target, command_kind: bridge.serial_port.writes.append(
+            f'{command_kind}:{target}')
+        bridge.handle_command(String(data='STOP'))
+        bridge.process_serial_line('OK,ARRIVED')
+
+        self.assertTrue(bridge.stop_requested)
+        self.assertFalse(bridge.sequence_active)
+        self.assertEqual(len(bridge.serial_port.writes), 1)
+        self.assertEqual(bridge.serial_port.writes[0], b'HOLD\n')
+
+    def test_home_and_run_require_ready_home_sequence(self):
+        from std_msgs.msg import String
+
+        bridge = self.make_bridge()
+        bridge.ready = False
+        bridge.handle_command(String(data='HOME'))
+        self.assertEqual(bridge.last_status, 'home-rejected-not-ready')
+
+        bridge.ready = True
+        bridge.home_completed = False
+        bridge.handle_command(String(data='RUN'))
+        self.assertEqual(bridge.last_status, 'run-rejected-home-required')
+
     def test_fault_is_reported_as_diagnostic_error(self):
         from diagnostic_msgs.msg import DiagnosticStatus
 
@@ -112,6 +146,25 @@ class TestArduinoBridge(unittest.TestCase):
         self.assertEqual(bridge.diagnostic.status[0].level, DiagnosticStatus.ERROR)
         self.assertEqual(bridge.diagnostic.status[1].message, 'robot_state_publisher connected')
         self.assertEqual(bridge.diagnostic.status[2].level, DiagnosticStatus.WARN)
+
+    def test_unhandshaken_connection_is_not_reported_healthy(self):
+        from diagnostic_msgs.msg import DiagnosticStatus
+
+        bridge = self.make_bridge()
+        bridge.ready = False
+        bridge.last_status = 'connected'
+        bridge.diagnostics_publisher = SimpleNamespace(publish=lambda message: setattr(bridge, 'diagnostic', message))
+        bridge.status_publisher = SimpleNamespace(publish=lambda message: setattr(bridge, 'motion_status', message))
+        bridge.count_subscribers = lambda topic: 1
+        bridge.port = '/dev/fake'
+        bridge.baud = 115200
+        bridge.get_clock = lambda: SimpleNamespace(
+            now=lambda: SimpleNamespace(to_msg=lambda: None))
+
+        bridge.publish_diagnostics()
+
+        self.assertEqual(bridge.diagnostic.status[0].level, DiagnosticStatus.WARN)
+        self.assertEqual(bridge.motion_status.data, 'CONNECTING')
 
     def test_shutdown_requests_hold_before_closing_port(self):
         import rclpy
