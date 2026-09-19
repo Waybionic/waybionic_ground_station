@@ -16,6 +16,12 @@ MVP Camera Setup: A camera that lives above the arm, preferably either in the ce
 
 Interface: Within the ground station interface like a plugin/add-on.
 
+Resolution/Rate Assumptions: 1080p with a frame rate of 30fps.
+
+Availability: Should be available to switch to and from the camera at all times.
+
+Integration Effort: The hardest part would be connecting the camera to Ros itself
+
 Expected ROS Topics: 
   - /doctor_view/left|right/image_raw - A topic for each of the raw camera feeds (left and/or right depends on stereoscopic camera capabilities)
   - /doctor_view/left|right/camera_info - A topic that contains the calibration settings for the left and/or right cameras
@@ -23,10 +29,10 @@ Expected ROS Topics:
 
 Latency Target: Should remain consistently >30-50ms.
 
-Unresolved Hardware Requirements: 
+Unresolved Hardware Questions: 
   - Mechanical envelope for the camera.
   - Working with electrical to make the camera work with the robot and the ground station.
 
 Test/Purchase decision: 
-  - I personally would recommend the [Orbbec Gemini 2 Camera](https://d1cd332k3pgc17.cloudfront.net/wp-content/uploads/2023/07/Orbbec-Gemini-2-Series-DatasheetPublicV1.720240316.pdf?_gl=1*ffjzs5*_gcl_au*NzAxNTA3NDEzLjE3ODI1ODg5MzAuODcxNjc2MDcuMTc4MjU4ODk5OC4xNzgyNTg5MDAw) as it is a stereo camera and a good fit for an initial test camera.
+  - I personally would recommend the [Orbbec Gemini 2 Camera](https://d1cd332k3pgc17.cloudfront.net/wp-content/uploads/2023/07/Orbbec-Gemini-2-Series-DatasheetPublicV1.720240316.pdf?_gl=1*ffjzs5*_gcl_au*NzAxNTA3NDEzLjE3ODI1ODg5MzAuODcxNjc2MDcuMTc4MjU4ODk5OC4xNzgyNTg5MDAw) as it is a stereo camera and a good fit for an initial test camera. It works with a lot of the camera requirements specified in the system design md file.
   - For now, a webcam would also be suitable for initial, universal testing of the latency monitor and/or doctor view interface.
