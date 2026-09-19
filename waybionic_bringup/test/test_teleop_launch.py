@@ -70,6 +70,10 @@ class TestTeleop(unittest.TestCase):
             while 'tool_grip' not in joints and time.monotonic() < deadline:
                 rclpy.spin_once(node, timeout_sec=0.1)
             self.assertIn('tool_grip', joints, 'the simulated drives never reported positions')
+            deadline = time.monotonic() + 15.0
+            while 'teleop.state' not in diagnostics and time.monotonic() < deadline:
+                rclpy.spin_once(node, timeout_sec=0.1)
+            self.assertIn('teleop.state', diagnostics, 'teleop did not become ready')
             hold(1.0, left_x=1.0)
             self.assertAlmostEqual(joints['joint_1'], 0.0, places=3, msg='moved while disabled')
             hold(0.2, 'start')
