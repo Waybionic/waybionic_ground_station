@@ -136,13 +136,27 @@ as a real sensor.
 For the integration runner (Malik). Source the workspace overlay first.
 There is no physical IMU driver.
 
-Last full verification of this closeout:
+Verification record (not a physical-sensor claim):
 
-- Commit: `e317df4`
-- Environment: Ubuntu 24.04.4 LTS / ROS 2 Jazzy / Python 3.12.3 / WSL2
-- Install: `rosdep install --from-paths . --ignore-src -y` (no `-r`, no skip keys) → all required rosdeps installed; `ros-jazzy-rviz-imu-plugin` present
-- Tests: `colcon test --packages-select waybionic_sensors` → 96 passed at `e317df4` (runtime also verified there). Docs-guard tests on this closeout raise the IMU suite to 98.
-- Shutdown: Ctrl+C on the launch process. The node calls `stop()` on the reader, then destroys itself. Mock and unconfigured live mode have no extra processes.
+- Historical runtime verification of the handoff commands: commit `e317df4`
+  (Ubuntu 24.04.4 LTS / ROS 2 Jazzy / Python 3.12.3 / WSL2). Strict
+  `rosdep install --from-paths . --ignore-src -y` (no `-r`, no skip keys);
+  `ros-jazzy-rviz-imu-plugin` present; IMU suite 96 passed there, then 98
+  after docs-guard tests.
+- Merged PR #11 head: `4022337540209b8f2c4f1ce988f31537b8bd9a41` (merge
+  commit `dbd4ff0bb5915b34a03794afdf978c625a8557c4` on `main`). Yassin
+  approved; CI green; full workspace 139 tests, including 98 IMU tests.
+  Physical IMU behavior remains unverified because no physical driver exists.
+- Reader-validation follow-up: this branch, verified after the implementation
+  with strict rosdep (no `-r`), full workspace build, **125** IMU tests and
+  **166** workspace tests passing, plus mock / stall / unconfigured-live
+  runtime checks. Same launch commands and PR #11 topic/frame/covariance/
+  stall/lifecycle semantics. New coverage is the reader failure policy in
+  `docs/IMU_CONTRACT.md`. Physical IMU behavior is still unverified.
+
+Shutdown: Ctrl+C on the launch process. The node calls `stop()` on the
+reader, then destroys itself. Mock and unconfigured live mode have no extra
+processes.
 
 ### Raw
 
@@ -205,12 +219,19 @@ colcon test --packages-select waybionic_sensors
 colcon test-result --all --verbose
 ```
 
-96 tests, 0 failures on Ubuntu 24.04 / ROS 2 Jazzy at `e317df4`. This closeout
-adds two documentation-guard tests (expected 98). Coverage spans message
-semantics and covariance, mock generation and stalling, diagnostics levels and
-units, the hardware boundary, package structure, and a runtime suite that spins
-the node to check timestamps, frame IDs, rate, demo defaults, and the heartbeat
+Run the suite after building; do not assume a fixed count from an older
+commit. This follow-up: **125 tests, 0 failures** for `waybionic_sensors` and
+**166 tests, 0 failures** for the full workspace (Ubuntu 24.04.4 / ROS 2 Jazzy
+/ WSL2). PR #11 had merged with 98 IMU tests / 139 workspace tests; the added
+coverage is reader validation and recovery (`None`, non-finite/malformed data,
+out-of-order timestamps, `read()` exceptions, and rejected input that must not
+refresh diagnostics). Coverage still includes message semantics and covariance,
+mock generation and stalling, diagnostics levels and units, the hardware
+boundary, package structure, flake8/pep257, and a runtime suite that spins the
+node to check timestamps, frame IDs, rate, demo defaults, and the heartbeat
 transitioning from OK to STALE.
+
+There is no physical IMU driver and no Hamnah recording in this verification.
 
 ## Related docs
 

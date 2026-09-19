@@ -29,6 +29,7 @@ def test_components_are_separated_into_modules():
         'hardware_reader.py',
         'imu_messages.py',
         'imu_diagnostics.py',
+        'imu_sample_validation.py',
         'imu_publisher_node.py',
     ):
         assert (MODULE_ROOT / module).exists(), module
@@ -161,3 +162,10 @@ def test_readme_has_runtime_handoff_commands():
     assert 'mock_stall_after_sec' in readme
     assert 'use_mock:=false' in readme
     assert 'no physical imu driver' in readme.lower()
+
+
+def test_contract_documents_reader_failure_policy():
+    contract = read('docs/IMU_CONTRACT.md')
+    assert 'Reader failure policy' in contract
+    assert 'do not falsely refresh it' in ' '.join(contract.lower().split())
+    assert 'out-of-order' in contract

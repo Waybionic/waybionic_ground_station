@@ -8,7 +8,9 @@ be answered by electrical before a real reader is written.
 
 To add hardware later, implement :class:`ImuHardwareReader` in its own module
 and hand an instance to the node. No change to message construction,
-diagnostics, or TF publishing is required.
+diagnostics, or TF publishing is required. Temporary ``read()`` failures are
+handled at the publisher boundary; this module does not invent a reconnect
+policy.
 """
 
 from abc import ABC, abstractmethod

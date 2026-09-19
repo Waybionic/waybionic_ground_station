@@ -238,16 +238,20 @@ See README **Runtime handoff**.
 
 ## FOLLOW-UP AFTER PR #11 MERGES
 
-Do not implement these on this branch. They belong on a later reader-validation
-PR once a real `ImuHardwareReader` exists. Attach tests next to
-`test_hardware_reader.py` / `test_imu_publisher_node.py`, around
-`ImuHardwareReader.read()` and the publisher sample loop:
+Implemented on `feature/imu-reader-validation`, not by reopening PR #11.
 
-- no sample
-- delayed sample
-- malformed / non-finite sample
-- reader exception
-- recovery after those failures
+The publisher now validates candidate readings at the reader boundary:
 
-`UnconfiguredImuReader.read()` already returns `None` (no fake live samples).
-Do not invent protocol, calibration, noise, axes, or device timestamps there.
+- `None` publishes nothing new
+- non-finite / malformed data is rejected
+- out-of-order timestamps are rejected
+- `read()` exceptions are logged, do not kill the node, and retry next cycle
+- last valid state is retained for diagnostics/reference and is not republished
+  as a fresh measurement
+- a later valid sample recovers normal operation
+
+Intentionally excluded from that follow-up:
+
+- Hamnah normal -> stall -> restart recording remains a separate human task.
+- No physical IMU driver, protocol, calibration, noise, mounting, or device
+  timestamp source is added.

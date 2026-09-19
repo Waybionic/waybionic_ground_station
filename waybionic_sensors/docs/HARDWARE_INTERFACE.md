@@ -102,9 +102,12 @@ class MyImuReader(ImuHardwareReader):
 ```
 
 The driver owns transport and parsing, and converts to the REP-103 units of
-`ImuReading`. Message construction, covariance, diagnostics, and TF need no
-changes. Parser tests should be added at that point using recorded packets from
-the real device.
+`ImuReading`. The publisher then applies a hardware-independent validation
+gate (`imu_sample_validation.py`): `None`, non-finite or malformed fields,
+out-of-order timestamps, and `read()` exceptions do not publish a new sample
+and do not refresh last-valid freshness. Message construction, covariance,
+diagnostics, and TF need no driver-specific changes. Parser tests should be
+added at that point using recorded packets from the real device.
 
 Live mode already works end to end with the stub: the node publishes no samples
 and `imu.heartbeat` reports STALE, which is the correct depiction of a missing
