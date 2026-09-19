@@ -419,7 +419,7 @@ source install/setup.bash
 ```
 - Validate the full workspace before launching:
 ```bash
-colcon test
+colcon test --return-code-on-test-failure
 colcon test-result --verbose
 bash src/waybionic_ground_station/scripts/check_waybionic_ws.sh
 ```
