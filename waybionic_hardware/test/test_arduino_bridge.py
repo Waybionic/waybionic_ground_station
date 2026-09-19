@@ -101,6 +101,7 @@ class TestArduinoBridge(unittest.TestCase):
         bridge.last_status = 'arduino-error'
         bridge.diagnostics_publisher = SimpleNamespace(publish=lambda message: setattr(bridge, 'diagnostic', message))
         bridge.status_publisher = SimpleNamespace(publish=lambda message: setattr(bridge, 'motion_status', message))
+        bridge.count_subscribers = lambda topic: 1
         bridge.port = '/dev/fake'
         bridge.baud = 115200
         bridge.get_clock = lambda: SimpleNamespace(
@@ -109,6 +110,8 @@ class TestArduinoBridge(unittest.TestCase):
         bridge.publish_diagnostics()
 
         self.assertEqual(bridge.diagnostic.status[0].level, DiagnosticStatus.ERROR)
+        self.assertEqual(bridge.diagnostic.status[1].message, 'robot_state_publisher connected')
+        self.assertEqual(bridge.diagnostic.status[2].level, DiagnosticStatus.WARN)
 
     def test_shutdown_requests_hold_before_closing_port(self):
         import rclpy

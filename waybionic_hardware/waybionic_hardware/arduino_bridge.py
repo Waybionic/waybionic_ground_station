@@ -15,8 +15,9 @@ JOINT_NAMES = [
     'old_arm_elbow_pitch_joint',
     'old_arm_wrist_roll_joint',
 ]
-HOME_PHYSICAL_DEGREES = [33.5, 112.5, 151.5, 27.5]
+HOME_PHYSICAL_DEGREES = [90.0, 35.0, 151.5, 27.5]
 SERVO_DIRECTIONS = [1.0, -1.0, 1.0, 1.0]
+MODEL_HOME_OFFSETS_DEGREES = [0.0, 90.0, 0.0, 0.0]
 PHYSICAL_LIMITS = [(0.0, 270.0), (0.0, 112.5), (90.0, 270.0), (0.0, 270.0)]
 SEQUENCE = [
     [60.0, 95.0, 125.0, 60.0],
@@ -37,9 +38,10 @@ FAULT_STATUSES = {
 
 def model_radians_from_physical(degrees):
     return [
-        math.radians((physical - zero) / direction)
-        for physical, zero, direction in zip(
-            degrees, HOME_PHYSICAL_DEGREES, SERVO_DIRECTIONS)
+        math.radians((physical - zero) / direction + offset)
+        for physical, zero, direction, offset in zip(
+            degrees, HOME_PHYSICAL_DEGREES, SERVO_DIRECTIONS,
+            MODEL_HOME_OFFSETS_DEGREES)
     ]
 
 
@@ -279,26 +281,51 @@ class ArduinoBridge(Node):
             self.process_serial_line('OK,ARRIVED')
 
     def publish_diagnostics(self):
-        status = DiagnosticStatus()
-        status.name = 'waybionic_arduino_bridge'
-        status.level = (
+        bridge_status = DiagnosticStatus()
+        bridge_status.name = 'waybionic_arduino_bridge'
+        bridge_status.level = (
             DiagnosticStatus.ERROR
             if self.faulted or not self.connected or self.last_status in FAULT_STATUSES
             else DiagnosticStatus.OK
         )
-        status.message = self.last_status
-        status.values = [
+        bridge_status.message = self.last_status
+        bridge_status.values = [
             KeyValue(key='port', value=self.port or 'not configured'),
             KeyValue(key='baud', value=str(self.baud)),
             KeyValue(key='mode', value='dry-run' if self.dry_run else 'physical'),
             KeyValue(key='error', value=self.last_error),
         ]
+
+        subscriber_count = self.count_subscribers('/joint_states')
+        output_status = DiagnosticStatus()
+        output_status.name = 'waybionic_joint_state_output'
+        output_status.level = (
+            DiagnosticStatus.OK if subscriber_count > 0 else DiagnosticStatus.ERROR)
+        output_status.message = (
+            'robot_state_publisher connected'
+            if subscriber_count > 0 else
+            'No subscribers on /joint_states; RViz cannot update')
+        output_status.values = [
+            KeyValue(key='subscriber_count', value=str(subscriber_count)),
+            KeyValue(key='topic', value='/joint_states'),
+        ]
+
+        feedback_status = DiagnosticStatus()
+        feedback_status.name = 'waybionic_servo_feedback'
+        feedback_status.level = DiagnosticStatus.WARN
+        feedback_status.message = (
+            'No measured servo feedback; /joint_states is estimated')
+        feedback_status.values = [
+            KeyValue(key='verification', value='command timeline only'),
+            KeyValue(key='servos', value='individual servo connection unknown'),
+        ]
+
         message = DiagnosticArray()
         message.header.stamp = self.get_clock().now().to_msg()
-        message.status = [status]
+        message.status = [bridge_status, output_status, feedback_status]
         self.diagnostics_publisher.publish(message)
 
-        if self.faulted or status.level == DiagnosticStatus.ERROR:
+        if self.faulted or bridge_status.level == DiagnosticStatus.ERROR:
             motion_status = 'FAULT'
         elif self.motion_active:
             motion_status = 'RUNNING'

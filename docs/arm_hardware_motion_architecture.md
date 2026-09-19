@@ -34,7 +34,7 @@ workspace.
 The archived handoff provides a usable first transport contract:
 
 - Arduino Uno R4 WiFi at 115200 baud over USB serial.
-- Servo signals: D3 `base_yaw`, D4 `shoulder`, D5 `elbow`, D6 `wrist_roll`.
+- Servo signals: D1 `base_yaw`, D2 `shoulder`, D3 `elbow`, D4 `wrist_roll`.
 - Hold switch: D7 to ground using `INPUT_PULLUP`.
 - Commands: `ID`, `MOVE,s1,s2,s3,s4,durationMs`, `JOG,servo,delta,durationMs`,
   and `HOLD`.

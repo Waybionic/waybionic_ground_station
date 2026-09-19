@@ -13,16 +13,18 @@ JOINT_NAMES = [
     'old_arm_wrist_roll_joint',
 ]
 JOINT_COUNT = len(JOINT_NAMES)
-HOME_PHYSICAL_DEGREES = [33.5, 112.5, 151.5, 27.5]
+HOME_PHYSICAL_DEGREES = [90.0, 35.0, 151.5, 27.5]
 SERVO_DIRECTIONS = [1.0, -1.0, 1.0, 1.0]
+MODEL_HOME_OFFSETS_DEGREES = [0.0, 90.0, 0.0, 0.0]
 
 
 def model_radians_from_physical(degrees):
     """Convert calibrated Arduino servo angles into URDF model radians."""
     return [
-        math.radians((physical - zero) / direction)
-        for physical, zero, direction in zip(
-            degrees, HOME_PHYSICAL_DEGREES, SERVO_DIRECTIONS)
+        math.radians((physical - zero) / direction + offset)
+        for physical, zero, direction, offset in zip(
+            degrees, HOME_PHYSICAL_DEGREES, SERVO_DIRECTIONS,
+            MODEL_HOME_OFFSETS_DEGREES)
     ]
 
 

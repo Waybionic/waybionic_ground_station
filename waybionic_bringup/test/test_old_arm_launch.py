@@ -75,7 +75,7 @@ class TestOldArmDescription(unittest.TestCase):
         robot = expand_model()
         joints = [joint for joint in robot.findall('joint') if joint.get('type') != 'fixed']
         self.assertEqual([joint.get('name') for joint in joints], JOINT_NAMES)
-        expected_ranges = [(-33.5, 236.5), (0.0, 112.5), (-61.5, 118.5), (-27.5, 242.5)]
+        expected_ranges = [(-90.0, 180.0), (12.5, 125.0), (-61.5, 118.5), (-27.5, 242.5)]
         for joint, expected in zip(joints, expected_ranges):
             self.assertEqual(joint.get('type'), 'revolute')
             limits = joint.find('limit')
@@ -104,8 +104,8 @@ class TestOldArmDescription(unittest.TestCase):
              joints['old_arm_elbow_pitch_joint'].find('origin').get('xyz').split()],
             [0.130, 0.0, 0.0])
         limits = joints['old_arm_base_yaw_joint'].find('limit')
-        self.assertAlmostEqual(float(limits.get('lower')), math.radians(-236.5))
-        self.assertAlmostEqual(float(limits.get('upper')), math.radians(33.5))
+        self.assertAlmostEqual(float(limits.get('lower')), math.radians(-180.0))
+        self.assertAlmostEqual(float(limits.get('upper')), math.radians(90.0))
         for box in robot.findall('.//box'):
             self.assertTrue(all(float(value) > 0 for value in box.get('size').split()))
         for cylinder in robot.findall('.//cylinder'):
