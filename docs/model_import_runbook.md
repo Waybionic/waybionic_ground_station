@@ -205,10 +205,10 @@ axis `[0 0 1]`, placeholder limits `effort=100 velocity=1`):
 
 | Joint | Type | Moves | Range | Notes / known limitations |
 |-------|------|-------|-------|---------------------------|
-| `joint1` | revolute | `base_link → shoulder` | ±3.14 rad | limits are exporter defaults, not real RoM |
-| `joint2` | revolute | `shoulder → elbow` | ±3.14 rad | limits are exporter defaults, not real RoM |
+| `joint1` | revolute | `base_link → shoulder` | ±1.5708 rad | limits are exporter defaults, not real RoM, range is interim placeholder |
+| `joint2` | revolute | `shoulder → elbow` | ±1.5708 rad | limits are exporter defaults, not real RoM, range is interim placeholder |
 | `joint3` | continuous | `elbow → forearm` | unbounded | `continuous` = no limit; bound it if the real joint is limited |
-| `joint4` | revolute | `forearm → wrist` | ±3.14 rad | wrist is a **differential** (pitch+roll) modeled as one joint — may need 2 |
+| `joint4` | revolute | `forearm → wrist` | ±1.5708 rad | wrist is a **differential** (pitch+roll) modeled as one joint — may need 2, range is interim placeholder |
 
 `world_to_base` is `fixed` (not movable). Record any joint that rotates the wrong
 way (bad `<axis>`) or exceeds its true range **by exact joint name**.
