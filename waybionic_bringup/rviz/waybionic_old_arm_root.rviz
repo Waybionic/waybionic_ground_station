@@ -5,7 +5,7 @@ Panels:
     Property Tree Widget:
       Expanded: ~
       Splitter Ratio: 0.5
-    Tree Height: 417
+    Tree Height: 451
   - Class: rviz_common/Views
     Expanded:
       - /Current View1
@@ -13,6 +13,10 @@ Panels:
     Splitter Ratio: 0.5
   - Class: waybionic_rviz_plugins/MotionTestPanel
     Name: MotionTestPanel
+  - Class: waybionic_rviz_plugins/DiagnosticsPanel
+    Diagnostics Topic: /diagnostics
+    Name: DiagnosticsPanel
+    Use Mock Diagnostics: true
 Visualization Manager:
   Class: ""
   Displays:
@@ -247,3 +251,19 @@ Visualization Manager:
         Target Frame: <Fixed Frame>
         Value: Orbit (rviz_default_plugins)
         Yaw: 2.640000581741333
+Window Geometry:
+  DiagnosticsPanel:
+    collapsed: false
+  Displays:
+    collapsed: false
+  Height: 1143
+  Hide Left Dock: false
+  Hide Right Dock: false
+  MotionTestPanel:
+    collapsed: false
+  QMainWindow State: 000000ff00000000fd0000000200000000000001a400000421fc0200000002fb0000001e004d006f00740069006f006e005400650073007400500061006e0065006c010000003b000000cc000000cc00fffffffb000000200044006900610067006e006f0073007400690063007300500061006e0065006c010000010d0000034f0000034f00ffffff000000010000015600000421fc0200000002fb000000100044006900730070006c006100790073010000003b00000244000000c700fffffffb0000000a005600690065007700730100000285000001d7000000a000ffffff0000046e0000042100000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  Views:
+    collapsed: false
+  Width: 1908
+  X: 0
+  Y: 0
