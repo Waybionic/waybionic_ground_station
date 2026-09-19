@@ -37,6 +37,7 @@ class TestArduinoBridge(unittest.TestCase):
         bridge.ready = True
         bridge.faulted = False
         bridge.motion_active = True
+        bridge.motion_duration = 0.0
         bridge.sequence_active = True
         bridge.last_error = ''
         bridge.last_status = 'moving'
