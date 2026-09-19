@@ -169,3 +169,19 @@ def test_contract_documents_reader_failure_policy():
     assert 'Reader failure policy' in contract
     assert 'do not falsely refresh it' in ' '.join(contract.lower().split())
     assert 'out-of-order' in contract
+    assert 'only when enabled and the existing mock/orientation path' in contract
+
+
+def test_current_docs_include_validation_stage_and_accurate_live_timestamps():
+    readme = read('README.md')
+    notes = read('docs/PR_NOTES.md')
+    hardware = read('docs/HARDWARE_INTERFACE.md')
+    hardware_words = ' '.join(hardware.split())
+    assert 'imu_sample_validation.py' in readme
+    assert 'ImuReading -> imu_sample_validation.py -> accepted reading' in notes
+    assert (
+        'Unconfigured live mode produces no readings or samples at all'
+        in hardware_words
+    )
+    assert 'timestamp source and' in hardware
+    assert 'OPEN / NEEDS ELECTRICAL CONFIRMATION' in hardware

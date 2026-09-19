@@ -116,7 +116,7 @@ Retaining the last valid reading is for diagnostics and reference. The node does
 
 | `read()` result | Publish | Last valid state | Freshness / sample count | Node |
 |-----------------|---------|------------------|--------------------------|------|
-| Valid in-order sample | raw (and demo/TF if those outputs are enabled) | replaced | updated from the sample's original `stamp_ns` | stays up |
+| Valid in-order sample | raw; demo/TF only when enabled and the existing mock/orientation path supplies an orientation | replaced | updated from the sample's original `stamp_ns` | stays up |
 | `None` (no sample) | nothing | unchanged | unchanged; the previous sample ages | stays up; retry next cycle |
 | Non-finite or malformed data | nothing | unchanged | unchanged | stays up; retry |
 | Timestamp older than last accepted | nothing | unchanged | unchanged | stays up; retry |

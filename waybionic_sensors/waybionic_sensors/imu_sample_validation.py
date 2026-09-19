@@ -8,40 +8,59 @@ telemetry. It does not invent sensor values, clamp corrupt data, guess
 covariance, or rewrite timestamps.
 """
 
+import math
+from numbers import Real
 from typing import Optional
+
+from waybionic_sensors.imu_reading import ImuReading
 
 REASON_NO_SAMPLE = 'no sample'
 REASON_INVALID = 'invalid or non-finite sample'
 REASON_OUT_OF_ORDER = 'out-of-order timestamp'
 
+# ``builtin_interfaces/msg/Time`` uses an int32 ``sec`` field and a uint32
+# ``nanosec`` field. ``to_time_msg()`` normalises nanoseconds to
+# 0..999,999,999, so these are the inclusive ImuReading.stamp_ns bounds that
+# preserve the value through Jazzy CDR serialization.
+_NANOSECONDS_PER_SECOND = 1_000_000_000
+_TIME_SEC_MIN = -(2 ** 31)
+_TIME_SEC_MAX = 2 ** 31 - 1
+_STAMP_NS_MIN = _TIME_SEC_MIN * _NANOSECONDS_PER_SECOND
+_STAMP_NS_MAX = (
+    (_TIME_SEC_MAX + 1) * _NANOSECONDS_PER_SECOND - 1
+)
+
 
 def _is_finite_number(value) -> bool:
-    """Return whether ``value`` is a non-bool int or finite float."""
-    if isinstance(value, bool) or value is None:
+    """Return whether ``value`` is a finite real safely convertible to float."""
+    if isinstance(value, bool) or not isinstance(value, Real):
         return False
-    if isinstance(value, int):
-        return True
-    if isinstance(value, float):
-        return value == value and value not in (float('inf'), float('-inf'))
-    return False
+    try:
+        return math.isfinite(float(value))
+    except Exception:
+        return False
 
 
 def _is_finite_vector(value, length: int) -> bool:
-    """Return whether ``value`` is a sequence of ``length`` finite numbers."""
-    if isinstance(value, (str, bytes)) or value is None:
+    """Return whether ``value`` is a fixed tuple of finite real numbers."""
+    if type(value) is not tuple:
         return False
     try:
-        components = tuple(value)
-    except TypeError:
+        return (
+            len(value) == length
+            and all(_is_finite_number(value[index]) for index in range(length))
+        )
+    except Exception:
         return False
-    if len(components) != length:
-        return False
-    return all(_is_finite_number(component) for component in components)
 
 
 def _is_stamp_ns(value) -> bool:
-    """Return whether ``value`` is an integer nanosecond timestamp."""
-    return isinstance(value, int) and not isinstance(value, bool)
+    """Return whether ``value`` safely maps to ROS Time's int32 seconds."""
+    return (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and _STAMP_NS_MIN <= value <= _STAMP_NS_MAX
+    )
 
 
 def invalid_reading_reason(reading) -> Optional[str]:
@@ -52,14 +71,21 @@ def invalid_reading_reason(reading) -> Optional[str]:
     orientation when it is present. ``orientation is None`` is valid: raw
     samples are not required to carry a fused attitude.
     """
-    if not _is_stamp_ns(getattr(reading, 'stamp_ns', None)):
+    if not isinstance(reading, ImuReading):
         return REASON_INVALID
-    if not _is_finite_vector(getattr(reading, 'angular_velocity', None), 3):
-        return REASON_INVALID
-    if not _is_finite_vector(getattr(reading, 'linear_acceleration', None), 3):
-        return REASON_INVALID
-    orientation = getattr(reading, 'orientation', None)
-    if orientation is not None and not _is_finite_vector(orientation, 4):
+    try:
+        if not _is_stamp_ns(reading.stamp_ns):
+            return REASON_INVALID
+        if not _is_finite_vector(reading.angular_velocity, 3):
+            return REASON_INVALID
+        if not _is_finite_vector(reading.linear_acceleration, 3):
+            return REASON_INVALID
+        if (
+            reading.orientation is not None
+            and not _is_finite_vector(reading.orientation, 4)
+        ):
+            return REASON_INVALID
+    except Exception:
         return REASON_INVALID
     return None
 

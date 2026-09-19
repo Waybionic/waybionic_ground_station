@@ -73,6 +73,7 @@ class ImuPublisher(Node):
         use_mock = self._bool_param('use_mock')
         self._mock_source = None
         self._hardware_reader = None
+        self._unconfigured_reader_active = False
         if hardware_reader is not None:
             self._hardware_reader = hardware_reader
             self._hardware_reader.start()
@@ -84,6 +85,7 @@ class ImuPublisher(Node):
             self._source_description = 'mock generator'
         else:
             self._hardware_reader = UnconfiguredImuReader(self._string_param('serial_port'))
+            self._unconfigured_reader_active = True
             self._hardware_reader.start()
             self._source_description = self._hardware_reader.describe()
 
@@ -115,7 +117,7 @@ class ImuPublisher(Node):
             diagnostics_period, self._on_diagnostics_timer
         )
 
-        self._log_startup(use_mock and hardware_reader is None)
+        self._log_startup()
 
     def _declare_parameters(self) -> None:
         """Declare every runtime parameter with its default."""
@@ -157,7 +159,7 @@ class ImuPublisher(Node):
         """Return the current node time in nanoseconds."""
         return self.get_clock().now().nanoseconds
 
-    def _log_startup(self, use_mock: bool) -> None:
+    def _log_startup(self) -> None:
         """Log the active configuration so the mode is obvious in the console."""
         logger = self.get_logger()
         logger.info(
@@ -171,7 +173,7 @@ class ImuPublisher(Node):
             f'{"enabled" if self._publish_demo_orientation else "disabled"}, '
             f'demo TF {"enabled" if self._publish_demo_tf else "disabled"}'
         )
-        if not use_mock:
+        if self._unconfigured_reader_active:
             logger.warning(
                 'Live mode selected but no hardware driver is implemented yet. '
                 'imu.heartbeat will report STALE until a real reader is supplied.'

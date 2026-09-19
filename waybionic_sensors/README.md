@@ -100,6 +100,7 @@ waybionic_sensors/
     imu_reading.py         # Hardware-independent sample type: the boundary contract
     mock_source.py         # Synthetic sample generation, no ROS types
     hardware_reader.py     # Driver interface plus an unimplemented stub
+    imu_sample_validation.py # Hardware-independent candidate acceptance gate
     imu_messages.py        # sensor_msgs/Imu and TF construction, covariance rules
     imu_diagnostics.py     # DiagnosticArray construction, heartbeat and freshness
     imu_publisher_node.py  # ROS node that only wires the above together
@@ -115,8 +116,9 @@ waybionic_sensors/
   test/
 ```
 
-Each stage is separately testable: sample generation, message construction,
-diagnostics, and the hardware boundary have no dependency on one another.
+Each stage is separately testable: sample generation, candidate validation,
+message construction, diagnostics, and the hardware boundary have no dependency
+on one another.
 
 ## Hardware status
 
@@ -147,12 +149,10 @@ Verification record (not a physical-sensor claim):
   commit `dbd4ff0bb5915b34a03794afdf978c625a8557c4` on `main`). Yassin
   approved; CI green; full workspace 139 tests, including 98 IMU tests.
   Physical IMU behavior remains unverified because no physical driver exists.
-- Reader-validation follow-up: this branch, verified after the implementation
-  with strict rosdep (no `-r`), full workspace build, **125** IMU tests and
-  **166** workspace tests passing, plus mock / stall / unconfigured-live
-  runtime checks. Same launch commands and PR #11 topic/frame/covariance/
-  stall/lifecycle semantics. New coverage is the reader failure policy in
-  `docs/IMU_CONTRACT.md`. Physical IMU behavior is still unverified.
+- Reader validation/recovery has dedicated boundary, publisher, stale-health,
+  and runtime regression coverage. See
+  [PR #21](https://github.com/Waybionic/waybionic_ground_station/pull/21) for
+  exact head-specific verification. It does not claim physical IMU testing.
 
 Shutdown: Ctrl+C on the launch process. The node calls `stop()` on the
 reader, then destroys itself. Mock and unconfigured live mode have no extra
@@ -219,17 +219,14 @@ colcon test --packages-select waybionic_sensors
 colcon test-result --all --verbose
 ```
 
-Run the suite after building; do not assume a fixed count from an older
-commit. This follow-up: **125 tests, 0 failures** for `waybionic_sensors` and
-**166 tests, 0 failures** for the full workspace (Ubuntu 24.04.4 / ROS 2 Jazzy
-/ WSL2). PR #11 had merged with 98 IMU tests / 139 workspace tests; the added
-coverage is reader validation and recovery (`None`, non-finite/malformed data,
-out-of-order timestamps, `read()` exceptions, and rejected input that must not
-refresh diagnostics). Coverage still includes message semantics and covariance,
-mock generation and stalling, diagnostics levels and units, the hardware
-boundary, package structure, flake8/pep257, and a runtime suite that spins the
-node to check timestamps, frame IDs, rate, demo defaults, and the heartbeat
-transitioning from OK to STALE.
+Run the suite after building; do not assume a fixed count from an older commit.
+Coverage includes reader validation and recovery (`None`, non-finite/malformed
+data, out-of-order timestamps, `read()` exceptions, and rejected input that
+must not refresh diagnostics), message semantics and covariance, mock
+generation and stalling, diagnostics levels and units, the hardware boundary,
+package structure, flake8/pep257, and runtime node behavior. See
+[PR #21](https://github.com/Waybionic/waybionic_ground_station/pull/21) for its
+exact final test totals and environment.
 
 There is no physical IMU driver and no Hamnah recording in this verification.
 

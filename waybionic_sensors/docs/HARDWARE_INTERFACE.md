@@ -26,10 +26,11 @@ production defaults.
 | Sensor noise / standard deviation | Electrical | OPEN / NEEDS ELECTRICAL CONFIRMATION |
 | IMU ROS message semantics (raw vs demo, unavailable orientation, unknown covariance) | Khuzaymah | Implemented in this package; not a hardware claim |
 
-Until Electrical confirms timestamp source, mock and unconfigured live mode use
-the node clock as `ImuReading.stamp_ns`. Diagnostic heartbeat age is
-`now - that stamp` (sample freshness). Do not rewrite stamps to make replayed
-or delayed data look fresh.
+The mock uses node time as `ImuReading.stamp_ns`. Unconfigured live mode
+produces no readings or samples at all. A future physical timestamp source and
+its semantics remain OPEN / NEEDS ELECTRICAL CONFIRMATION. Diagnostic heartbeat
+age is `now - the last accepted source stamp` (sample freshness); rejected or
+delayed readings must not have their timestamps rewritten to look fresh.
 
 ## Questions for electrical
 

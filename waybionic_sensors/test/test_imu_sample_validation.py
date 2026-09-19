@@ -2,6 +2,8 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from waybionic_sensors.imu_reading import GRAVITY_M_S2, ImuReading
 from waybionic_sensors.imu_sample_validation import (
     invalid_reading_reason,
@@ -13,6 +15,8 @@ from waybionic_sensors.imu_sample_validation import (
 
 T1_NS = 1_000_000_000
 T2_NS = 2_000_000_000
+ROS_TIME_MIN_NS = -(2 ** 31) * 1_000_000_000
+ROS_TIME_MAX_NS = (2 ** 31) * 1_000_000_000 - 1
 
 
 def make_reading(
@@ -40,6 +44,31 @@ def test_valid_reading_is_accepted():
 
 def test_valid_reading_with_orientation_is_accepted():
     assert rejection_reason(make_reading(orientation=(0.0, 0.0, 0.0, 1.0))) is None
+
+
+@pytest.mark.parametrize('component', [0, 1, -1, 0.25, -3.5])
+def test_normal_int_and_float_components_are_accepted(component):
+    reading = make_reading(angular_velocity=(component, 0.0, 0.0))
+    assert invalid_reading_reason(reading) is None
+
+
+def test_bool_component_is_invalid():
+    reading = make_reading(angular_velocity=(True, 0.0, 0.0))
+    assert invalid_reading_reason(reading) == REASON_INVALID
+
+
+def test_integer_too_large_for_float_is_invalid():
+    reading = make_reading(angular_velocity=(10 ** 1000, 0.0, 0.0))
+    assert invalid_reading_reason(reading) == REASON_INVALID
+
+
+def test_numeric_conversion_exception_is_rejected_not_raised():
+    class MalformedFloat(float):
+        def __float__(self):
+            raise RuntimeError('cannot convert')
+
+    reading = make_reading(angular_velocity=(MalformedFloat(1.0), 0.0, 0.0))
+    assert invalid_reading_reason(reading) == REASON_INVALID
 
 
 def test_nan_angular_velocity_is_invalid():
@@ -78,14 +107,43 @@ def test_malformed_orientation_shape_is_invalid():
     assert invalid_reading_reason(reading) == REASON_INVALID
 
 
-def test_malformed_stamp_on_a_controlled_object_is_invalid():
+def test_non_reading_object_with_valid_looking_fields_is_invalid():
     candidate = SimpleNamespace(
-        stamp_ns=float('nan'),
+        stamp_ns=T2_NS,
         angular_velocity=(0.0, 0.0, 0.0),
         linear_acceleration=(0.0, 0.0, GRAVITY_M_S2),
         orientation=None,
     )
     assert invalid_reading_reason(candidate) == REASON_INVALID
+
+
+def test_one_shot_vector_iterable_is_invalid_without_being_consumed():
+    vector = (component for component in (0.0, 0.0, 0.0))
+    reading = make_reading(angular_velocity=vector)
+    assert invalid_reading_reason(reading) == REASON_INVALID
+    assert tuple(vector) == (0.0, 0.0, 0.0)
+
+
+@pytest.mark.parametrize('stamp_ns', [0, T2_NS, ROS_TIME_MIN_NS, ROS_TIME_MAX_NS])
+def test_ros_time_representable_timestamp_is_accepted(stamp_ns):
+    assert invalid_reading_reason(make_reading(stamp_ns=stamp_ns)) is None
+
+
+@pytest.mark.parametrize(
+    'stamp_ns',
+    [ROS_TIME_MIN_NS - 1, ROS_TIME_MAX_NS + 1, float('nan'), True],
+)
+def test_unrepresentable_or_malformed_timestamp_is_invalid(stamp_ns):
+    assert invalid_reading_reason(make_reading(stamp_ns=stamp_ns)) == REASON_INVALID
+
+
+def test_validation_returns_rejection_for_weird_malformed_container():
+    class ExplodingTuple(tuple):
+        def __len__(self):
+            raise RuntimeError('malformed container')
+
+    reading = make_reading(angular_velocity=ExplodingTuple((0.0, 0.0, 0.0)))
+    assert invalid_reading_reason(reading) == REASON_INVALID
 
 
 def test_out_of_order_timestamp_is_rejected():

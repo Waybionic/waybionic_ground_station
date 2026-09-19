@@ -75,14 +75,19 @@ Tracked as question 14 in `docs/HARDWARE_INTERFACE.md`.
 
 ```text
 mock_source.py  ─┐
-                 ├─> ImuReading ─┬─> imu_messages.py   -> sensor_msgs/Imu, TF
-hardware_reader.py ─┘            └─> imu_diagnostics.py -> DiagnosticArray
-                                        imu_publisher_node.py wires them
+                 ├─> ImuReading -> imu_sample_validation.py -> accepted reading
+hardware_reader.py ─┘                                      ├─> imu_messages.py
+                                                          │   -> sensor_msgs/Imu, TF
+                                                          └─> imu_diagnostics.py
+                                                              -> DiagnosticArray
+                                      imu_publisher_node.py wires the stages
 ```
 
 `imu_reading.py` is the contract between sample producers and consumers. A real
-driver implements `ImuHardwareReader` and returns `ImuReading` values; message
-construction, covariance, diagnostics, and TF need no changes.
+driver implements `ImuHardwareReader` and returns `ImuReading` values. The
+hardware-independent validation gate rejects malformed, non-finite, or
+out-of-order candidates before message construction; covariance, diagnostics,
+and TF need no driver-specific changes.
 
 Two structural tests enforce this: the node must not construct `Imu()` or
 `DiagnosticStatus` itself.
