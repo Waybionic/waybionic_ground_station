@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
 import can
 from diagnostic_msgs.msg import DiagnosticStatus
 import rclpy
+from rclpy.parameter import Parameter
 from sensor_msgs.msg import JointState
 
 from waybionic_control.node.can_host import CanHostNode
@@ -199,6 +200,74 @@ class TestCanControlLogic(unittest.TestCase):
 
         self.node.command_callback(good)
         self.node.bus.send.assert_called_once()
+
+    def test_float32_overflow_rejected_then_valid_accepted(self):
+        with self.assertRaises(ValueError):
+            codec.encode_target_command(1e40, 0.0)
+        with self.assertRaises(ValueError):
+            codec.encode_joint_state(0.0, -1e40, 1, 0)
+
+        huge = JointState()
+        huge.name = ['joint_1']
+        huge.position = [1e40]
+
+        try:
+            self.node.command_callback(huge)
+        except OverflowError:
+            self.fail('OverflowError escaped command_callback')
+        self.node.bus.send.assert_not_called()
+
+        good_cmd = JointState()
+        good_cmd.name = ['joint_1']
+        good_cmd.position = [1.5]
+        self.node.command_callback(good_cmd)
+        self.node.bus.send.assert_called_once()
+
+    def test_float32_boundary_accepted(self):
+        data = codec.encode_target_command(codec.FLOAT32_MAX, -codec.FLOAT32_MAX)
+        self.assertEqual(len(data), 8)
+
+    def test_socketcan_failure_degrades_node(self):
+        self.bus_patcher.stop()
+        with patch('can.interface.Bus', side_effect=OSError('No such device')):
+            node = CanHostNode()
+        self.mock_bus = self.bus_patcher.start()
+
+        try:
+            self.assertIsNone(node.bus)
+            node.diag_pub.publish = MagicMock()
+            node.publish_diagnostics()
+
+            published = node.diag_pub.publish.call_args[0][0]
+            link = [s for s in published.status
+                    if s.name == 'can.bus: Link Status'][0]
+            self.assertEqual(link.level, DiagnosticStatus.ERROR)
+            self.assertIn('DOWN', link.message)
+
+            js = JointState()
+            js.name = ['joint_1']
+            js.position = [1.5]
+            node.command_callback(js)
+            node.read_bus()
+        finally:
+            node.destroy_node()
+
+    def test_explicit_udp_transport_selected(self):
+        node = CanHostNode(parameter_overrides=[
+            Parameter('transport', Parameter.Type.STRING, 'udp_multicast')])
+        try:
+            self.assertEqual(
+                self.mock_bus.call_args.kwargs['bustype'], 'udp_multicast')
+            node.diag_pub.publish = MagicMock()
+            node.publish_diagnostics()
+
+            published = node.diag_pub.publish.call_args[0][0]
+            link = [s for s in published.status
+                    if s.name == 'can.bus: Link Status'][0]
+            self.assertEqual(link.level, DiagnosticStatus.OK)
+            self.assertIn('udp_multicast', link.message)
+        finally:
+            node.destroy_node()
 
 
 if __name__ == '__main__':

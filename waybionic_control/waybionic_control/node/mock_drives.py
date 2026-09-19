@@ -46,6 +46,9 @@ class MockDrivesNode(Node):
         self.get_logger().info('Mock drives started. Broadcasting 6 joints at 10Hz.')
 
     def timer_callback(self):
+        if self.bus is None:
+            return
+
         simulate_faults = self.get_parameter('simulate_faults').value
 
         # Process max 100 messages per tick to prevent infinite blocking

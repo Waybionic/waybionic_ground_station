@@ -32,12 +32,20 @@ def generate_launch_description():
         'start_mock_drives', default_value='true',
         description='Set false when driving real hardware on the bus')
 
+    transport_arg = DeclareLaunchArgument(
+        'transport', default_value='socketcan',
+        description='Transport: socketcan (default) or udp_multicast.'
+    )
+
     can_host_node = Node(
         package='waybionic_control',
         executable='can_host',
         name='can_host',
         output='screen',
-        parameters=[{'can_interface': LaunchConfiguration('can_interface')}]
+        parameters=[
+            {'can_interface': LaunchConfiguration('can_interface')},
+            {'transport': LaunchConfiguration('transport')},
+        ]
     )
 
     mock_drives_node = Node(
@@ -48,7 +56,8 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('start_mock_drives')),
         parameters=[
             {'can_interface': LaunchConfiguration('can_interface')},
-            {'simulate_faults': LaunchConfiguration('simulate_faults')}
+            {'simulate_faults': LaunchConfiguration('simulate_faults')},
+            {'transport': LaunchConfiguration('transport')},
         ]
     )
 
@@ -56,6 +65,7 @@ def generate_launch_description():
         can_interface_arg,
         simulate_faults_arg,
         start_mock_drives_arg,
+        transport_arg,
         can_host_node,
         mock_drives_node,
     ])

@@ -21,6 +21,24 @@ import struct
 STATE_BASE_ID = 0x100
 CMD_BASE_ID = 0x200
 
+# Maximum magnitude representable in IEEE-754 binary32 ('<f').
+FLOAT32_MAX = 3.4028234663852886e38
+
+
+def _validate_float32(value, label):
+    """
+    Check that a value is finite and fits the float32 wire format.
+
+    :param value: Value to check.
+    :param label: Field name used in the error message.
+    :raises ValueError: If the value is NaN, Inf, or out of float32 range.
+    """
+    if not math.isfinite(value):
+        raise ValueError(f'{label} is NaN or Inf')
+    if abs(value) > FLOAT32_MAX:
+        raise ValueError(
+            f'{label} ({value!r}) exceeds float32 wire range +/-{FLOAT32_MAX:g}')
+
 
 def encode_target_command(position, velocity):
     """
@@ -29,10 +47,14 @@ def encode_target_command(position, velocity):
     :param position: Target position.
     :param velocity: Target velocity.
     :return: 8-byte packed payload.
+    :raises ValueError: If a value is NaN, Inf, or outside float32 range.
     """
-    if not (math.isfinite(position) and math.isfinite(velocity)):
-        raise ValueError('Command contains NaN or Inf values')
-    return struct.pack('<ff', position, velocity)
+    _validate_float32(position, 'Command position')
+    _validate_float32(velocity, 'Command velocity')
+    try:
+        return struct.pack('<ff', position, velocity)
+    except (OverflowError, struct.error) as e:
+        raise ValueError(f'Command not packable: {e}') from e
 
 
 def decode_target_command(data):
@@ -60,10 +82,15 @@ def encode_joint_state(position, velocity, health, fault):
     :param health: Health status byte (e.g., 1 for OK).
     :param fault: Hardware fault code byte.
     :return: 10-byte packed payload.
+    :raises ValueError: If a value is NaN, Inf, outside float32 range,
+        or a byte field is out of range.
     """
-    if not (math.isfinite(position) and math.isfinite(velocity)):
-        raise ValueError('State contains NaN or Inf values')
-    return struct.pack('<ffBB', position, velocity, health, fault)
+    _validate_float32(position, 'State position')
+    _validate_float32(velocity, 'State velocity')
+    try:
+        return struct.pack('<ffBB', position, velocity, health, fault)
+    except (OverflowError, struct.error) as e:
+        raise ValueError(f'State not packable: {e}') from e
 
 
 def decode_joint_state(data):

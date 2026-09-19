@@ -26,8 +26,8 @@ from waybionic_control.protocol import codec
 class CanHostNode(Node):
     """Node that translates ROS JointState messages to CAN frames and monitors health."""
 
-    def __init__(self):
-        super().__init__('can_host')
+    def __init__(self, **kwargs):
+        super().__init__('can_host', **kwargs)
 
         self.joint_pub = self.create_publisher(JointState, '/joint_states', 10)
         self.diag_pub = self.create_publisher(DiagnosticArray, '/diagnostics', 10)
@@ -36,15 +36,39 @@ class CanHostNode(Node):
             JointState, '/joint_commands', self.command_callback, 10)
 
         self.declare_parameter('can_interface', 'vcan0')
+        self.declare_parameter('transport', 'socketcan')
+
         can_interface = self.get_parameter('can_interface').value
+        self.transport = self.get_parameter('transport').value
+        self.bus = None
+        self.bus_error = None
 
-        self.get_logger().info(f'Host connecting to CAN bus on {can_interface}...')
-
-        try:
-            self.bus = can.interface.Bus(bustype='socketcan', channel=can_interface, fd=True)
-        except Exception as e:
-            self.get_logger().warning(f'SocketCAN failed ({e}), falling back to udp_multicast')
-            self.bus = can.interface.Bus(bustype='udp_multicast', channel='224.0.0.1', fd=True)
+        if self.transport == 'socketcan':
+            try:
+                self.bus = can.interface.Bus(
+                    bustype='socketcan', channel=can_interface, fd=True)
+                self.get_logger().info(f'SocketCAN active on {can_interface}')
+            except (can.CanError, OSError) as e:
+                self.bus_error = str(e)
+                self.get_logger().error(
+                    f'SocketCAN init failed on {can_interface}: {e}. Node is '
+                    'degraded; no frames sent or received. Set '
+                    'transport:=udp_multicast to use UDP explicitly.')
+        elif self.transport == 'udp_multicast':
+            try:
+                self.bus = can.interface.Bus(
+                    bustype='udp_multicast', channel='224.0.0.1', fd=True)
+                self.get_logger().warning(
+                    'udp_multicast transport selected. This is NOT a physical '
+                    'CAN link and must not be used for hardware validation.')
+            except (can.CanError, OSError) as e:
+                self.bus_error = str(e)
+                self.get_logger().error(f'udp_multicast init failed: {e}')
+        else:
+            self.bus_error = f'unknown transport {self.transport!r}'
+            self.get_logger().error(
+                f'Unknown transport {self.transport!r}; '
+                "expected 'socketcan' or 'udp_multicast'.")
 
         self.last_seen = {i: 0.0 for i in range(1, 7)}
         self.faults = {i: 0 for i in range(1, 7)}
@@ -56,6 +80,12 @@ class CanHostNode(Node):
         self.get_logger().info('Host node started. Ready for bidirectional CAN.')
 
     def command_callback(self, msg):
+        if self.bus is None:
+            self.get_logger().warning(
+                'Command dropped: no CAN transport available',
+                throttle_duration_sec=5.0)
+            return
+
         self.last_cmd_time = time.time()
         for i, name in enumerate(msg.name):
             if name.startswith('joint_'):
@@ -81,6 +111,9 @@ class CanHostNode(Node):
                     self.get_logger().error(f'Command error: {e}')
 
     def read_bus(self):
+        if self.bus is None:
+            return
+
         # Process max 100 messages per tick to prevent infinite blocking
         for _ in range(100):
             msg = self.bus.recv(0.0)
@@ -111,11 +144,20 @@ class CanHostNode(Node):
         diag_array.header.stamp = self.get_clock().now().to_msg()
         current_time = time.time()
 
-        bus_stat = DiagnosticStatus(
-            name='can.bus: Link Status',
-            level=DiagnosticStatus.OK,
-            message='ACTIVE'
-        )
+        if self.bus is None:
+            bus_stat = DiagnosticStatus(
+                name='can.bus: Link Status',
+                level=DiagnosticStatus.ERROR,
+                message=f'DOWN ({self.transport} init failed: {self.bus_error})'
+            )
+        else:
+            bus_stat = DiagnosticStatus(
+                name='can.bus: Link Status',
+                level=DiagnosticStatus.OK,
+                message=f'ACTIVE ({self.transport})'
+            )
+        bus_stat.values.append(
+            KeyValue(key='transport', value=str(self.transport)))
         diag_array.status.append(bus_stat)
 
         cmd_stat = DiagnosticStatus(name='can.bus: Command Age')
@@ -136,12 +178,8 @@ class CanHostNode(Node):
             status.name = f'can.bus: Joint {joint_id} Health'
             status.hardware_id = f'joint_{joint_id}'
 
-            status.values.append(
-                KeyValue(key='fault_code', value=hex(self.faults[joint_id]))
-            )
-            status.values.append(
-                KeyValue(key='health', value=str(self.healths[joint_id]))
-            )
+            status.values.append(KeyValue(key='fault_code', value=hex(self.faults[joint_id])))
+            status.values.append(KeyValue(key='health', value=str(self.healths[joint_id])))
 
             if current_time - self.last_seen[joint_id] > 0.5:
                 status.level = DiagnosticStatus.ERROR
