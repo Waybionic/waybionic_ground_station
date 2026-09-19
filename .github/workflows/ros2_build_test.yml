@@ -17,6 +17,11 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Validate Compose Configuration
+        run: |
+          docker compose -f compose.yaml config --quiet
+          docker compose -f compose.yaml -f docker/compose.wslg.yaml config --quiet
+
       - name: Build and Test Docker Image
         run: docker build --progress=plain --target test --file docker/Dockerfile --tag waybionic-ground-station:ci .
 
@@ -26,6 +31,11 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Validate Compose Configuration
+        run: |
+          docker compose -f compose.yaml config --quiet
+          docker compose -f compose.yaml -f docker/compose.wslg.yaml config --quiet
 
       - name: Build and Test Docker Image
         run: docker build --progress=plain --target test --file docker/Dockerfile --tag waybionic-ground-station:ci .

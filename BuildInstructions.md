@@ -105,6 +105,48 @@ docker exec waybionic-demo /entrypoint.sh ros2 topic echo /diagnostics --once
 Expect a timestamped array containing temperature, current, and IMU demo values.
 Press **Ctrl+C** in the first terminal to stop and remove the demo container.
 
+#### Compose Demo
+
+Compose provides a checked-in alternative to the `docker run` settings above.
+It uses the same Dockerfile's `test` target, so a failed build or test prevents
+startup. Docker Desktop includes Compose; on native Linux, install the
+[Compose plugin](https://docs.docker.com/compose/install/linux/) if
+`docker compose version` is unavailable. The direct Docker commands and VS Code
+Dev Container remain supported; do not start both demo launchers at once.
+
+From the repository root:
+
+```console
+docker compose up --build
+```
+
+In a second host terminal, inspect the service rather than assuming a container
+name:
+
+```console
+docker compose exec ground-station /entrypoint.sh ros2 topic echo /diagnostics --once
+docker compose logs --tail 50 ground-station
+```
+
+Press **Ctrl+C** in the launch terminal to stop the service, then remove its
+container and project network:
+
+```console
+docker compose down
+```
+
+The [base configuration](./compose.yaml) runs the existing headless launch with
+mock diagnostics, a non-root image user, an init process, and SIGINT shutdown.
+There is no automatic restart policy, host port publication, display mount, or
+hardware-device access. Rebuild with `--build` after source changes; this is a
+source snapshot, not the editable Dev Container.
+
+All ROS nodes remain in one service with localhost-only discovery. Adding more
+services to a Compose network does not make this configuration a distributed
+ROS setup. Cross-container discovery, robot networking, USB, and CAN require
+separate configuration and validation. Do not add privileged mode or broad
+device mounts to the demo.
+
 ### 3. Develop in VS Code
 
 Install the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers),
@@ -182,6 +224,29 @@ Press **Ctrl+C** in PowerShell to stop it.
 The display socket path is specific to Docker Desktop's WSL2 backend. Software
 rendering avoids requiring GPU passthrough. If the socket mount is unavailable,
 stop and check Docker/WSL rather than creating an empty replacement directory.
+
+### Compose with WSLg
+
+From the repository root, the optional
+[WSLg override](./docker/compose.wslg.yaml) enables RViz and the joint-state GUI
+in the same service:
+
+```console
+docker compose -f compose.yaml -f docker/compose.wslg.yaml up --build
+```
+
+In PowerShell, use the Docker executable path shown above if `docker` is not on
+the current terminal's PATH. Stop with Ctrl+C and clean up with the same files:
+
+```console
+docker compose -f compose.yaml -f docker/compose.wslg.yaml down
+```
+
+This override adds only the display environment variables and the read-only
+WSLg socket mount. A missing socket directory is an error; Compose will not
+create an empty substitute. It is Windows/WSL2-specific and does not replace
+the native Linux or macOS GUI instructions. CI validates both Compose files,
+but GUI rendering still requires the platform-specific runtime check.
 
 Qt may report a default `XDG_RUNTIME_DIR`, and RViz may report that stereo is not
 supported; neither prevented this demo from starting. On Ctrl+C, the joint GUI

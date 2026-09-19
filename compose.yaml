@@ -1,0 +1,21 @@
+services:
+  ground-station:
+    image: waybionic-ground-station:jazzy
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: test
+    init: true
+    restart: "no"
+    stop_signal: SIGINT
+    stop_grace_period: 20s
+    environment:
+      ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+    command:
+      - ros2
+      - launch
+      - waybionic_bringup
+      - ground_station.launch.py
+      - launch_rviz:=false
+      - use_joint_state_publisher_gui:=false
+      - start_temporary_diagnostics_publisher:=true

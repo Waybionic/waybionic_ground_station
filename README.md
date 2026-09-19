@@ -25,6 +25,18 @@ From the repository root:
 docker build --progress=plain --target test --file docker/Dockerfile --tag waybionic-ground-station:jazzy .
 ```
 
+To build, test, and start the headless mock demo with the checked-in Compose
+configuration:
+
+```console
+docker compose up --build
+```
+
+Press Ctrl+C to stop, then run `docker compose down` to remove the demo container
+and network. See the [Compose demo](./BuildInstructions.md#compose-demo) for
+diagnostics commands and the optional Windows WSLg configuration. Compose reuses
+the same Dockerfile and ROS launch; it does not enable hardware access.
+
 For editing, open the repository with VS Code's **Dev Containers: Reopen in Container**.
 Local development and CI use the same Dockerfile, with CI jobs for x86-64 and ARM64.
 The default container is headless. Windows users can run the

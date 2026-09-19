@@ -1,0 +1,21 @@
+services:
+  ground-station:
+    environment:
+      DISPLAY: ":0"
+      QT_X11_NO_MITSHM: "1"
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    volumes:
+      - type: bind
+        source: /mnt/host/wslg/.X11-unix
+        target: /tmp/.X11-unix
+        read_only: true
+        bind:
+          create_host_path: false
+    command:
+      - ros2
+      - launch
+      - waybionic_bringup
+      - ground_station.launch.py
+      - launch_rviz:=true
+      - use_joint_state_publisher_gui:=true
+      - start_temporary_diagnostics_publisher:=true
