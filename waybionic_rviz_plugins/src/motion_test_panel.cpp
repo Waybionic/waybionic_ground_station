@@ -17,6 +17,14 @@ namespace waybionic_rviz_plugins
 
   MotionTestPanel::~MotionTestPanel()
   {
+    if (executor_)
+    {
+      executor_->cancel();
+    }
+    if (executor_thread_.joinable())
+    {
+      executor_thread_.join();
+    }
   }
 
   void MotionTestPanel::onInitialize()
@@ -29,6 +37,10 @@ namespace waybionic_rviz_plugins
         "/old_arm_motion_test/status", rclcpp::QoS(10),
         [this](const std_msgs::msg::String::SharedPtr message)
         { handleStatus(message); });
+    executor_ = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
+    executor_->add_node(ros_node_);
+    executor_thread_ = std::thread([this]()
+                                   { executor_->spin(); });
   }
   void MotionTestPanel::buildUi()
   {
@@ -119,11 +131,11 @@ namespace waybionic_rviz_plugins
     test_running_ = false;
     publishCommand("STOP");
 
-    status_label_->setText("STOPPED");
-    result_label_->setText("Motion test stopped.");
+    status_label_->setText("STOP REQUESTED");
+    result_label_->setText("Waiting for the Arduino to confirm HOLD.");
 
-    run_button_->setEnabled(true);
-    home_button_->setEnabled(true);
+    run_button_->setEnabled(false);
+    home_button_->setEnabled(false);
     stop_button_->setEnabled(false);
   }
 
@@ -150,6 +162,27 @@ namespace waybionic_rviz_plugins
       result_label_->setText(status == "COMPLETE" ? "Motion sequence complete." : "Ready.");
       run_button_->setEnabled(true);
       home_button_->setEnabled(true);
+      stop_button_->setEnabled(false);
+    } else if (status == "HOME_REQUIRED") {
+      test_running_ = false;
+      status_label_->setText("HOME REQUIRED");
+      result_label_->setText("Move to HOME before running the sequence.");
+      run_button_->setEnabled(false);
+      home_button_->setEnabled(true);
+      stop_button_->setEnabled(false);
+    } else if (status == "CONNECTING") {
+      test_running_ = false;
+      status_label_->setText("CONNECTING");
+      result_label_->setText("Waiting for the Arduino handshake.");
+      run_button_->setEnabled(false);
+      home_button_->setEnabled(false);
+      stop_button_->setEnabled(false);
+    } else if (status == "STOP_REQUESTED") {
+      test_running_ = false;
+      status_label_->setText("STOP REQUESTED");
+      result_label_->setText("Waiting for the Arduino to confirm HOLD.");
+      run_button_->setEnabled(false);
+      home_button_->setEnabled(false);
       stop_button_->setEnabled(false);
     } else if (status == "STOPPED" || status == "FAULT" || status == "ERROR") {
       test_running_ = false;

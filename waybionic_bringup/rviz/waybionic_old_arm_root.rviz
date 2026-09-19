@@ -13,10 +13,6 @@ Panels:
     Splitter Ratio: 0.5
   - Class: waybionic_rviz_plugins/MotionTestPanel
     Name: MotionTestPanel
-  - Class: waybionic_rviz_plugins/DiagnosticsPanel
-    Diagnostics Topic: /diagnostics
-    Name: DiagnosticsPanel
-    Use Mock Diagnostics: false
 Visualization Manager:
   Class: ""
   Displays:
@@ -251,19 +247,3 @@ Visualization Manager:
         Target Frame: <Fixed Frame>
         Value: Orbit (rviz_default_plugins)
         Yaw: 2.640000581741333
-Window Geometry:
-  DiagnosticsPanel:
-    collapsed: false
-  Displays:
-    collapsed: false
-  Height: 1187
-  Hide Left Dock: false
-  Hide Right Dock: false
-  MotionTestPanel:
-    collapsed: false
-  QMainWindow State: 000000ff00000000fd0000000200000000000001a40000044dfc0200000002fb0000001e004d006f00740069006f006e005400650073007400500061006e0065006c010000003b000000cc000000cc00fffffffb000000200044006900610067006e006f0073007400690063007300500061006e0065006c010000010d0000037b0000035100ffffff000000010000019b0000044dfc0200000002fb0000000a00560069006500770073010000003b00000225000000a000fffffffb000000100044006900730070006c006100790073010000026600000222000000c700ffffff000004290000044d00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
-  Views:
-    collapsed: false
-  Width: 1908
-  X: 0
-  Y: 0
