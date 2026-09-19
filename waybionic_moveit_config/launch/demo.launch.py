@@ -113,8 +113,10 @@ def generate_launch_description():
         "publish_robot_description": True,
     }
 
+    # waybionic_move_group is a drop-in for moveit_ros_move_group/move_group
+    # whose shutdown does not segfault on Jazzy (moveit/moveit2#3680).
     move_group_node = Node(
-        package="moveit_ros_move_group",
+        package="waybionic_move_group",
         executable="move_group",
         output="screen",
         parameters=[
