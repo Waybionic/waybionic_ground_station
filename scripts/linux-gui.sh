@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Write an error message to standard error and exit with status 1.
 fail() {
   printf '%s\n' "$*" >&2
   exit 1
