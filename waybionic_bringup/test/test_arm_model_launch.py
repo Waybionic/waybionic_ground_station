@@ -100,6 +100,18 @@ class TestArmModel(unittest.TestCase):
         self.assert_close(rotate(tool.rotation, (0.0, 0.0, 1.0)), (0.0, 0.0, 1.0), 1e-6)
         self.assertGreater(tool.translation.z, 0.7)
 
+    def test_camera_focus_follows_the_tool(self):
+        # Hold one pose long enough for the smoothed focus to settle on it.
+        end = time.monotonic() + 2.5
+        while time.monotonic() < end:
+            tool = self.transform(CAD_POSE, 'tool_link').translation
+        shoulder = self.transform(CAD_POSE, 'shoulder_link').translation
+        focus = self.buffer.lookup_transform('base_link', 'view_focus', Time())
+        expected = [0.7 * t + 0.3 * s for t, s in zip((tool.x, tool.y, tool.z),
+                                                      (shoulder.x, shoulder.y, shoulder.z))]
+        offset = focus.transform.translation
+        self.assert_close((offset.x, offset.y, offset.z), expected, 0.005)
+
     def test_wrist_roll_turns_side_gears_in_opposite_directions(self):
         roll = dict(ZERO_POSE, joint_5=0.5)
         for gear, sign in (('wrist_left_gear_link', -1.0), ('wrist_right_gear_link', 1.0)):
