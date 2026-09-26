@@ -265,6 +265,60 @@ Qt may report a default `XDG_RUNTIME_DIR`, and RViz may report that stereo is no
 supported; neither prevented this demo from starting. On Ctrl+C, the joint GUI
 can report exit code `-2`, indicating the requested SIGINT interruption.
 
+## Xbox Controller (Simulated Arm)
+
+`teleop:=true` drives the arm with an Xbox controller through simulated CAN drives;
+nothing is sent to hardware. The controller mapping is in
+`waybionic_teleop/config/xbox_teleop.yaml`, and the placeholder joint-to-drive map
+(MKS SERVO42D/57D CAN IDs, gear ratios and the wrist differential) is in
+`waybionic_teleop/config/arm_drives.yaml`.
+
+**Windows (Docker):** connect the controller, then start the teleop version of the
+[WSLg demo](#windows-wslg-demo) from the repository root:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin\docker.exe" compose run --rm --build --service-ports wslg-teleop
+```
+
+In a second PowerShell window, start the controller bridge from the repository root.
+It needs only Python 3 on Windows, with no extra packages:
+
+```powershell
+cd waybionic_teleop
+python -m waybionic_teleop.xinput_bridge
+```
+
+The bridge sends the controller state to the container on `127.0.0.1:47300/udp`.
+Press **Ctrl+C** in each window to stop.
+
+**Linux (native ROS):** with the controller plugged in, run
+`ros2 launch waybionic_bringup ground_station.launch.py teleop:=true`.
+
+| Input | Action |
+| --- | --- |
+| Start (Xbox Menu button, three lines) | Enable or disable; the arm starts disabled |
+| B | Stop and hold the current pose |
+| Y | Switch group: base (joints 1-3) or upper (joints 2-5) |
+| Base group: left stick | Base yaw (left/right) and shoulder (up/down) |
+| Base group: right stick up/down | Elbow |
+| Upper group: left stick | Shoulder (left/right) and elbow (up/down) |
+| Upper group: right stick | Wrist roll (left/right) and wrist pitch (up/down) |
+| RT / LT | Close / open the placeholder end effector |
+| D-pad up/down | Speed: 10, 25, 50 or 100% of 60 deg/s |
+| A (hold) | Return to the zero pose |
+
+Start is refused until the sticks are centred and the triggers released. The
+diagnostics panel shows the teleop state, each joint, each drive's last CAN frame
+and the simulated bus load.
+
+The RViz camera follows the tool as the arm moves; drag to orbit and scroll to zoom
+as usual, or add `follow_camera:=false` to the launch command for a fixed view.
+
+If the arm stops responding and the bridge's axis values stop changing while you
+move the sticks, Windows has stopped updating the controller. Turn the controller
+off and on (or unplug and replug it), then press Start again; the bridge
+reconnects by itself.
+
 ## Native Ubuntu Setup for RViz
 
 Only follow this section if you need ROS and RViz outside the container. It is

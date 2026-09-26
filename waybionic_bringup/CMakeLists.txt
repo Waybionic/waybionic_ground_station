@@ -20,9 +20,10 @@ if(BUILD_TESTING)
   add_launch_test(test/test_ground_station_launch.py)
   add_launch_test(test/test_arm_model_launch.py)
   add_launch_test(test/test_joint_demo_launch.py)
+  add_launch_test(test/test_teleop_launch.py)
 endif()
 
-install(PROGRAMS scripts/joint_demo.py
+install(PROGRAMS scripts/joint_demo.py scripts/camera_follower.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -10,6 +10,8 @@ Currently, this repository contains the clean foundation and the SolidWorks-expo
   Hardware description, URDF/Xacro files, and meshes. `waybionic_arm.urdf` is generated from the mechanical team's `full-arm-smaller.SLDASM` by the tools in `scripts/cad/`; regenerate it after CAD changes instead of editing it. The geometric placeholder model remains available.
 - **`waybionic_bringup`**
   Launch files and RViz configurations to bring up the robot state and visualization.
+- **`waybionic_teleop`**
+  Xbox controller teleoperation of the arm through placeholder MKS SERVO CAN drives, simulated until the real drives are connected.
 - **`waybionic_rviz_plugins`**
   Engineer diagnostics panel, mock/live diagnostics sources, and a temporary diagnostics publisher.
 
