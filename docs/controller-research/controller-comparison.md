@@ -24,3 +24,5 @@ Fallback: The SpaceMouse controller would be good for simply controlling the arm
 | --- | --- |
 | Button 1 | Enable or disable arm |
 | Button 2 | Toggle between base joints and upper joints |
+
+Since the controller itself is able to move in a 3D space, moving the robot like that would be a lot easier to configure.
