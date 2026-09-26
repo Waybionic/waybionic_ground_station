@@ -38,6 +38,7 @@ waybionic_rviz_plugins/
   plugin_description.xml      # Registers DiagnosticsPanel
   scripts/
     temporary_diagnostics_publisher.py
+    diagnostics_recorder.py
   include/waybionic_rviz_plugins/
     diagnostics_contract.hpp  # Normalized DiagnosticMessage model
     diagnostics_source.hpp    # DiagnosticsSource interface
@@ -138,6 +139,49 @@ DiagnosticsSource
 ```
 
 `RosDiagnosticsSource` maps ROS diagnostic levels and fields into the internal `DiagnosticMessage` model before the Qt panel renders them. See `docs/DIAGNOSTICS_CONTRACT.md` for the full mapping Korede/backend should follow, and `docs/DIAGNOSTICS_BACKEND_INTEGRATION.md` for backend replacement guidance.
+
+### Recording a diagnostics session
+
+The recorder saves the original ROS messages in a standard rosbag2 session and
+writes `metadata.json` beside the bag. It records `/diagnostics` by default;
+additional topics must be named explicitly.
+
+```bash
+ros2 run waybionic_rviz_plugins diagnostics_recorder.py \
+  --duration 30 \
+  --output-directory ~/diagnostics-sessions/fault-001 \
+  --source-label mock \
+  --tested-commit "$(git rev-parse HEAD)"
+```
+
+The output directory must not already exist. Inspect or replay a session in an
+isolated ROS domain so it cannot interfere with an active robot or publisher:
+
+```bash
+ROS_DOMAIN_ID=42 ros2 bag info ~/diagnostics-sessions/fault-001/bag
+ROS_DOMAIN_ID=42 ros2 bag play ~/diagnostics-sessions/fault-001/bag
+ROS_DOMAIN_ID=42 ros2 topic echo /diagnostics
+```
+
+Label replayed data as `recorded/mock` when sharing it. Replay does not require
+the original diagnostics publisher to be running. Generated bag directories
+should remain outside Git; the repository ignores local recording output.
+
+For a complete temporary-publisher validation, record each mode in a separate
+new directory. Use a duration long enough for the first rosbag2 startup on the
+machine:
+
+```bash
+ros2 launch waybionic_rviz_plugins temporary_diagnostics_publisher.launch.py mode:=normal
+ros2 run waybionic_rviz_plugins diagnostics_recorder.py --duration 30 \
+  --output-directory ~/diagnostics-sessions/normal \
+  --source-label mock
+```
+
+Repeat with `mode:=fault`, `mode:=stale`, and `mode:=cycle`. To preserve a
+publisher message gap, stop the publisher with `Ctrl+C`, leave the recorder
+running, restart the publisher, and then let the recorder finish. The recorder
+does not insert samples during that gap.
 
 Switching between mock and live replaces the active source while a ROS callback may still be running. `docs/DIAGNOSTICS_SOURCE_LIFECYCLE.md` documents the ownership rules that keep that handoff safe and the stress test that guards it.
 

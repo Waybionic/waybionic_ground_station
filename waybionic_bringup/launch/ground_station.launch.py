@@ -36,7 +36,6 @@ def generate_launch_description():
     default_rviz_config_path = os.path.join(
         waybionic_bringup_dir, 'rviz', 'waybionic_unified.rviz')
 
-    # --- Declare Launch Arguments ---
     model_arg = DeclareLaunchArgument(
         'model', default_value=default_model_path,
         description='Absolute path to robot urdf')
@@ -99,7 +98,6 @@ def generate_launch_description():
 
     file_check = OpaqueFunction(function=check_files_exist)
 
-    # --- Nodes ---
     robot_description_content = {
         'robot_description': ParameterValue(
             Command(['xacro ', LaunchConfiguration('model')]), value_type=str)
@@ -173,7 +171,6 @@ def generate_launch_description():
         ]
     )
 
-    # Pass the correct arguments to the temporary publisher
     temp_diag_pub_node = Node(
         package='waybionic_rviz_plugins', executable='temporary_diagnostics_publisher.py',
         name='temp_diag_pub',

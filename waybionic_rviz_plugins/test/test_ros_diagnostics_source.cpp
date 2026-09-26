@@ -175,6 +175,23 @@ TEST_F(DiagnosticsTrafficFixture, NormalizesReceivedDiagnostics)
   stopTraffic();
 }
 
+TEST_F(DiagnosticsTrafficFixture, OkDiagnosticsDoNotCarryAlertMessage)
+{
+  const auto source = makeSource();
+
+  // A single publish can go out before the subscription is matched.
+  ASSERT_TRUE(waitFor([&]() {
+    publisher_->publish(makeArray(diagnostic_msgs::msg::DiagnosticStatus::OK, "42"));
+    const auto messages = source->messages(now());
+    return messages.size() == 1u && messages.front().signal_name == "board.temperature";
+  }, 5s));
+
+  const auto messages = source->messages(now());
+  ASSERT_EQ(messages.size(), 1u);
+  EXPECT_EQ(messages.front().status, DiagnosticStatus::Ok);
+  EXPECT_FALSE(messages.front().alert_message.has_value());
+}
+
 TEST_F(DiagnosticsTrafficFixture, StopFreezesStateAndIgnoresLaterMessages)
 {
   auto source = makeSource();

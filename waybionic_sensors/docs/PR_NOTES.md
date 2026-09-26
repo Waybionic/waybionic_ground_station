@@ -75,14 +75,19 @@ Tracked as question 14 in `docs/HARDWARE_INTERFACE.md`.
 
 ```text
 mock_source.py  ─┐
-                 ├─> ImuReading ─┬─> imu_messages.py   -> sensor_msgs/Imu, TF
-hardware_reader.py ─┘            └─> imu_diagnostics.py -> DiagnosticArray
-                                        imu_publisher_node.py wires them
+                 ├─> ImuReading -> imu_sample_validation.py -> accepted reading
+hardware_reader.py ─┘                                      ├─> imu_messages.py
+                                                          │   -> sensor_msgs/Imu, TF
+                                                          └─> imu_diagnostics.py
+                                                              -> DiagnosticArray
+                                      imu_publisher_node.py wires the stages
 ```
 
 `imu_reading.py` is the contract between sample producers and consumers. A real
-driver implements `ImuHardwareReader` and returns `ImuReading` values; message
-construction, covariance, diagnostics, and TF need no changes.
+driver implements `ImuHardwareReader` and returns `ImuReading` values. The
+hardware-independent validation gate rejects malformed, non-finite, or
+out-of-order candidates before message construction; covariance, diagnostics,
+and TF need no driver-specific changes.
 
 Two structural tests enforce this: the node must not construct `Imu()` or
 `DiagnosticStatus` itself.
@@ -238,16 +243,20 @@ See README **Runtime handoff**.
 
 ## FOLLOW-UP AFTER PR #11 MERGES
 
-Do not implement these on this branch. They belong on a later reader-validation
-PR once a real `ImuHardwareReader` exists. Attach tests next to
-`test_hardware_reader.py` / `test_imu_publisher_node.py`, around
-`ImuHardwareReader.read()` and the publisher sample loop:
+Implemented on `feature/imu-reader-validation`, not by reopening PR #11.
 
-- no sample
-- delayed sample
-- malformed / non-finite sample
-- reader exception
-- recovery after those failures
+The publisher now validates candidate readings at the reader boundary:
 
-`UnconfiguredImuReader.read()` already returns `None` (no fake live samples).
-Do not invent protocol, calibration, noise, axes, or device timestamps there.
+- `None` publishes nothing new
+- non-finite / malformed data is rejected
+- out-of-order timestamps are rejected
+- `read()` exceptions are logged, do not kill the node, and retry next cycle
+- last valid state is retained for diagnostics/reference and is not republished
+  as a fresh measurement
+- a later valid sample recovers normal operation
+
+Intentionally excluded from that follow-up:
+
+- Hamnah normal -> stall -> restart recording remains a separate human task.
+- No physical IMU driver, protocol, calibration, noise, mounting, or device
+  timestamp source is added.
