@@ -1,11 +1,22 @@
 Panels:
   - Class: rviz_common/Displays
+    Help Height: 70
     Name: Displays
+    Property Tree Widget:
+      Expanded: ~
+      Splitter Ratio: 0.5
+    Tree Height: 70
   - Class: rviz_common/Views
+    Expanded:
+      - /Current View1
     Name: Views
+    Splitter Ratio: 0.5
   - Class: waybionic_rviz_plugins/DiagnosticsPanel
     Diagnostics Topic: /diagnostics
     Name: WayBionic Diagnostics
+    Use Mock Diagnostics: false
+  - Class: waybionic_rviz_plugins/MotionTestPanel
+    Name: MotionTestPanel
 Visualization Manager:
   Class: ""
   Displays:
@@ -15,7 +26,7 @@ Visualization Manager:
       Color: 160; 160; 164
       Enabled: true
       Line Style:
-        Line Width: 0.03
+        Line Width: 0.029999999329447746
         Value: Lines
       Name: Grid
       Normal Cell Count: 0
@@ -29,10 +40,12 @@ Visualization Manager:
       Value: true
     - Class: rviz_default_plugins/TF
       Enabled: true
+      Filter (blacklist): ""
+      Filter (whitelist): ""
       Frame Timeout: 15
       Frames:
         All Enabled: true
-      Marker Scale: 0.4
+      Marker Scale: 0.4000000059604645
       Name: TF
       Show Arrows: true
       Show Axes: true
@@ -44,6 +57,7 @@ Visualization Manager:
     - Alpha: 1
       Class: rviz_default_plugins/RobotModel
       Collision Enabled: false
+      Description File: ""
       Description Source: Topic
       Description Topic:
         Depth: 5
@@ -52,8 +66,16 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /robot_description
       Enabled: true
+      Links:
+        All Links Enabled: true
+        Expand Joint Details: false
+        Expand Link Details: false
+        Expand Tree: false
+        Link Tree Style: ""
+      Mass Properties:
+        Inertia: false
+        Mass: false
       Name: Robot Model
-      Robot Description: robot_description
       TF Prefix: ""
       Update Interval: 0
       Value: true
@@ -79,36 +101,39 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 1.8
+      Distance: 15.149079322814941
       Enable Stereo Rendering:
-        Stereo Eye Separation: 0.06
+        Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
         X: 0
         Y: 0
-        Z: 0.2
+        Z: 0.20000000298023224
       Focal Shape Fixed Size: true
-      Focal Shape Size: 0.05
+      Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
-      Near Clip Distance: 0.01
-      Pitch: 0.55
+      Near Clip Distance: 0.009999999776482582
+      Pitch: 0.550000011920929
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 5.4
+      Yaw: 5.400000095367432
     Saved: ~
 Window Geometry:
   Displays:
     collapsed: false
-  Height: 995
+  Height: 1104
   Hide Left Dock: false
   Hide Right Dock: false
+  MotionTestPanel:
+    collapsed: false
+  QMainWindow State: 000000ff00000000fd0000000100000000000001a4000003fafc0200000004fb000000100044006900730070006c006100790073000000003b000000c7000000c700fffffffb0000000a00560069006500770073000000003b000000c3000000a000fffffffb0000002a00570061007900420069006f006e0069006300200044006900610067006e006f00730074006900630073010000003b000003280000030e00fffffffb0000001e004d006f00740069006f006e005400650073007400500061006e0065006c0100000369000000cc000000cc00ffffff000005d6000003fa00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Views:
-    collapsed: true
+    collapsed: false
   WayBionic Diagnostics:
     collapsed: false
   Width: 1920
-  X: 0
-  Y: 0
+  X: -29
+  Y: -31

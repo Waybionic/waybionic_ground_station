@@ -14,6 +14,8 @@
 
 #include <rclcpp/clock.hpp>
 #include <rclcpp/node.hpp>
+#include <rclcpp/publisher.hpp>
+#include <std_msgs/msg/string.hpp>
 #include <rviz_common/config.hpp>
 #include <rviz_common/panel.hpp>
 
@@ -22,72 +24,78 @@
 #include "waybionic_rviz_plugins/mock_diagnostics_source.hpp"
 
 class QButtonGroup;
+class QProgressBar;
 class QPushButton;
 
 namespace waybionic_rviz_plugins
 {
 
-class DiagnosticsPanel : public rviz_common::Panel
-{
-  Q_OBJECT
+  class DiagnosticsPanel : public rviz_common::Panel
+  {
+    Q_OBJECT
 
-public:
-  explicit DiagnosticsPanel(QWidget * parent = nullptr);
-  ~DiagnosticsPanel() override;
+  public:
+    explicit DiagnosticsPanel(QWidget *parent = nullptr);
+    ~DiagnosticsPanel() override;
 
-  void onInitialize() override;
-  void save(rviz_common::Config config) const override;
-  void load(const rviz_common::Config & config) override;
+    void onInitialize() override;
+    void save(rviz_common::Config config) const override;
+    void load(const rviz_common::Config &config) override;
 
-private:
-  void buildUi();
-  void configureSource(bool use_mock_diagnostics);
-  bool readUseMockDiagnosticsParameter(bool default_value);
-  std::string readDiagnosticsTopicParameter(const std::string & default_value);
-  void refresh();
-  void setMockDiagnosticsState(MockDiagnosticsState mode);
-  void setUseMockDiagnostics(bool use_mock_diagnostics);
-  void updateSystemStatus(
-    const DiagnosticsSource & source,
-    const std::vector<DiagnosticMessage> & messages,
-    const rclcpp::Time & now);
-  void updateTelemetryTable(const std::vector<DiagnosticMessage> & messages, const rclcpp::Time & now);
-  void updateAlerts(const std::vector<DiagnosticMessage> & messages);
-  void updateSourceControls();
-  void clearAlerts();
+  private:
+    void buildUi();
+    void buildMovementTestUi(QVBoxLayout *root_layout);
+    void configureSource(bool use_mock_diagnostics);
+    bool readUseMockDiagnosticsParameter(bool default_value);
+    std::string readDiagnosticsTopicParameter(const std::string &default_value);
+    void refresh();
+    void setMockDiagnosticsState(MockDiagnosticsState mode);
+    void setUseMockDiagnostics(bool use_mock_diagnostics);
+    void updateSystemStatus(
+        const DiagnosticsSource &source,
+        const std::vector<DiagnosticMessage> &messages,
+        const rclcpp::Time &now);
+    void updateTelemetryTable(const std::vector<DiagnosticMessage> &messages, const rclcpp::Time &now);
+    void updateAlerts(const std::vector<DiagnosticMessage> &messages);
+    void updateSourceControls();
+    void clearAlerts();
 
-  QString statusColor(DiagnosticStatus status) const;
-  QString rowBackground(DiagnosticStatus status) const;
-  QString ageText(const rclcpp::Time & timestamp, const rclcpp::Time & now) const;
-  QString optionalText(const std::optional<std::string> & value) const;
-  QString alertText(const DiagnosticMessage & message) const;
+    QString statusColor(DiagnosticStatus status) const;
+    QString rowBackground(DiagnosticStatus status) const;
+    QString ageText(const rclcpp::Time &timestamp, const rclcpp::Time &now) const;
+    QString optionalText(const std::optional<std::string> &value) const;
+    QString alertText(const DiagnosticMessage &message) const;
 
-  // Shared ownership so a refresh tick keeps its source alive even if a mode
-  // switch replaces the panel's source part-way through the tick.
-  std::shared_ptr<DiagnosticsSource> diagnostics_source_;
-  std::shared_ptr<MockDiagnosticsSource> mock_diagnostics_source_;
-  rclcpp::Node::SharedPtr rviz_node_;
-  rclcpp::Clock clock_{RCL_SYSTEM_TIME};
-  std::string diagnostics_topic_{"/diagnostics"};
-  bool use_mock_diagnostics_{true};
+    // Shared ownership so a refresh tick keeps its source alive even if a mode
+    // switch replaces the panel's source part-way through the tick.
+    std::shared_ptr<DiagnosticsSource> diagnostics_source_;
+    std::shared_ptr<MockDiagnosticsSource> mock_diagnostics_source_;
+    rclcpp::Node::SharedPtr rviz_node_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr motion_command_publisher_;
+    rclcpp::Clock clock_{RCL_SYSTEM_TIME};
+    std::string diagnostics_topic_{"/diagnostics"};
+    bool use_mock_diagnostics_{true};
 
-  QTimer * refresh_timer_{nullptr};
-  QCheckBox * use_mock_diagnostics_checkbox_{nullptr};
-  QLabel * state_label_{nullptr};
-  QLabel * last_updated_label_{nullptr};
-  QLabel * source_label_{nullptr};
-  QLabel * ros_connection_label_{nullptr};
-  QLabel * heartbeat_label_{nullptr};
-  QLabel * ui_mode_label_{nullptr};
-  QLabel * safety_label_{nullptr};
-  QLabel * alert_icon_label_{nullptr};
-  QTableWidget * telemetry_table_{nullptr};
-  QVBoxLayout * alerts_layout_{nullptr};
-  QPushButton * normal_button_{nullptr};
-  QPushButton * fault_button_{nullptr};
-  QButtonGroup * mock_state_button_group_{nullptr};
-};
+    QTimer *refresh_timer_{nullptr};
+    QCheckBox *use_mock_diagnostics_checkbox_{nullptr};
+    QLabel *state_label_{nullptr};
+    QLabel *last_updated_label_{nullptr};
+    QLabel *source_label_{nullptr};
+    QLabel *ros_connection_label_{nullptr};
+    QLabel *heartbeat_label_{nullptr};
+    QLabel *ui_mode_label_{nullptr};
+    QLabel *safety_label_{nullptr};
+    QLabel *alert_icon_label_{nullptr};
+    QTableWidget *telemetry_table_{nullptr};
+    QVBoxLayout *alerts_layout_{nullptr};
+    QPushButton *normal_button_{nullptr};
+    QPushButton *fault_button_{nullptr};
+    QPushButton *movement_test_button_{nullptr};
+    QLabel *movement_test_status_{nullptr};
+    QProgressBar *movement_test_progress_{nullptr};
+    QButtonGroup *mock_state_button_group_{nullptr};
+  };
 
-}  // namespace waybionic_rviz_plugins
+} // namespace waybionic_rviz_plugins
 
-#endif  // WAYBIONIC_RVIZ_PLUGINS__DIAGNOSTICS_PANEL_HPP_
+#endif // WAYBIONIC_RVIZ_PLUGINS__DIAGNOSTICS_PANEL_HPP_
