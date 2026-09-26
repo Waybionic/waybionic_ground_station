@@ -106,10 +106,11 @@ def test_unreachable_points_have_no_solution(arm):
     assert arm.inverse((0.01, 0.0, 0.3), math.pi, 0.0, DOWN, LIMITS) is None
 
 
-def cut(arm, velocity, seconds, joints=DOWN, roll_rate=0.0):
+def cut(arm, velocity, seconds, joints=DOWN, pitch_rate=0.0, roll_rate=0.0):
     path = [dict(joints)]
     for _ in range(round(seconds / DT)):
-        joints, fraction, blocked = arm.jog(joints, velocity, roll_rate, DT, LIMITS, MAX_RATE)
+        joints, fraction, blocked = arm.jog(joints, velocity, pitch_rate, roll_rate, DT, LIMITS,
+                                            MAX_RATE)
         path.append(joints)
     return path
 
@@ -137,8 +138,27 @@ def test_a_sideways_cut_moves_all_five_joints_and_keeps_the_blade_heading(arm):
         assert [row[0] for row in urdf_pose(joints)[1]] == pytest.approx(heading, abs=1e-9)
 
 
+def test_tilting_pivots_the_tool_about_a_fixed_tip(arm):
+    path = cut(arm, (0.0, 0.0, 0.0), 1.0, pitch_rate=-0.2)
+    start, pitch = arm.forward(path[0])
+    for joints in path:
+        assert arm.forward(joints)[0] == pytest.approx(start, abs=1e-9)
+    assert arm.forward(path[-1])[1] == pytest.approx(pitch - 0.2)
+    moved = [name for name in arm.joints if abs(path[-1][name] - path[0][name]) > 1e-3]
+    assert moved == ['joint_2', 'joint_3', 'joint_4']
+
+
+def test_tilting_stops_at_a_joint_limit_with_the_tip_in_place(arm):
+    path = cut(arm, (0.0, 0.0, 0.0), 2.0, pitch_rate=-0.2)
+    joints, fraction, blocked = arm.jog(path[-1], (0.0, 0.0, 0.0), -0.2, 0.0, DT, LIMITS,
+                                        MAX_RATE)
+    assert blocked == ['joint_3'] and fraction == pytest.approx(0.0, abs=1e-6)
+    assert joints['joint_3'] == pytest.approx(LIMITS['joint_3'][1], abs=1e-6)
+    assert arm.forward(joints)[0] == pytest.approx(arm.forward(DOWN)[0], abs=1e-9)
+
+
 def test_a_fast_request_slows_the_whole_step_and_stays_on_the_line(arm):
-    joints, fraction, blocked = arm.jog(DOWN, (0.0, 2.0, 0.0), 0.0, DT, LIMITS, MAX_RATE)
+    joints, fraction, blocked = arm.jog(DOWN, (0.0, 2.0, 0.0), 0.0, 0.0, DT, LIMITS, MAX_RATE)
     rates = [abs(joints[name] - DOWN[name]) / DT for name in arm.joints]
     start = arm.forward(DOWN)[0]
     assert 0.0 < fraction < 1.0 and blocked == []
@@ -149,7 +169,8 @@ def test_a_fast_request_slows_the_whole_step_and_stays_on_the_line(arm):
 def test_a_cut_stops_on_the_line_at_the_edge_of_the_workspace(arm):
     path = cut(arm, (0.05, 0.0, 0.0), 20.0)
     start = arm.forward(path[0])[0]
-    joints, fraction, blocked = arm.jog(path[-1], (0.05, 0.0, 0.0), 0.0, DT, LIMITS, MAX_RATE)
+    joints, fraction, blocked = arm.jog(path[-1], (0.05, 0.0, 0.0), 0.0, 0.0, DT, LIMITS,
+                                        MAX_RATE)
     assert fraction == pytest.approx(0.0, abs=1e-6) and blocked
     assert all(LIMITS[name][0] - 1e-9 <= joints[name] <= LIMITS[name][1] + 1e-9
                for name in arm.joints)

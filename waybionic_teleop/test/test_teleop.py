@@ -165,6 +165,16 @@ def test_holding_lb_keeps_only_the_strongest_direction(arm, cartesian):
     assert end[1:] == pytest.approx(start[1:], abs=1e-12)
 
 
+def test_the_dpad_tilts_the_tool_about_its_tip(arm, cartesian):
+    start, pitch = arm.forward(cartesian.targets)
+    for _ in range(round(0.5 / DT)):
+        cartesian.update(*sample('dpad_right'), DOWN, DT)
+        assert arm.forward(cartesian.targets)[0] == pytest.approx(start, abs=1e-9)
+    # 15 deg/s at the initial speed level, less the short ramp.
+    assert arm.forward(cartesian.targets)[1] - pitch == pytest.approx(-math.radians(7.5),
+                                                                      abs=math.radians(0.3))
+
+
 def test_without_arm_kinematics_the_cartesian_group_is_skipped(teleop):
     assert [group.name for group in teleop.groups] == ['base', 'upper']
     press(teleop, 'start')

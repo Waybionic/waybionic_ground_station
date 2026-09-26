@@ -306,8 +306,9 @@ Press **Ctrl+C** in each window to stop.
 | Cartesian group: left stick | Tool tip left/right and forward/back, in straight lines |
 | Cartesian group: right stick | Tool roll (left/right) and tool tip up/down |
 | Cartesian group: LB (hold) | Move along one axis only: the stick direction pushed furthest |
+| Cartesian group: D-pad left/right | Tilt the tool about its tip; the tip stays still |
 | RT / LT | Close / open the placeholder end effector |
-| D-pad up/down | Speed: 10, 25, 50 or 100% of 60 deg/s, or of 50 mm/s in the Cartesian group |
+| D-pad up/down | Speed: 10, 25, 50 or 100% of 60 deg/s, or of 50 mm/s and 30 deg/s of tilt in the Cartesian group |
 | A (hold) | Return to the zero pose |
 
 Start is refused until the sticks are centred and the triggers released. The
@@ -316,8 +317,8 @@ and the simulated bus load.
 
 The Cartesian group moves the tool tip along straight lines in the base frame and
 keeps the tool's tilt and heading: every joint moves together, and the tip stops
-at the edge of the workspace instead of leaving the line. To change the tilt, use
-the upper group.
+at the edge of the workspace instead of leaving the line. Tilting with the D-pad
+moves the shoulder, elbow and wrist around the tip, which stays in place.
 
 The RViz camera follows the tool as the arm moves; drag to orbit and scroll to zoom
 as usual, or add `follow_camera:=false` to the launch command for a fixed view.

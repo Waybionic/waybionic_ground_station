@@ -5,7 +5,7 @@ import math
 
 from waybionic_teleop.gamepad import AXIS, BUTTON
 
-ACTIONS = ('enable', 'stop', 'group', 'home', 'faster', 'slower', 'lock')
+ACTIONS = ('enable', 'stop', 'group', 'home', 'faster', 'slower', 'lock', 'tilt_up', 'tilt_down')
 CARTESIAN_AXES = ('x', 'y', 'z', 'roll')
 
 
@@ -44,6 +44,7 @@ class TeleopConfig:
     max_accel: float
     linear_speed: float
     linear_accel: float
+    tilt_speed: float
     speed_levels: list
     speed_level: int
     deadzone: float
@@ -69,6 +70,7 @@ def config_from_parameters(params):
             max_accel=math.radians(params['max_accel_deg_s2']),
             linear_speed=params['max_linear_speed_mm_s'] / 1000.0,
             linear_accel=params['max_linear_accel_mm_s2'] / 1000.0,
+            tilt_speed=math.radians(params['max_tilt_speed_deg_s']),
             speed_levels=[float(level) for level in params['speed_levels']],
             speed_level=int(params['initial_speed_level']),
             deadzone=float(params['deadzone']),
@@ -113,6 +115,7 @@ class ArmTeleop:
         self.targets = {}
         self.velocities = dict.fromkeys(self.limits, 0.0)
         self.linear = (0.0, 0.0, 0.0)
+        self.tilt = 0.0
         self.held = set()
         self.blocked = []
         self.note = 'Press Start (Xbox Menu button) to enable'
@@ -143,7 +146,7 @@ class ArmTeleop:
             self.enable(measured, axes)
         if 'group' in pressed:
             self.group = (self.group + 1) % len(self.groups)
-            self.linear = (0.0, 0.0, 0.0)
+            self.linear, self.tilt = (0.0, 0.0, 0.0), 0.0
         if 'faster' in pressed:
             self.level = min(self.level + 1, len(self.config.speed_levels) - 1)
         if 'slower' in pressed:
@@ -170,13 +173,13 @@ class ArmTeleop:
         # Start from the measured pose so enabling never makes the arm jump.
         self.targets = {joint: measured[joint] for joint in self.limits}
         self.velocities = dict.fromkeys(self.limits, 0.0)
-        self.linear = (0.0, 0.0, 0.0)
+        self.linear, self.tilt = (0.0, 0.0, 0.0), 0.0
         self.enabled, self.note, self.warning = True, '', False
 
     def disable(self, measured, note, warning=False):
         self.enabled, self.note, self.warning = False, note, warning
         self.velocities = dict.fromkeys(self.limits, 0.0)
-        self.linear = (0.0, 0.0, 0.0)
+        self.linear, self.tilt = (0.0, 0.0, 0.0), 0.0
         self.targets.update({joint: measured[joint] for joint in self.limits if joint in measured})
 
     def move(self, axes, homing, dt):
@@ -216,7 +219,7 @@ class ArmTeleop:
             self.targets[joint], self.velocities[joint] = target, velocity
 
     def jog(self, axes, dt):
-        """Move the tool tip along a straight line set by the sticks, keeping the tool pitch."""
+        """Move the tool tip along a straight line set by the sticks, or tilt the tool about it."""
         config, group = self.config, self.active_group
         values = [scale * self.stick(axes, axis) for axis, scale in zip(group.axes, group.scales)]
         linear, roll = values[:3], values[3]
@@ -229,10 +232,15 @@ class ArmTeleop:
         if size > most:
             change = [value * most / size for value in change]
         velocity = [current + value for current, value in zip(self.linear, change)]
+        # Tilting up turns the tool axis towards straight up, which lowers the pitch angle.
+        tilt = config.tilt_speed * config.speed_levels[self.level] * (
+            (config.buttons['tilt_down'] in self.held) - (config.buttons['tilt_up'] in self.held))
+        step = config.max_accel * dt
+        tilt = self.tilt + clamp(tilt - self.tilt, -step, step)
         before = {joint: self.targets[joint] for joint in self.kinematics.joints}
         after, fraction, self.blocked = self.kinematics.jog(
-            before, velocity, roll * self.speed, dt, self.limits, config.max_speed)
-        self.linear = tuple(value * fraction for value in velocity)
+            before, velocity, tilt, roll * self.speed, dt, self.limits, config.max_speed)
+        self.linear, self.tilt = tuple(value * fraction for value in velocity), tilt * fraction
         for joint in self.kinematics.joints:
             self.velocities[joint] = (after[joint] - before[joint]) / dt
             self.targets[joint] = after[joint]

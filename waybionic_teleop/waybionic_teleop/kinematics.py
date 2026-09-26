@@ -118,26 +118,27 @@ class ArmKinematics:
                         best, best_cost = candidate, cost
         return best
 
-    def jog(self, joints, velocity, roll_rate, dt, limits, max_rate):
+    def jog(self, joints, velocity, pitch_rate, roll_rate, dt, limits, max_rate):
         """
         Move the tip along a straight line for dt; return (joints, fraction, blocked).
 
-        The tool pitch stays fixed. The whole step shrinks, never one joint, so the tip stays
-        on the line when a joint would pass max_rate or a limit. Roll turns against the yaw so
-        the tool keeps its heading.
+        pitch_rate tilts the tool about its tip. The whole step shrinks, never one joint, so
+        the tip stays on the line when a joint would pass max_rate or a limit. Roll turns
+        against the yaw so the tool keeps its heading.
         """
         start, pitch = self.forward(joints)
         yaw, roll = self.joints[0], self.joints[4]
 
         def solve(fraction, bounds):
+            new_pitch = pitch + pitch_rate * dt * fraction
             target = [p + v * dt * fraction for p, v in zip(start, velocity)]
             arm = {name: value for name, value in bounds.items() if name != roll}
-            result = self.inverse(target, pitch, joints[roll], joints, arm)
+            result = self.inverse(target, new_pitch, joints[roll], joints, arm)
             if result is None:
                 return None
             # Turning the yaw also turns the tool about its own axis by cos(pitch) of that turn.
             result[roll] = (joints[roll] + roll_rate * dt * fraction
-                            - math.cos(pitch) * (result[yaw] - joints[yaw]))
+                            - math.cos((pitch + new_pitch) / 2.0) * (result[yaw] - joints[yaw]))
             return result if _within(result[roll], bounds.get(roll)) else None
 
         def fastest(result):
