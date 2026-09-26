@@ -8,7 +8,7 @@ These google docs are still editable and may be changed
 - [Camera's Mechanical Requirements](https://docs.google.com/document/d/15i2DtYXTZA4_sDSY5-uei4Io7vbqmeA7kBANB8NLVCQ/edit?tab=t.0)
 
 ## Current Best Source
-The [camera system design](https://github.com/Waybionic/waybionic_ground_station/blob/research/doctor-camera-pipeline-gianna/docs/doctor_camera/doctor_camera_system_design.md) is so far the most up to date document surrounding the camera, constraints, and everything that mechanical and electrical has told us.
+The [camera system design](https://github.com/Waybionic/waybionic_ground_station/blob/docs/camera-controller-handoff-gianna/docs/camera-research/doctor_camera_system_design.md) is so far the most up to date document surrounding the camera, constraints, and everything that mechanical and electrical has told us.
 
 ## Current Recommendation (first testing)
 
