@@ -95,6 +95,39 @@ itself is OPEN / NEEDS ELECTRICAL CONFIRMATION (`HARDWARE_INTERFACE.md`
 question 10). `imu.heartbeat` reports age as now minus that source stamp. That
 is freshness of the sample, not a replay or observation clock.
 
+Original timestamps are preserved. The publisher never rewrites an older
+sample's stamp to `now` to make it look fresh. A candidate older than the last
+accepted `stamp_ns` is rejected as out-of-order. A candidate that is in-order
+but already old relative to `now` is accepted with its original stamp and will
+show as STALE.
+
+## Reader failure policy
+
+Temporary `read()` failures are handled at the publisher boundary. This gate is
+hardware-independent: it does not parse device packets, apply calibration, remap
+axes, or guess covariance. Future drivers still convert transport into an
+`ImuReading` first.
+
+Lead-approved rule: **keep the last genuinely valid reading, do not falsely
+refresh it, keep the node alive, and retry on later polling cycles.**
+
+Retaining the last valid reading is for diagnostics and reference. The node does
+**not** republish that old sample as a new measurement.
+
+| `read()` result | Publish | Last valid state | Freshness / sample count | Node |
+|-----------------|---------|------------------|--------------------------|------|
+| Valid in-order sample | raw; demo/TF only when enabled and the existing mock/orientation path supplies an orientation | replaced | updated from the sample's original `stamp_ns` | stays up |
+| `None` (no sample) | nothing | unchanged | unchanged; the previous sample ages | stays up; retry next cycle |
+| Non-finite or malformed data | nothing | unchanged | unchanged | stays up; retry |
+| Timestamp older than last accepted | nothing | unchanged | unchanged | stays up; retry |
+| Exception during `read()` | nothing | unchanged | unchanged | stays up; retry |
+
+Rejected input is never coerced to zero, clamped, or normalized into healthy
+telemetry. Diagnostics become STALE after `stale_timeout_sec` with no new
+accepted sample. A later valid sample recovers normal publishing.
+
+`start()` failures remain outside this temporary-read policy.
+
 ## Diagnostics
 
 Names, `value`/`unit` keys, and level mapping follow

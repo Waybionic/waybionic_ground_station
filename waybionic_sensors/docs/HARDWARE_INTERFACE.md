@@ -26,10 +26,11 @@ production defaults.
 | Sensor noise / standard deviation | Electrical | OPEN / NEEDS ELECTRICAL CONFIRMATION |
 | IMU ROS message semantics (raw vs demo, unavailable orientation, unknown covariance) | Khuzaymah | Implemented in this package; not a hardware claim |
 
-Until Electrical confirms timestamp source, mock and unconfigured live mode use
-the node clock as `ImuReading.stamp_ns`. Diagnostic heartbeat age is
-`now - that stamp` (sample freshness). Do not rewrite stamps to make replayed
-or delayed data look fresh.
+The mock uses node time as `ImuReading.stamp_ns`. Unconfigured live mode
+produces no readings or samples at all. A future physical timestamp source and
+its semantics remain OPEN / NEEDS ELECTRICAL CONFIRMATION. Diagnostic heartbeat
+age is `now - the last accepted source stamp` (sample freshness); rejected or
+delayed readings must not have their timestamps rewritten to look fresh.
 
 ## Questions for electrical
 
@@ -102,9 +103,12 @@ class MyImuReader(ImuHardwareReader):
 ```
 
 The driver owns transport and parsing, and converts to the REP-103 units of
-`ImuReading`. Message construction, covariance, diagnostics, and TF need no
-changes. Parser tests should be added at that point using recorded packets from
-the real device.
+`ImuReading`. The publisher then applies a hardware-independent validation
+gate (`imu_sample_validation.py`): `None`, non-finite or malformed fields,
+out-of-order timestamps, and `read()` exceptions do not publish a new sample
+and do not refresh last-valid freshness. Message construction, covariance,
+diagnostics, and TF need no driver-specific changes. Parser tests should be
+added at that point using recorded packets from the real device.
 
 Live mode already works end to end with the stub: the node publishes no samples
 and `imu.heartbeat` reports STALE, which is the correct depiction of a missing

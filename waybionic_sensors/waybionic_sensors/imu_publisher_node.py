@@ -4,7 +4,8 @@ ROS 2 node publishing WayBionic IMU data and sensor health.
 
 The node only wires components together: sample generation lives in
 :mod:`waybionic_sensors.mock_source` or a future
-:class:`~waybionic_sensors.hardware_reader.ImuHardwareReader`, message
+:class:`~waybionic_sensors.hardware_reader.ImuHardwareReader`, candidate
+acceptance in :mod:`waybionic_sensors.imu_sample_validation`, message
 construction in :mod:`waybionic_sensors.imu_messages`, and health reporting in
 :mod:`waybionic_sensors.imu_diagnostics`.
 
@@ -33,18 +34,26 @@ from waybionic_sensors.imu_messages import (
     build_demo_transform,
     build_raw_imu_message,
 )
+from waybionic_sensors.imu_sample_validation import REASON_NO_SAMPLE, rejection_reason
 from waybionic_sensors.mock_source import MockImuSource
+
+_READ_FAILURE_LOG_PERIOD_SEC = 2.0
+"""Minimum seconds between repeated reader-failure log lines."""
 
 
 class ImuPublisher(Node):
     """Publishes IMU samples, an optional demo orientation, and health."""
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, hardware_reader=None, **kwargs) -> None:
         """
         Declare parameters, build the data source, and start the timers.
 
         Extra keyword arguments are forwarded to :class:`rclpy.node.Node`, which
         lets tests supply ``parameter_overrides`` without a launch file.
+
+        ``hardware_reader``, when given, is a test or future-driver seam: the
+        node calls ``start()`` / ``read()`` / ``stop()`` on that instance
+        instead of constructing the mock or the unconfigured stub.
         """
         super().__init__('waybionic_imu_publisher', **kwargs)
 
@@ -64,13 +73,19 @@ class ImuPublisher(Node):
         use_mock = self._bool_param('use_mock')
         self._mock_source = None
         self._hardware_reader = None
-        if use_mock:
+        self._unconfigured_reader_active = False
+        if hardware_reader is not None:
+            self._hardware_reader = hardware_reader
+            self._hardware_reader.start()
+            self._source_description = self._hardware_reader.describe()
+        elif use_mock:
             self._mock_source = MockImuSource(
                 stall_after_sec=self._double_param('mock_stall_after_sec'),
             )
             self._source_description = 'mock generator'
         else:
             self._hardware_reader = UnconfiguredImuReader(self._string_param('serial_port'))
+            self._unconfigured_reader_active = True
             self._hardware_reader.start()
             self._source_description = self._hardware_reader.describe()
 
@@ -102,7 +117,7 @@ class ImuPublisher(Node):
             diagnostics_period, self._on_diagnostics_timer
         )
 
-        self._log_startup(use_mock)
+        self._log_startup()
 
     def _declare_parameters(self) -> None:
         """Declare every runtime parameter with its default."""
@@ -144,7 +159,7 @@ class ImuPublisher(Node):
         """Return the current node time in nanoseconds."""
         return self.get_clock().now().nanoseconds
 
-    def _log_startup(self, use_mock: bool) -> None:
+    def _log_startup(self) -> None:
         """Log the active configuration so the mode is obvious in the console."""
         logger = self.get_logger()
         logger.info(
@@ -158,7 +173,7 @@ class ImuPublisher(Node):
             f'{"enabled" if self._publish_demo_orientation else "disabled"}, '
             f'demo TF {"enabled" if self._publish_demo_tf else "disabled"}'
         )
-        if not use_mock:
+        if self._unconfigured_reader_active:
             logger.warning(
                 'Live mode selected but no hardware driver is implemented yet. '
                 'imu.heartbeat will report STALE until a real reader is supplied.'
@@ -176,10 +191,25 @@ class ImuPublisher(Node):
         return self._hardware_reader.read(stamp_ns)
 
     def _on_sample_timer(self) -> None:
-        """Acquire one sample and publish the raw, demo, and TF outputs."""
+        """Acquire one sample and publish only an accepted new reading."""
         stamp_ns = self._now_ns()
-        reading = self._read(stamp_ns)
-        if reading is None:
+        try:
+            reading = self._read(stamp_ns)
+        except Exception as exc:
+            self.get_logger().warning(
+                f'IMU reader raised {type(exc).__name__}: {exc}',
+                throttle_duration_sec=_READ_FAILURE_LOG_PERIOD_SEC,
+            )
+            return
+
+        last_stamp = None if self._last_reading is None else self._last_reading.stamp_ns
+        reason = rejection_reason(reading, last_accepted_stamp_ns=last_stamp)
+        if reason is not None:
+            if reason != REASON_NO_SAMPLE:
+                self.get_logger().warning(
+                    f'Rejected IMU reading ({reason}); keeping last valid sample',
+                    throttle_duration_sec=_READ_FAILURE_LOG_PERIOD_SEC,
+                )
             return
 
         self._last_reading = reading
