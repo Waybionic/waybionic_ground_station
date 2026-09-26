@@ -28,7 +28,6 @@ def generate_launch_description():
     default_rviz_config_path = os.path.join(
         waybionic_bringup_dir, 'rviz', 'waybionic_unified.rviz')
 
-    # --- Declare Launch Arguments ---
     model_arg = DeclareLaunchArgument(
         'model', default_value=default_model_path,
         description='Absolute path to robot urdf')
@@ -63,7 +62,6 @@ def generate_launch_description():
 
     file_check = OpaqueFunction(function=check_files_exist)
 
-    # --- Nodes ---
     robot_description_content = {
         'robot_description': Command(['xacro ', LaunchConfiguration('model')])
     }
@@ -81,7 +79,6 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('use_joint_state_publisher_gui'))
     )
 
-    # Pass the correct arguments to the temporary publisher
     temp_diag_pub_node = Node(
         package='waybionic_rviz_plugins', executable='temporary_diagnostics_publisher.py',
         name='temp_diag_pub',
@@ -93,7 +90,6 @@ def generate_launch_description():
         ]
     )
 
-    # Pass the mock toggles into the RViz node parameters
     rviz_node = Node(
         package='rviz2', executable='rviz2', name='rviz2', output='screen',
         arguments=['-d', LaunchConfiguration('rvizconfig')],
