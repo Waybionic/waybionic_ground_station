@@ -41,6 +41,12 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 target_link_libraries(${PROJECT_NAME} Qt5::Widgets)
 ament_target_dependencies(${PROJECT_NAME} ${THIS_PACKAGE_INCLUDE_DEPENDS})
 
+if(APPLE)
+  # RoboStack exports optional Python type-support dylibs through RViz targets.
+  # Do not retain those unused dylibs in this C++-only plugin.
+  target_link_options(${PROJECT_NAME} PRIVATE "LINKER:-dead_strip_dylibs")
+endif()
+
 pluginlib_export_plugin_description_file(rviz_common plugin_description.xml)
 
 install(
