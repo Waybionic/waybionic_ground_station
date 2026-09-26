@@ -22,7 +22,8 @@ class CameraFollower(Node):
         self.focus_frame = self.declare_parameter('focus_frame', 'view_focus').value
         self.tool_weight = self.declare_parameter('tool_weight', 0.7).value
         self.smoothing = self.declare_parameter('smoothing_s', 0.25).value
-        # Used until the arm's TF exists, e.g. with the placeholder model.
+        self.follow = self.declare_parameter('follow', True).value
+        # Used until the arm's TF exists, and as the fixed view when follow is false.
         self.focus = tuple(self.declare_parameter('default_focus', [0.0, 0.0, 0.35]).value)
         self.period = 1.0 / self.declare_parameter('rate_hz', 60.0).value
         self.buffer = tf2_ros.Buffer()
@@ -36,13 +37,15 @@ class CameraFollower(Node):
         return offset.x, offset.y, offset.z
 
     def update(self):
-        try:
-            tool, anchor = self.position(self.tool_frame), self.position(self.anchor_frame)
-        except tf2_ros.TransformException:
-            goal = self.focus
-        else:
-            goal = [self.tool_weight * t + (1.0 - self.tool_weight) * a
-                    for t, a in zip(tool, anchor)]
+        goal = self.focus
+        if self.follow:
+            try:
+                tool, anchor = self.position(self.tool_frame), self.position(self.anchor_frame)
+            except tf2_ros.TransformException:
+                pass
+            else:
+                goal = [self.tool_weight * t + (1.0 - self.tool_weight) * a
+                        for t, a in zip(tool, anchor)]
         blend = 1.0 - math.exp(-self.period / self.smoothing)
         self.focus = tuple(f + blend * (g - f) for f, g in zip(self.focus, goal))
         message = TransformStamped()

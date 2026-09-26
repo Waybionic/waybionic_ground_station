@@ -30,7 +30,8 @@ def generate_test_description():
             PythonLaunchDescriptionSource(launch_file),
             launch_arguments={
                 'launch_rviz': 'false',
-                'teleop': 'true',
+                # Capitalised on purpose: launch booleans are case-insensitive.
+                'teleop': 'True',
                 'joy_source': 'udp',
                 'joy_udp_port': str(PORT),
             }.items()),

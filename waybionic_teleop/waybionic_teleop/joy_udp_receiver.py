@@ -39,7 +39,8 @@ class JoyUdpReceiver(Node):
 
     def poll(self):
         latest = None
-        while True:
+        # Bounded so a flood of packets cannot starve the node's other callbacks.
+        for _ in range(100):
             try:
                 data, sender = self.socket.recvfrom(PACKET_SIZE + 1)
             except BlockingIOError:

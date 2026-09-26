@@ -6,8 +6,8 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.substitutions import (
-    AndSubstitution, Command, LaunchConfiguration, NotSubstitution, OrSubstitution,
-    PythonExpression)
+    AndSubstitution, Command, EqualsSubstitution, LaunchConfiguration, NotSubstitution,
+    OrSubstitution)
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -19,8 +19,8 @@ def check_files_exist(context, *args, **kwargs):
         raise FileNotFoundError(f'Model file not found: {model_path}')
     if not os.path.exists(rviz_path):
         raise FileNotFoundError(f'RViz config file not found: {rviz_path}')
-    if (LaunchConfiguration('demo_mode').perform(context) == 'true'
-            and LaunchConfiguration('teleop').perform(context) == 'true'):
+    if (IfCondition(LaunchConfiguration('demo_mode')).evaluate(context)
+            and IfCondition(LaunchConfiguration('teleop')).evaluate(context)):
         raise RuntimeError('demo_mode and teleop both publish joint states; choose one')
     joy_source = LaunchConfiguration('joy_source').perform(context)
     if joy_source not in ('device', 'udp', 'none'):
@@ -117,6 +117,7 @@ def generate_launch_description():
     teleop = LaunchConfiguration('teleop')
     joy_source = LaunchConfiguration('joy_source')
     diagnostics_topic = {'diagnostics_topic': LaunchConfiguration('diagnostics_topic')}
+    sim_time = {'use_sim_time': LaunchConfiguration('use_sim_time')}
     # Demo mode and teleop publish joint states themselves.
     simulated_joints = OrSubstitution(demo_mode, teleop)
 
@@ -129,36 +130,41 @@ def generate_launch_description():
 
     joy_node = Node(
         package='joy', executable='game_controller_node', name='joy',
-        condition=IfCondition(PythonExpression([
-            "'", teleop, "' == 'true' and '", joy_source, "' == 'device'"]))
+        condition=IfCondition(AndSubstitution(teleop, EqualsSubstitution(joy_source, 'device'))),
+        parameters=[sim_time]
     )
 
     joy_udp_node = Node(
         package='waybionic_teleop', executable='joy_udp_receiver', name='joy_udp_receiver',
-        condition=IfCondition(PythonExpression([
-            "'", teleop, "' == 'true' and '", joy_source, "' == 'udp'"])),
+        condition=IfCondition(AndSubstitution(teleop, EqualsSubstitution(joy_source, 'udp'))),
         parameters=[
             {'bind_address': LaunchConfiguration('joy_udp_bind')},
             {'port': ParameterValue(LaunchConfiguration('joy_udp_port'), value_type=int)},
-            diagnostics_topic
+            diagnostics_topic, sim_time
         ]
     )
 
     teleop_node = Node(
         package='waybionic_teleop', executable='xbox_teleop', name='xbox_teleop',
         output='screen', condition=IfCondition(teleop),
-        parameters=[os.path.join(teleop_config_dir, 'xbox_teleop.yaml'), diagnostics_topic]
+        parameters=[os.path.join(teleop_config_dir, 'xbox_teleop.yaml'), diagnostics_topic,
+                    sim_time]
     )
 
     drives_node = Node(
         package='waybionic_teleop', executable='sim_arm_drives', name='sim_arm_drives',
         output='screen', condition=IfCondition(teleop),
-        parameters=[os.path.join(teleop_config_dir, 'arm_drives.yaml'), diagnostics_topic]
+        parameters=[os.path.join(teleop_config_dir, 'arm_drives.yaml'), diagnostics_topic,
+                    sim_time]
     )
 
+    # RViz orbits view_focus, so the follower also runs for the fixed view.
     camera_follower_node = Node(
         package='waybionic_bringup', executable='camera_follower.py', name='camera_follower',
-        condition=IfCondition(LaunchConfiguration('follow_camera'))
+        parameters=[
+            {'follow': ParameterValue(LaunchConfiguration('follow_camera'), value_type=bool)},
+            sim_time
+        ]
     )
 
     demo_speed = ParameterValue(LaunchConfiguration('demo_speed'), value_type=float)
@@ -169,7 +175,7 @@ def generate_launch_description():
         parameters=[
             {'speed_deg_s': demo_speed},
             {'diagnostics_topic': LaunchConfiguration('diagnostics_topic')},
-            {'use_sim_time': LaunchConfiguration('use_sim_time')}
+            sim_time
         ]
     )
 
