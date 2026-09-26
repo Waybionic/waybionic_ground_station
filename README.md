@@ -2,12 +2,12 @@
 
 ROS2 workspace for the WayBionic robotic ground station. 
 
-Currently, this repository contains the clean foundation and placeholder robot model for the ground station rebuild.
+Currently, this repository contains the clean foundation and the SolidWorks-exported arm model for the ground station rebuild.
 
 ## Packages
 
 - **`waybionic_description`**
-  Hardware description, URDF/Xacro files, and meshes. (Currently using a geometric placeholder model until mechanical exports are finalized).
+  Hardware description, URDF/Xacro files, and meshes. `waybionic_arm.urdf` is generated from the mechanical team's `full-arm-smaller.SLDASM` by the tools in `scripts/cad/`; regenerate it after CAD changes instead of editing it. The geometric placeholder model remains available.
 - **`waybionic_bringup`**
   Launch files and RViz configurations to bring up the robot state and visualization.
 - **`waybionic_rviz_plugins`**

@@ -18,7 +18,13 @@ if(BUILD_TESTING)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
   add_launch_test(test/test_ground_station_launch.py)
+  add_launch_test(test/test_arm_model_launch.py)
+  add_launch_test(test/test_joint_demo_launch.py)
 endif()
+
+install(PROGRAMS scripts/joint_demo.py
+  DESTINATION lib/${PROJECT_NAME}
+)
 
 install(DIRECTORY launch
   DESTINATION share/${PROJECT_NAME}
