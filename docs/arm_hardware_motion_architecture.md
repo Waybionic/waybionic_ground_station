@@ -123,6 +123,11 @@ accepts the existing `/old_arm_motion_test/command` topic. It translates
 `RUN`, `HOME`, and `STOP` into the firmware protocol, publishes the estimated
 pose, and publishes connection/command status on `/diagnostics`.
 
+The initial and HOME pose is the calibrated upright pose: physical servo
+angles `[90.0, 35.0, 151.5, 27.5]`, corresponding to model joint angles
+`[0, 90, 0, 0]` degrees. The manual joint-state stepper is opt-in so it does
+not overwrite this upright motion-test state by publishing zero positions.
+
 ## Package Responsibilities
 
 ### `waybionic_description`
@@ -181,9 +186,11 @@ It must not publish synthetic `/joint_states` in physical mode.
    Arduino-reported fault.
 5. Treat the stop command as cancellation plus a hardware stop request; do not
    merely stop publishing messages.
-6. Require an explicit physical-mode launch argument so a development launch
+6. A latched bridge fault ignores subsequent `READY` messages and can only be
+   cleared by restarting the bridge; inspect the reported fault before doing so.
+7. Require an explicit physical-mode launch argument so a development launch
    cannot move the arm accidentally.
-7. Keep the first physical test at low speed with one joint at a time before
+8. Keep the first physical test at low speed with one joint at a time before
    running synchronized trajectories.
 
 ## Incremental Implementation Plan

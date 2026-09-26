@@ -11,10 +11,9 @@
       ],
       "name": "ROS",
       "intelliSenseMode": "gcc-x64",
-      "compilerPath": "/usr/bin/c++",
+      "compilerPath": "/usr/bin/gcc",
       "cStandard": "gnu11",
-      "cppStandard": "c++17",
-      "compileCommands": "${workspaceFolder}/build/waybionic_rviz_plugins/compile_commands.json"
+      "cppStandard": "c++14"
     }
   ],
   "version": 4

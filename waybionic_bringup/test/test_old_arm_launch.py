@@ -12,7 +12,7 @@ import xml.etree.ElementTree as ET
 
 from ament_index_python.packages import get_package_share_directory
 import launch
-from launch.actions import IncludeLaunchDescription
+from launch.actions import IncludeLaunchDescription, SetEnvironmentVariable
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 import launch_testing
 import launch_testing.actions
@@ -60,9 +60,11 @@ def generate_test_description():
             'launch_rviz': 'false',
             'use_joint_state_publisher_gui': 'false',
             'joint_states_topic': topic,
+            'start_motion_test': 'false',
         }.items(),
     )
     return launch.LaunchDescription([
+        SetEnvironmentVariable('ROS_DOMAIN_ID', '72'),
         station, launch_testing.actions.ReadyToTest(),
     ]), {'joint_states_topic': topic}
 

@@ -25,6 +25,18 @@ class TestMotionTest(unittest.TestCase):
             'old_arm_wrist_roll_joint',
         ])
 
+    def test_upright_home_pose_is_the_initial_stepper_pose(self):
+        from waybionic_motion_test.motion_test import (
+            UPRIGHT_PHYSICAL_DEGREES,
+            model_radians_from_physical,
+        )
+
+        self.assertEqual(UPRIGHT_PHYSICAL_DEGREES, [90.0, 35.0, 151.5, 27.5])
+        self.assertEqual(
+            model_radians_from_physical(UPRIGHT_PHYSICAL_DEGREES),
+            [0.0, 1.5707963267948966, 0.0, 0.0],
+        )
+
     def test_home_does_not_advance_into_sequence(self):
         from std_msgs.msg import String
         from waybionic_motion_test.motion_test import MotionTestNode
