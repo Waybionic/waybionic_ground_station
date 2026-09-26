@@ -4,7 +4,7 @@ import unittest
 
 from ament_index_python.packages import get_package_share_directory
 import launch
-from launch.actions import IncludeLaunchDescription
+from launch.actions import IncludeLaunchDescription, SetEnvironmentVariable
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 import launch_testing
 import launch_testing.actions
@@ -26,6 +26,7 @@ def generate_test_description():
     )
 
     return launch.LaunchDescription([
+        SetEnvironmentVariable('ROS_DOMAIN_ID', '71'),
         ground_station_launch,
         launch_testing.actions.ReadyToTest()
     ])

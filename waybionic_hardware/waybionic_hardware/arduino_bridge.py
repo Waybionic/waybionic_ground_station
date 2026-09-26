@@ -15,7 +15,8 @@ JOINT_NAMES = [
     'old_arm_elbow_pitch_joint',
     'old_arm_wrist_roll_joint',
 ]
-HOME_PHYSICAL_DEGREES = [90.0, 35.0, 151.5, 27.5]
+UPRIGHT_PHYSICAL_DEGREES = [90.0, 35.0, 151.5, 27.5]
+HOME_PHYSICAL_DEGREES = UPRIGHT_PHYSICAL_DEGREES
 SERVO_DIRECTIONS = [1.0, -1.0, 1.0, 1.0]
 MODEL_HOME_OFFSETS_DEGREES = [0.0, 90.0, 0.0, 0.0]
 PHYSICAL_LIMITS = [(0.0, 270.0), (0.0, 112.5), (90.0, 270.0), (0.0, 270.0)]
@@ -259,7 +260,10 @@ class ArduinoBridge(Node):
                 self.stop_requested = True
                 self.command_kind = 'STOP'
                 if self.send_line('HOLD'):
-                    self.last_status = 'hold-requested'
+                    if self.dry_run:
+                        self.process_serial_line('OK,HOLD')
+                    else:
+                        self.last_status = 'hold-requested'
                 else:
                     self.last_status = 'hold-request-failed'
             else:

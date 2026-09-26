@@ -70,9 +70,16 @@ def generate_launch_description():
         arguments=['-d', LaunchConfiguration('rvizconfig')],
     )
 
+    joint_state_publisher_gui_node = Node(
+        package='joint_state_publisher_gui',
+        executable='joint_state_publisher_gui',
+        name='joint_state_publisher_gui',
+    )
+
     return LaunchDescription([
         model_arg,
         rviz_arg,
         OpaqueFunction(function=_launch_nodes),
+        joint_state_publisher_gui_node,
         rviz_node,
     ])

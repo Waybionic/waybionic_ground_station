@@ -114,6 +114,18 @@ class TestArduinoBridge(unittest.TestCase):
         self.assertEqual(len(bridge.serial_port.writes), 1)
         self.assertEqual(bridge.serial_port.writes[0], b'HOLD\n')
 
+    def test_dry_run_stop_completes_hold(self):
+        from std_msgs.msg import String
+
+        bridge = self.make_bridge()
+        bridge.dry_run = True
+
+        bridge.handle_command(String(data='STOP'))
+
+        self.assertEqual(bridge.last_status, 'held')
+        self.assertTrue(bridge.stop_requested)
+        self.assertFalse(bridge.motion_active)
+
     def test_home_and_run_require_ready_home_sequence(self):
         from std_msgs.msg import String
 
