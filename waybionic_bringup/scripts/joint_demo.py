@@ -73,7 +73,10 @@ class JointDemo(Node):
 
     def __init__(self):
         super().__init__('joint_demo')
-        self.speed = math.radians(self.declare_parameter('speed_deg_s', 30.0).value)
+        speed = self.declare_parameter('speed_deg_s', 30.0).value
+        if not speed > 0.0:
+            raise ValueError(f'speed_deg_s must be positive, not {speed}')
+        self.speed = math.radians(speed)
         self.fraction = self.declare_parameter('amplitude_fraction', 0.5).value
         self.dwell = self.declare_parameter('dwell_s', 0.5).value
         self.loop = self.declare_parameter('loop', True).value

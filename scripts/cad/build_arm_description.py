@@ -10,8 +10,9 @@
      python3 scripts/cad/build_arm_description.py build/cad/arm_export.json
    This rewrites waybionic_description/urdf/waybionic_arm.urdf and
    waybionic_description/meshes/arm/*.dae.
-3. Optional SolidWorks motion check: --write-moves moves.json, export again with
-   --moves moves.json --no-geometry, then --check-moves on that export. SolidWorks
+3. Optional SolidWorks motion check: run this script with --write-moves
+   moves.json, export again with --moves moves.json --no-geometry, then run this
+   script on the full export with --check-moves <new export>. SolidWorks
    only carries the differential when the casing resolves, so until the Sep 12
    file exists, copy the Sep 8 part to that name in a scratch CAD copy and add
    --unsuppress "diff_assem_sep18-1/StepperHolderCasing-Sep12 (1)-1".
@@ -724,7 +725,7 @@ def main():
     parser.add_argument('export', help='JSON from export_solidworks_assembly.exe')
     parser.add_argument('--grid', type=float, default=0.0005, help='mesh vertex grid in metres')
     parser.add_argument('--write-moves', help='write SolidWorks joint moves and exit')
-    parser.add_argument('--check-moves', help='SolidWorks export produced with --moves')
+    parser.add_argument('--check-moves', help='export made with --moves, compared with the full export')
     arguments = parser.parse_args()
 
     export = Export(arguments.export)
