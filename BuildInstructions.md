@@ -170,8 +170,9 @@ container build has been validated. Base-image updates must pass both CI
 architectures before adoption.
 
 The default container configuration is **headless**. For RViz, use the Linux GUI or
-Windows WSLg demo below, or a native path. Do not add privileged containers, broad
-display-server permissions, or device mounts just to get the build working.
+Windows WSLg demo below, or a native path. Do not add privileged containers or broad
+display-server permissions just to get the build working; the WSLg demo mounts only
+WSL's paravirtual GPU device.
 
 ## Linux GUI Demo
 
@@ -246,9 +247,13 @@ to move the placeholder arm, and use the diagnostics panel's mock controls to
 try normal and fault states. This demo uses simulated data, not a physical arm.
 Press **Ctrl+C** in PowerShell to stop it.
 
-The display socket path is specific to Docker Desktop's WSL2 backend. Software
-rendering avoids requiring GPU passthrough. If the socket mount is unavailable,
-stop and check Docker/WSL rather than creating an empty replacement directory.
+The display socket path is specific to Docker Desktop's WSL2 backend. RViz renders on
+the Windows GPU through WSL's D3D12 driver, using the read-only `/dev/dxg` device and
+`/usr/lib/wsl` libraries that Docker Desktop already provides. If RViz fails to open
+or shows a black view, start it with CPU rendering instead:
+`$env:WAYBIONIC_GL_DRIVER = 'llvmpipe'` before the command above. If the socket mount
+is unavailable, stop and check Docker/WSL rather than creating an empty replacement
+directory.
 
 Qt may report a default `XDG_RUNTIME_DIR`, and RViz may report that stereo is not
 supported; neither prevented this demo from starting. On Ctrl+C, the joint GUI

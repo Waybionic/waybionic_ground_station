@@ -92,12 +92,22 @@ services:
     environment:
       DISPLAY: ":0"
       QT_X11_NO_MITSHM: "1"
-      LIBGL_ALWAYS_SOFTWARE: "1"
+      # Renders on the Windows GPU through WSL's D3D12 driver; WAYBIONIC_GL_DRIVER=llvmpipe uses the CPU.
+      GALLIUM_DRIVER: ${WAYBIONIC_GL_DRIVER:-d3d12}
+      LD_LIBRARY_PATH: /usr/lib/wsl/lib
       ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+    devices:
+      - /dev/dxg:/dev/dxg
     volumes:
       - type: bind
         source: /mnt/host/wslg/.X11-unix
         target: /tmp/.X11-unix
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /usr/lib/wsl
+        target: /usr/lib/wsl
         read_only: true
         bind:
           create_host_path: false
