@@ -146,22 +146,80 @@ The recorder saves the original ROS messages in a standard rosbag2 session and
 writes `metadata.json` beside the bag. It records `/diagnostics` by default;
 additional topics must be named explicitly.
 
+From `~/waybionic_ws`, source the ROS 2 Jazzy and workspace environments first:
+
 ```bash
+cd ~/waybionic_ws
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+```
+
+The installed recorder command is:
+
+```bash
+ros2 run waybionic_rviz_plugins diagnostics_recorder.py
+```
+
+For a timed recording, run the temporary publisher in one terminal and the
+recorder in another:
+
+```bash
+# Terminal 1
+ros2 launch waybionic_rviz_plugins temporary_diagnostics_publisher.launch.py \
+  mode:=normal
+
+# Terminal 2
 ros2 run waybionic_rviz_plugins diagnostics_recorder.py \
   --duration 30 \
   --output-directory ~/diagnostics-sessions/fault-001 \
   --source-label mock \
-  --tested-commit "$(git rev-parse HEAD)"
+  --tested-commit 0a2e9e5
 ```
 
-The output directory must not already exist. Inspect or replay a session in an
-isolated ROS domain so it cannot interfere with an active robot or publisher:
+For a recording stopped manually, omit `--duration` and press `Ctrl+C` in the
+recorder terminal after the session has run:
 
 ```bash
-ROS_DOMAIN_ID=42 ros2 bag info ~/diagnostics-sessions/fault-001/bag
-ROS_DOMAIN_ID=42 ros2 bag play ~/diagnostics-sessions/fault-001/bag
-ROS_DOMAIN_ID=42 ros2 topic echo /diagnostics
+ros2 run waybionic_rviz_plugins diagnostics_recorder.py \
+  --output-directory ~/diagnostics-sessions/fault-ctrl-c \
+  --source-label mock \
+  --tested-commit 0a2e9e5
 ```
+
+The output directory must not already exist. A successful session contains a
+`bag/` directory (MCAP files and rosbag2 metadata) and a `metadata.json` file:
+
+```text
+<session>/
+  bag/
+    bag_0.mcap
+    metadata.yaml
+  metadata.json
+```
+
+The JSON records `topic`, `start_time`, `end_time`, `source_label`,
+`message_count`, and optional `tested_commit`. The recorder returns `0` only
+after finalization and a positive message count. It returns `2` when the output
+directory already exists or cannot be created, and returns `1` for missing
+dependencies, recorder-child failure, finalization failure, or an empty
+recording. A recorder interrupted with `Ctrl+C` finalizes normally when the bag
+contains messages. Existing session directories are never overwritten.
+
+Inspect or replay a session in an isolated ROS domain so it cannot interfere
+with an active robot or publisher. The following commands were verified with
+the Task 5 fixture and ROS domain `71`:
+
+```bash
+ROS_DOMAIN_ID=71 ros2 bag info ~/diagnostics-sessions/task5-imu-stall/bag
+ROS_DOMAIN_ID=71 ros2 bag play ~/diagnostics-sessions/task5-imu-stall/bag
+ROS_DOMAIN_ID=71 ros2 topic echo /diagnostics
+```
+
+Run the replay subscriber before `ros2 bag play`. A ROS subscriber received all
+17 Task 5 messages, including healthy IMU statuses before and after the stored
+gap. The preserved `DiagnosticArray.header.stamp` values can be historical, so
+a live consumer may calculate them as stale even when the stored diagnostic
+level is `OK`.
 
 Label replayed data as `recorded/mock` when sharing it. Replay does not require
 the original diagnostics publisher to be running. Generated bag directories
@@ -187,8 +245,14 @@ Switching between mock and live replaces the active source while a ROS callback 
 
 ## Platform Notes
 
-- Primary validation target is Ubuntu/WSL2 with ROS 2 Jazzy.
-- A Mac/RoboStack RViz shutdown crash is not treated as a merge blocker unless it is reproduced on Ubuntu/WSL2.
+- Recorder and MCAP validation was performed on Ubuntu 24.04 under WSL2 with
+  ROS 2 Jazzy.
+- The workspace was rebuilt before final validation. The missing `python3-can`
+  dependency was installed through rosdep using the apt package provider.
+- Final full-workspace validation passed: 237 tests, 0 errors, 0 failures, and
+  0 skipped.
+- macOS/RoboStack, native Windows, and other hosts are untested for recorder
+  behavior and are not claimed as supported by this validation.
 
 ## Related Docs
 
