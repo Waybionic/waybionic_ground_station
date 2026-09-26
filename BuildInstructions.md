@@ -145,8 +145,8 @@ The development source bind mount stays editable.
 The Compose source mount uses a shared SELinux label for Fedora and other
 SELinux hosts. VS Code adjusts the container user's UID to match your Linux user.
 After changing package dependencies, run **Dev Containers: Rebuild Container**.
-When adding a package, also add its manifest to the Dockerfile's dependency-stage
-`COPY` instructions. Run the clean Docker test command above before a PR.
+The Dockerfile finds every package's `package.xml`, so a new package needs no
+Dockerfile change. Run the clean Docker test command above before a PR.
 
 For a development shell without VS Code, run `docker compose run --rm development bash`.
 Inside it, use the build and test commands above (including sourcing the install setup
