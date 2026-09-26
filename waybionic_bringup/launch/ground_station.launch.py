@@ -1,112 +1,167 @@
+# Start the ground station with explicit visualization and diagnostics options.
+
 import os
+import tempfile
 
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
-from launch.conditions import IfCondition
-from launch.substitutions import Command, LaunchConfiguration
+from launch.actions import DeclareLaunchArgument, LogInfo, OpaqueFunction, RegisterEventHandler
+from launch.event_handlers import OnShutdown
+from launch.substitutions import LaunchConfiguration
+
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
+
+from rclpy.expand_topic_name import expand_topic_name
+from rclpy.validate_full_topic_name import validate_full_topic_name
+
+import xacro
+
+import yaml
 
 
-def check_files_exist(context, *args, **kwargs):
+BOOLEAN_OPTIONS = {
+    'launch_rviz': ('true', 'Launch the RViz window'),
+    'use_joint_state_publisher_gui': ('true', 'Launch the joint-state control window'),
+    'use_diagnostics': ('true', 'Enable the RViz diagnostics panel and optional demo publisher'),
+    'use_mock_diagnostics': ('true', 'Use internal mock diagnostics instead of live topics'),
+    'start_temporary_diagnostics_publisher': ('false', 'Start the demo diagnostics publisher'),
+    'use_sim_time': ('false', 'Use the ROS simulation clock'),
+}
+
+
+def _read_file(path, argument):
+    try:
+        with open(path, encoding='utf-8') as source:
+            return source.read()
+    except (OSError, UnicodeError) as exc:
+        raise ValueError(f"Invalid {argument} '{path}': {exc}") from exc
+
+
+def _without_diagnostics(config):
+    # Preserve the selected layout while removing the monitoring panel.
+    if not isinstance(config, dict):
+        raise ValueError('RViz config must contain a YAML mapping')
+    panels = config.get('Panels', [])
+    if not isinstance(panels, list) or any(not isinstance(panel, dict) for panel in panels):
+        raise ValueError('RViz config Panels must be a list of mappings')
+    return dict(config, Panels=[
+        panel for panel in panels
+        if panel.get('Class') != 'waybionic_rviz_plugins/DiagnosticsPanel'
+    ])
+
+
+def _launch_nodes(context):
+    # Validate all options before returning any processes to launch.
+    options = {}
+    for name in BOOLEAN_OPTIONS:
+        value = LaunchConfiguration(name).perform(context)
+        if value not in ('true', 'false'):
+            raise ValueError(f"Invalid {name} '{value}': expected true or false")
+        options[name] = value == 'true'
+
     model_path = LaunchConfiguration('model').perform(context)
+    _read_file(model_path, 'model')
+    try:
+        robot_description = xacro.process_file(model_path).toxml()
+    except Exception as exc:
+        raise ValueError(f"Invalid model '{model_path}': {exc}") from exc
+
+    topic = LaunchConfiguration('diagnostics_topic').perform(context)
+    if options['use_diagnostics']:
+        try:
+            validate_full_topic_name(expand_topic_name(topic, 'rviz2', '/'))
+        except (ValueError, RuntimeError) as exc:
+            raise ValueError(f"Invalid diagnostics_topic '{topic}': {exc}") from exc
+
+    actions = [LogInfo(msg='Ground station: ' + ', '.join(
+        f'{name}={str(value).lower()}' for name, value in options.items()
+    )), LogInfo(msg=f'Robot model: {model_path}')]
+
     rviz_path = LaunchConfiguration('rvizconfig').perform(context)
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f'Model file not found: {model_path}')
-    if not os.path.exists(rviz_path):
-        raise FileNotFoundError(f'RViz config file not found: {rviz_path}')
-    return []
+    if options['launch_rviz']:
+        contents = _read_file(rviz_path, 'rvizconfig')
+        try:
+            config = yaml.safe_load(contents)
+            filtered = _without_diagnostics(config)
+        except (ValueError, yaml.YAMLError) as exc:
+            raise ValueError(f"Invalid rvizconfig '{rviz_path}': {exc}") from exc
+        actions.append(LogInfo(msg=f'RViz layout: {rviz_path}'))
+        if not options['use_diagnostics']:
+            # Never rewrite the user's layout. Remove the temporary copy on shutdown.
+            temporary = tempfile.TemporaryDirectory(prefix='waybionic-rviz-')
+            rviz_path = os.path.join(temporary.name, 'without_diagnostics.rviz')
+            with open(rviz_path, 'w', encoding='utf-8') as output:
+                yaml.safe_dump(filtered, output, sort_keys=False)
+            actions.append(RegisterEventHandler(OnShutdown(on_shutdown=[
+                OpaqueFunction(function=lambda context: temporary.cleanup())
+            ])))
+        actions.append(Node(
+            package='rviz2', executable='rviz2', name='rviz2', output='screen',
+            arguments=['-d', rviz_path],
+            parameters=[{
+                'use_sim_time': options['use_sim_time'],
+                'use_mock_diagnostics': options['use_mock_diagnostics'],
+                'diagnostics_topic': topic,
+            }],
+        ))
+
+    actions.append(Node(
+        package='robot_state_publisher', executable='robot_state_publisher', output='screen',
+        parameters=[{
+            'robot_description': ParameterValue(robot_description, value_type=str),
+            'use_sim_time': options['use_sim_time'],
+        }],
+    ))
+    if options['use_joint_state_publisher_gui']:
+        actions.append(Node(
+            package='joint_state_publisher_gui', executable='joint_state_publisher_gui',
+            output='screen', parameters=[{'use_sim_time': options['use_sim_time']}],
+        ))
+        if not options['launch_rviz']:
+            actions.append(LogInfo(msg=(
+                'RViz is disabled, but the joint-state GUI is enabled. For headless '
+                'operation also set use_joint_state_publisher_gui:=false.'
+            )))
+    elif not options['launch_rviz']:
+        actions.append(LogInfo(msg='Headless operation: both visualization windows are disabled.'))
+
+    if options['use_diagnostics'] and options['start_temporary_diagnostics_publisher']:
+        actions.append(Node(
+            package='waybionic_rviz_plugins', executable='temporary_diagnostics_publisher.py',
+            name='temp_diag_pub', output='screen',
+            parameters=[{'mode': 'normal', 'topic': topic, 'publish_rate_hz': 10.0,
+                         'use_sim_time': options['use_sim_time']}],
+        ))
+    elif not options['use_diagnostics']:
+        actions.append(LogInfo(msg=(
+            'Diagnostics disabled: RViz monitoring panel and temporary publisher are disabled '
+            '(including any request to start the temporary publisher).'
+        )))
+    return actions
 
 
 def generate_launch_description():
-    waybionic_desc_dir = get_package_share_directory('waybionic_description')
-    waybionic_bringup_dir = get_package_share_directory('waybionic_bringup')
-
-    default_model_path = os.path.join(
-        waybionic_desc_dir, 'urdf', 'waybionic_placeholder.urdf')
-    default_rviz_config_path = os.path.join(
-        waybionic_bringup_dir, 'rviz', 'waybionic_unified.rviz')
-
-    # --- Declare Launch Arguments ---
-    model_arg = DeclareLaunchArgument(
-        'model', default_value=default_model_path,
-        description='Absolute path to robot urdf')
-
-    use_mock_diag_arg = DeclareLaunchArgument(
-        'use_mock_diagnostics', default_value='true',
-        description='Panel mode: true for internal mock, false for live topics')
-
-    diag_topic_arg = DeclareLaunchArgument(
-        'diagnostics_topic', default_value='/diagnostics',
-        description='Diagnostics topic name')
-
-    start_temp_pub_arg = DeclareLaunchArgument(
-        'start_temporary_diagnostics_publisher', default_value='false',
-        description='Start the optional temporary publisher for live demo')
-
-    use_jsp_gui_arg = DeclareLaunchArgument(
-        'use_joint_state_publisher_gui', default_value='true',
-        description='Launch joint state publisher GUI')
-
-    use_sim_time_arg = DeclareLaunchArgument(
-        'use_sim_time', default_value='false',
-        description='Use simulation time')
-
-    launch_rviz_arg = DeclareLaunchArgument(
-        'launch_rviz', default_value='true',
-        description='Launch RViz (set false for headless validation)')
-
-    rviz_config_arg = DeclareLaunchArgument(
-        'rvizconfig', default_value=default_rviz_config_path,
-        description='Absolute path to rviz config file')
-
-    file_check = OpaqueFunction(function=check_files_exist)
-
-    # --- Nodes ---
-    robot_description_content = {
-        'robot_description': Command(['xacro ', LaunchConfiguration('model')])
-    }
-
-    rsp_node = Node(
-        package='robot_state_publisher', executable='robot_state_publisher',
-        parameters=[
-            robot_description_content,
-            {'use_sim_time': LaunchConfiguration('use_sim_time')}
-        ]
-    )
-
-    jsp_gui_node = Node(
-        package='joint_state_publisher_gui', executable='joint_state_publisher_gui',
-        condition=IfCondition(LaunchConfiguration('use_joint_state_publisher_gui'))
-    )
-
-    # Pass the correct arguments to the temporary publisher
-    temp_diag_pub_node = Node(
-        package='waybionic_rviz_plugins', executable='temporary_diagnostics_publisher.py',
-        name='temp_diag_pub',
-        condition=IfCondition(LaunchConfiguration('start_temporary_diagnostics_publisher')),
-        parameters=[
-            {'mode': 'normal'},
-            {'topic': LaunchConfiguration('diagnostics_topic')},
-            {'publish_rate_hz': 10.0}
-        ]
-    )
-
-    # Pass the mock toggles into the RViz node parameters
-    rviz_node = Node(
-        package='rviz2', executable='rviz2', name='rviz2', output='screen',
-        arguments=['-d', LaunchConfiguration('rvizconfig')],
-        condition=IfCondition(LaunchConfiguration('launch_rviz')),
-        parameters=[
-            {'use_sim_time': LaunchConfiguration('use_sim_time')},
-            {'use_mock_diagnostics': LaunchConfiguration('use_mock_diagnostics')},
-            {'diagnostics_topic': LaunchConfiguration('diagnostics_topic')}
-        ]
-    )
-
-    return LaunchDescription([
-        model_arg, use_mock_diag_arg, diag_topic_arg, start_temp_pub_arg,
-        use_jsp_gui_arg, use_sim_time_arg, launch_rviz_arg, rviz_config_arg,
-        file_check, rsp_node, jsp_gui_node, temp_diag_pub_node, rviz_node
+    # Declare supported options and validate them before starting processes.
+    description_dir = get_package_share_directory('waybionic_description')
+    bringup_dir = get_package_share_directory('waybionic_bringup')
+    arguments = [
+        DeclareLaunchArgument(name, default_value=default, choices=['true', 'false'],
+                              description=description)
+        for name, (default, description) in BOOLEAN_OPTIONS.items()
+    ]
+    arguments.extend([
+        DeclareLaunchArgument(
+            'model', default_value=os.path.join(
+                description_dir, 'urdf', 'waybionic_placeholder.urdf'),
+            description='Path to a readable URDF or xacro robot model'),
+        DeclareLaunchArgument(
+            'rvizconfig', default_value=os.path.join(
+                bringup_dir, 'rviz', 'waybionic_unified.rviz'),
+            description='Path to an RViz layout; only needed when launch_rviz=true'),
+        DeclareLaunchArgument(
+            'diagnostics_topic', default_value='/diagnostics',
+            description='ROS topic for live diagnostics and the optional demo publisher'),
     ])
+    return LaunchDescription(arguments + [OpaqueFunction(function=_launch_nodes)])

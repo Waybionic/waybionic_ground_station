@@ -13,11 +13,13 @@ find_package(ament_cmake REQUIRED)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
+  find_package(ament_cmake_pytest REQUIRED)
   find_package(launch_testing_ament_cmake REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
   add_launch_test(test/test_ground_station_launch.py)
+  ament_add_pytest_test(test_launch_options test/test_launch_options.py)
 endif()
 
 install(DIRECTORY launch
