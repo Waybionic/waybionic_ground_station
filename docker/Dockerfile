@@ -1,12 +1,19 @@
+FROM ros@sha256:386d06ec6d4188f731bae5678e07b4cb64a4e4d4152090c0bd1f881dcf7706f5 AS manifests
+
+COPY . /source
+
+# Only package manifests reach the dependency layer, so source edits keep it cached.
+RUN mkdir /manifests \
+	&& cd /source \
+	&& find . -name package.xml -exec cp --parents {} /manifests \;
+
 FROM ros@sha256:386d06ec6d4188f731bae5678e07b4cb64a4e4d4152090c0bd1f881dcf7706f5 AS development
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 WORKDIR /waybionic_ws
 
-COPY waybionic_description/package.xml src/waybionic_ground_station/waybionic_description/package.xml
-COPY waybionic_bringup/package.xml src/waybionic_ground_station/waybionic_bringup/package.xml
-COPY waybionic_rviz_plugins/package.xml src/waybionic_ground_station/waybionic_rviz_plugins/package.xml
+COPY --from=manifests /manifests src/waybionic_ground_station
 
 RUN apt-get update \
 	&& rosdep update --rosdistro jazzy \
