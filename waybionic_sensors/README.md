@@ -100,6 +100,7 @@ waybionic_sensors/
     imu_reading.py         # Hardware-independent sample type: the boundary contract
     mock_source.py         # Synthetic sample generation, no ROS types
     hardware_reader.py     # Driver interface plus an unimplemented stub
+    imu_sample_validation.py # Hardware-independent candidate acceptance gate
     imu_messages.py        # sensor_msgs/Imu and TF construction, covariance rules
     imu_diagnostics.py     # DiagnosticArray construction, heartbeat and freshness
     imu_publisher_node.py  # ROS node that only wires the above together
@@ -115,8 +116,9 @@ waybionic_sensors/
   test/
 ```
 
-Each stage is separately testable: sample generation, message construction,
-diagnostics, and the hardware boundary have no dependency on one another.
+Each stage is separately testable: sample generation, candidate validation,
+message construction, diagnostics, and the hardware boundary have no dependency
+on one another.
 
 ## Hardware status
 
@@ -136,13 +138,25 @@ as a real sensor.
 For the integration runner (Malik). Source the workspace overlay first.
 There is no physical IMU driver.
 
-Last full verification of this closeout:
+Verification record (not a physical-sensor claim):
 
-- Commit: `e317df4`
-- Environment: Ubuntu 24.04.4 LTS / ROS 2 Jazzy / Python 3.12.3 / WSL2
-- Install: `rosdep install --from-paths . --ignore-src -y` (no `-r`, no skip keys) → all required rosdeps installed; `ros-jazzy-rviz-imu-plugin` present
-- Tests: `colcon test --packages-select waybionic_sensors` → 96 passed at `e317df4` (runtime also verified there). Docs-guard tests on this closeout raise the IMU suite to 98.
-- Shutdown: Ctrl+C on the launch process. The node calls `stop()` on the reader, then destroys itself. Mock and unconfigured live mode have no extra processes.
+- Historical runtime verification of the handoff commands: commit `e317df4`
+  (Ubuntu 24.04.4 LTS / ROS 2 Jazzy / Python 3.12.3 / WSL2). Strict
+  `rosdep install --from-paths . --ignore-src -y` (no `-r`, no skip keys);
+  `ros-jazzy-rviz-imu-plugin` present; IMU suite 96 passed there, then 98
+  after docs-guard tests.
+- Merged PR #11 head: `4022337540209b8f2c4f1ce988f31537b8bd9a41` (merge
+  commit `dbd4ff0bb5915b34a03794afdf978c625a8557c4` on `main`). Yassin
+  approved; CI green; full workspace 139 tests, including 98 IMU tests.
+  Physical IMU behavior remains unverified because no physical driver exists.
+- Reader validation/recovery has dedicated boundary, publisher, stale-health,
+  and runtime regression coverage. See
+  [PR #21](https://github.com/Waybionic/waybionic_ground_station/pull/21) for
+  exact head-specific verification. It does not claim physical IMU testing.
+
+Shutdown: Ctrl+C on the launch process. The node calls `stop()` on the
+reader, then destroys itself. Mock and unconfigured live mode have no extra
+processes.
 
 ### Raw
 
@@ -205,12 +219,16 @@ colcon test --packages-select waybionic_sensors
 colcon test-result --all --verbose
 ```
 
-96 tests, 0 failures on Ubuntu 24.04 / ROS 2 Jazzy at `e317df4`. This closeout
-adds two documentation-guard tests (expected 98). Coverage spans message
-semantics and covariance, mock generation and stalling, diagnostics levels and
-units, the hardware boundary, package structure, and a runtime suite that spins
-the node to check timestamps, frame IDs, rate, demo defaults, and the heartbeat
-transitioning from OK to STALE.
+Run the suite after building; do not assume a fixed count from an older commit.
+Coverage includes reader validation and recovery (`None`, non-finite/malformed
+data, out-of-order timestamps, `read()` exceptions, and rejected input that
+must not refresh diagnostics), message semantics and covariance, mock
+generation and stalling, diagnostics levels and units, the hardware boundary,
+package structure, flake8/pep257, and runtime node behavior. See
+[PR #21](https://github.com/Waybionic/waybionic_ground_station/pull/21) for its
+exact final test totals and environment.
+
+There is no physical IMU driver and no Hamnah recording in this verification.
 
 ## Related docs
 

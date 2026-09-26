@@ -29,6 +29,7 @@ def test_components_are_separated_into_modules():
         'hardware_reader.py',
         'imu_messages.py',
         'imu_diagnostics.py',
+        'imu_sample_validation.py',
         'imu_publisher_node.py',
     ):
         assert (MODULE_ROOT / module).exists(), module
@@ -161,3 +162,26 @@ def test_readme_has_runtime_handoff_commands():
     assert 'mock_stall_after_sec' in readme
     assert 'use_mock:=false' in readme
     assert 'no physical imu driver' in readme.lower()
+
+
+def test_contract_documents_reader_failure_policy():
+    contract = read('docs/IMU_CONTRACT.md')
+    assert 'Reader failure policy' in contract
+    assert 'do not falsely refresh it' in ' '.join(contract.lower().split())
+    assert 'out-of-order' in contract
+    assert 'only when enabled and the existing mock/orientation path' in contract
+
+
+def test_current_docs_include_validation_stage_and_accurate_live_timestamps():
+    readme = read('README.md')
+    notes = read('docs/PR_NOTES.md')
+    hardware = read('docs/HARDWARE_INTERFACE.md')
+    hardware_words = ' '.join(hardware.split())
+    assert 'imu_sample_validation.py' in readme
+    assert 'ImuReading -> imu_sample_validation.py -> accepted reading' in notes
+    assert (
+        'Unconfigured live mode produces no readings or samples at all'
+        in hardware_words
+    )
+    assert 'timestamp source and' in hardware
+    assert 'OPEN / NEEDS ELECTRICAL CONFIRMATION' in hardware
