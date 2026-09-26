@@ -179,8 +179,9 @@ TEST_F(DiagnosticsTrafficFixture, OkDiagnosticsDoNotCarryAlertMessage)
 {
   const auto source = makeSource();
 
-  publisher_->publish(makeArray(diagnostic_msgs::msg::DiagnosticStatus::OK, "42"));
+  // A single publish can go out before the subscription is matched.
   ASSERT_TRUE(waitFor([&]() {
+    publisher_->publish(makeArray(diagnostic_msgs::msg::DiagnosticStatus::OK, "42"));
     const auto messages = source->messages(now());
     return messages.size() == 1u && messages.front().signal_name == "board.temperature";
   }, 5s));
