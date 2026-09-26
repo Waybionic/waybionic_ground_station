@@ -13,14 +13,17 @@ find_package(ament_cmake REQUIRED)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
+  find_package(ament_cmake_ros REQUIRED)
   find_package(launch_testing_ament_cmake REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
-  add_launch_test(test/test_ground_station_launch.py)
-  add_launch_test(test/test_arm_model_launch.py)
-  add_launch_test(test/test_joint_demo_launch.py)
-  add_launch_test(test/test_teleop_launch.py)
+  # colcon tests packages in parallel; a private ROS domain keeps this /tf out of other tests.
+  set(isolated RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py")
+  add_launch_test(test/test_ground_station_launch.py ${isolated})
+  add_launch_test(test/test_arm_model_launch.py ${isolated})
+  add_launch_test(test/test_joint_demo_launch.py ${isolated})
+  add_launch_test(test/test_teleop_launch.py ${isolated})
 endif()
 
 install(PROGRAMS scripts/joint_demo.py scripts/camera_follower.py
