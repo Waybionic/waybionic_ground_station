@@ -66,7 +66,7 @@ class ArduinoBridge(Node):
         self.segment_duration = float(self.get_parameter('segment_duration').value)
         self.dry_run = bool(self.get_parameter('dry_run').value)
 
-        self.joint_publisher = self.create_publisher(JointState, '/joint_states', 10)
+        self.joint_publisher = self.create_publisher(JointState, 'joint_states', 10)
         self.diagnostics_publisher = self.create_publisher(
             DiagnosticArray, '/diagnostics', 10)
         self.status_publisher = self.create_publisher(
@@ -343,7 +343,7 @@ class ArduinoBridge(Node):
             KeyValue(key='error', value=self.last_error),
         ]
 
-        subscriber_count = self.count_subscribers('/joint_states')
+        subscriber_count = self.count_subscribers('joint_states')
         output_status = DiagnosticStatus()
         output_status.name = 'waybionic_joint_state_output'
         output_status.level = (
@@ -351,10 +351,10 @@ class ArduinoBridge(Node):
         output_status.message = (
             'robot_state_publisher connected'
             if subscriber_count > 0 else
-            'No subscribers on /joint_states; RViz cannot update')
+            'No subscribers on joint_states; RViz cannot update')
         output_status.values = [
             KeyValue(key='subscriber_count', value=str(subscriber_count)),
-            KeyValue(key='topic', value='/joint_states'),
+            KeyValue(key='topic', value='joint_states'),
         ]
 
         feedback_status = DiagnosticStatus()

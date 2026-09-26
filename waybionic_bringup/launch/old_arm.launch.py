@@ -24,10 +24,10 @@ def generate_launch_description():
             'joint_states_topic', default_value='/old_arm/joint_states',
             description='sensor_msgs/JointState input, with named model joints in radians'),
         DeclareLaunchArgument(
-            'use_joint_state_publisher_gui', default_value='false',
+            'use_joint_state_publisher_gui', default_value='true',
             description=(
-                'Opt into the manual joint stepper instead of the upright '
-                'motion-test source')),
+                'Use the manual joint stepper; set false to use the motion '
+                'test publisher')),
         DeclareLaunchArgument(
             'launch_rviz', default_value='true',
             description='Set false for headless transform validation'),
@@ -81,7 +81,8 @@ def generate_launch_description():
         output='screen',
         condition=IfCondition(PythonExpression([
             "'", LaunchConfiguration('start_motion_test'), "' == 'true' and '",
-            LaunchConfiguration('hardware_mode'), "' == 'simulation'"
+            LaunchConfiguration('hardware_mode'), "' == 'simulation' and '",
+            LaunchConfiguration('use_joint_state_publisher_gui'), "' != 'true'"
         ])),
         parameters=[
             {'segment_duration': LaunchConfiguration(

@@ -39,7 +39,7 @@ class MotionTestNode(Node):
 
         self.publisher = self.create_publisher(
             JointState,
-            '/joint_states',
+            'joint_states',
             10,
         )
         self.status_publisher = self.create_publisher(
