@@ -5,7 +5,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.conditions import IfCondition
-from launch.substitutions import Command, LaunchConfiguration, PythonExpression
+from launch.substitutions import AndSubstitution, Command, LaunchConfiguration, NotSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -86,13 +86,13 @@ def generate_launch_description():
 
     demo_mode = LaunchConfiguration('demo_mode')
     # Demo mode publishes joint states itself.
-    simulated_joints = PythonExpression(["'", demo_mode, "' == 'true'"])
+    simulated_joints = demo_mode
 
     jsp_gui_node = Node(
         package='joint_state_publisher_gui', executable='joint_state_publisher_gui',
-        condition=IfCondition(PythonExpression([
-            "'", LaunchConfiguration('use_joint_state_publisher_gui'), "' == 'true' and not ",
-            simulated_joints]))
+        condition=IfCondition(AndSubstitution(
+            LaunchConfiguration('use_joint_state_publisher_gui'),
+            NotSubstitution(simulated_joints)))
     )
 
     demo_speed = ParameterValue(LaunchConfiguration('demo_speed'), value_type=float)
@@ -102,7 +102,8 @@ def generate_launch_description():
         condition=IfCondition(demo_mode),
         parameters=[
             {'speed_deg_s': demo_speed},
-            {'diagnostics_topic': LaunchConfiguration('diagnostics_topic')}
+            {'diagnostics_topic': LaunchConfiguration('diagnostics_topic')},
+            {'use_sim_time': LaunchConfiguration('use_sim_time')}
         ]
     )
 
@@ -124,9 +125,8 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('launch_rviz')),
         parameters=[
             {'use_sim_time': LaunchConfiguration('use_sim_time')},
-            {'use_mock_diagnostics': PythonExpression([
-                "'false' if ", simulated_joints, " else '",
-                LaunchConfiguration('use_mock_diagnostics'), "'"])},
+            {'use_mock_diagnostics': AndSubstitution(
+                LaunchConfiguration('use_mock_diagnostics'), NotSubstitution(simulated_joints))},
             {'diagnostics_topic': LaunchConfiguration('diagnostics_topic')}
         ]
     )

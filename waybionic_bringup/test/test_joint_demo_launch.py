@@ -26,7 +26,8 @@ def generate_test_description():
             PythonLaunchDescriptionSource(launch_file),
             launch_arguments={
                 'launch_rviz': 'false',
-                'demo_mode': 'true',
+                # Capitalised on purpose: launch booleans are case-insensitive.
+                'demo_mode': 'True',
                 'demo_speed': '360.0',
             }.items()),
         launch_testing.actions.ReadyToTest(),
