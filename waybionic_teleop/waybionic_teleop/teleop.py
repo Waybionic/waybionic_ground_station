@@ -5,7 +5,8 @@ import math
 
 from waybionic_teleop.gamepad import AXIS, BUTTON
 
-ACTIONS = ('enable', 'stop', 'group', 'home', 'faster', 'slower')
+ACTIONS = ('enable', 'stop', 'group', 'home', 'faster', 'slower', 'lock')
+CARTESIAN_AXES = ('x', 'y', 'z', 'roll')
 
 
 def clamp(value, low, high):
@@ -20,9 +21,12 @@ class Group:
     joints: list
     axes: list
     scales: list
+    # 'cartesian' groups move the tool tip along x, y, z and roll instead of single joints.
+    mode: str = 'joint'
 
     def describe(self):
-        return ', '.join(f'{axis} {joint}' for axis, joint in zip(self.axes, self.joints))
+        moves = CARTESIAN_AXES if self.mode == 'cartesian' else self.joints
+        return ', '.join(f'{axis} {move}' for axis, move in zip(self.axes, moves))
 
 
 @dataclass
@@ -38,6 +42,8 @@ class TeleopConfig:
     tool_open_axis: str
     max_speed: float
     max_accel: float
+    linear_speed: float
+    linear_accel: float
     speed_levels: list
     speed_level: int
     deadzone: float
@@ -48,7 +54,8 @@ def config_from_parameters(params):
     """Build a TeleopConfig from flat ROS parameter names such as 'base.joints'."""
     try:
         groups = [Group(name, list(params[f'{name}.joints']), list(params[f'{name}.axes']),
-                        [float(scale) for scale in params[f'{name}.scales']])
+                        [float(scale) for scale in params[f'{name}.scales']],
+                        params.get(f'{name}.mode', 'joint'))
                   for name in params['groups']]
         config = TeleopConfig(
             groups=groups,
@@ -60,6 +67,8 @@ def config_from_parameters(params):
             tool_open_axis=params['tool_open_axis'],
             max_speed=math.radians(params['max_speed_deg_s']),
             max_accel=math.radians(params['max_accel_deg_s2']),
+            linear_speed=params['max_linear_speed_mm_s'] / 1000.0,
+            linear_accel=params['max_linear_accel_mm_s2'] / 1000.0,
             speed_levels=[float(level) for level in params['speed_levels']],
             speed_level=int(params['initial_speed_level']),
             deadzone=float(params['deadzone']),
@@ -67,7 +76,12 @@ def config_from_parameters(params):
     except KeyError as missing:
         raise ValueError(f'missing teleop parameter {missing}') from None
     for group in config.groups:
-        if not len(group.joints) == len(group.axes) == len(group.scales):
+        if group.mode == 'cartesian':
+            if not len(group.axes) == len(group.scales) == len(CARTESIAN_AXES):
+                raise ValueError(f'group {group.name} needs x, y, z and roll axes and scales')
+        elif group.mode != 'joint':
+            raise ValueError(f'group {group.name} mode must be joint or cartesian')
+        elif not len(group.joints) == len(group.axes) == len(group.scales):
             raise ValueError(f'group {group.name} needs one axis and scale per joint')
     unknown = [name for name in [axis for group in config.groups for axis in group.axes]
                + [config.tool_close_axis, config.tool_open_axis] if name not in AXIS]
@@ -84,9 +98,13 @@ def config_from_parameters(params):
 class ArmTeleop:
     """Hold joint targets and move them with the active group's sticks while enabled."""
 
-    def __init__(self, config, limits):
-        """Take the config and {joint: (lower, upper)} radians for every grouped joint."""
+    def __init__(self, config, limits, kinematics=None):
+        """Take the config, {joint: (lower, upper)} radians and optional ArmKinematics."""
         self.config = config
+        self.kinematics = kinematics
+        # Without kinematics for this arm, the Cartesian groups are left out.
+        self.groups = [group for group in config.groups
+                       if group.mode != 'cartesian' or kinematics is not None]
         self.limits = dict(limits)
         self.limits[config.tool_joint] = config.tool_limits
         self.enabled = False
@@ -94,6 +112,7 @@ class ArmTeleop:
         self.level = config.speed_level
         self.targets = {}
         self.velocities = dict.fromkeys(self.limits, 0.0)
+        self.linear = (0.0, 0.0, 0.0)
         self.held = set()
         self.blocked = []
         self.note = 'Press Start (Xbox Menu button) to enable'
@@ -101,11 +120,15 @@ class ArmTeleop:
 
     @property
     def active_group(self):
-        return self.config.groups[self.group]
+        return self.groups[self.group]
 
     @property
     def speed(self):
         return self.config.max_speed * self.config.speed_levels[self.level]
+
+    @property
+    def linear_speed(self):
+        return self.config.linear_speed * self.config.speed_levels[self.level]
 
     def update(self, axes, buttons, measured, dt):
         """Apply one controller sample; return True when the targets should be sent."""
@@ -119,7 +142,8 @@ class ArmTeleop:
         if 'enable' in pressed:
             self.enable(measured, axes)
         if 'group' in pressed:
-            self.group = (self.group + 1) % len(self.config.groups)
+            self.group = (self.group + 1) % len(self.groups)
+            self.linear = (0.0, 0.0, 0.0)
         if 'faster' in pressed:
             self.level = min(self.level + 1, len(self.config.speed_levels) - 1)
         if 'slower' in pressed:
@@ -146,21 +170,27 @@ class ArmTeleop:
         # Start from the measured pose so enabling never makes the arm jump.
         self.targets = {joint: measured[joint] for joint in self.limits}
         self.velocities = dict.fromkeys(self.limits, 0.0)
+        self.linear = (0.0, 0.0, 0.0)
         self.enabled, self.note, self.warning = True, '', False
 
     def disable(self, measured, note, warning=False):
         self.enabled, self.note, self.warning = False, note, warning
         self.velocities = dict.fromkeys(self.limits, 0.0)
+        self.linear = (0.0, 0.0, 0.0)
         self.targets.update({joint: measured[joint] for joint in self.limits if joint in measured})
 
     def move(self, axes, homing, dt):
         config = self.config
         desired = dict.fromkeys(self.limits, 0.0)
+        self.blocked = []
         if homing:
             for joint, (lower, upper) in self.limits.items():
                 if joint != config.tool_joint:
                     error = clamp(0.0, lower, upper) - self.targets[joint]
                     desired[joint] = clamp(config.home_gain * error, -self.speed, self.speed)
+        elif self.active_group.mode == 'cartesian':
+            self.jog(axes, dt)
+            desired = {config.tool_joint: 0.0}
         else:
             group = self.active_group
             for joint, axis, scale in zip(group.joints, group.axes, group.scales):
@@ -168,7 +198,6 @@ class ArmTeleop:
         desired[config.tool_joint] = config.tool_speed * (
             self.trigger(axes, config.tool_close_axis) - self.trigger(axes, config.tool_open_axis))
         step = config.max_accel * dt
-        self.blocked = []
         for joint, goal in desired.items():
             velocity = self.velocities[joint]
             if joint == config.tool_joint:
@@ -185,6 +214,28 @@ class ArmTeleop:
                 target, velocity = min(self.targets[joint], lower), 0.0
                 self.blocked.append(joint)
             self.targets[joint], self.velocities[joint] = target, velocity
+
+    def jog(self, axes, dt):
+        """Move the tool tip along a straight line set by the sticks, keeping the tool pitch."""
+        config, group = self.config, self.active_group
+        values = [scale * self.stick(axes, axis) for axis, scale in zip(group.axes, group.scales)]
+        linear, roll = values[:3], values[3]
+        if config.buttons['lock'] in self.held:
+            dominant = max(range(3), key=lambda index: abs(linear[index]))
+            linear = [value if index == dominant else 0.0 for index, value in enumerate(linear)]
+        # Ramp the tip velocity as one vector, so speeding up or slowing down never bends the line.
+        change = [self.linear_speed * goal - current for goal, current in zip(linear, self.linear)]
+        size, most = math.sqrt(sum(value * value for value in change)), config.linear_accel * dt
+        if size > most:
+            change = [value * most / size for value in change]
+        velocity = [current + value for current, value in zip(self.linear, change)]
+        before = {joint: self.targets[joint] for joint in self.kinematics.joints}
+        after, fraction, self.blocked = self.kinematics.jog(
+            before, velocity, roll * self.speed, dt, self.limits, config.max_speed)
+        self.linear = tuple(value * fraction for value in velocity)
+        for joint in self.kinematics.joints:
+            self.velocities[joint] = (after[joint] - before[joint]) / dt
+            self.targets[joint] = after[joint]
 
     def stick(self, axes, name):
         value = self.axis(axes, name)

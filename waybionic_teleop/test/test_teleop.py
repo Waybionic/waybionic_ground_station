@@ -1,16 +1,22 @@
 """Controller-to-joint behaviour of the placeholder Xbox mapping."""
 
 import math
+from pathlib import Path
 
 import pytest
 
 from waybionic_teleop.gamepad import AXES, BUTTONS
+from waybionic_teleop.kinematics import ArmKinematics
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
 LIMITS = {'joint_1': (-math.pi, math.pi), 'joint_2': (-1.5708, 1.5708),
           'joint_3': (-1.5708, 1.5708), 'joint_4': (-1.5708, 1.5708),
           'joint_5': (-1.5708, 1.5708)}
 HOME = dict.fromkeys([*LIMITS, 'tool_grip'], 0.0)
+# Tool pointing straight down in front of the base, where straight cuts start.
+DOWN = {**HOME, 'joint_1': 0.1, 'joint_2': 0.5, 'joint_3': 1.4, 'joint_4': math.pi - 1.9}
+URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
+        / 'waybionic_arm.urdf').read_text(encoding='utf-8')
 DT = 0.02
 
 
@@ -36,6 +42,20 @@ def params(parameters):
 @pytest.fixture
 def teleop(params):
     return ArmTeleop(config_from_parameters(params), LIMITS)
+
+
+@pytest.fixture
+def arm():
+    return ArmKinematics.from_urdf(URDF)
+
+
+@pytest.fixture
+def cartesian(params, arm):
+    teleop = ArmTeleop(config_from_parameters(params), LIMITS, arm)
+    press(teleop, 'start', DOWN)
+    press(teleop, 'y', DOWN)
+    press(teleop, 'y', DOWN)
+    return teleop
 
 
 def test_sticks_do_nothing_until_start_enables_from_the_measured_pose(teleop):
@@ -121,11 +141,45 @@ def test_holding_a_returns_to_the_zero_pose(teleop):
     assert teleop.targets['joint_1'] == pytest.approx(0.0, abs=1e-3)
 
 
+def test_the_cartesian_group_moves_the_tip_along_a_straight_line(arm, cartesian):
+    assert cartesian.active_group.name == 'cartesian'
+    start, pitch = arm.forward(cartesian.targets)
+    path = []
+    for _ in range(round(1.0 / DT)):
+        cartesian.update(*sample(left_x=1.0), DOWN, DT)
+        path.append(arm.forward(cartesian.targets))
+    for (x, y, z), tool_pitch in path:
+        assert (x, z, tool_pitch) == pytest.approx((start[0], start[2], pitch), abs=1e-9)
+    # Half of the 50 mm/s maximum at the initial speed level, after a 0.1 s ramp.
+    assert cartesian.linear == pytest.approx((0.0, 0.025, 0.0))
+    assert path[-1][0][1] - start[1] == pytest.approx(0.024, abs=1e-6)
+    assert all(cartesian.targets[joint] != DOWN[joint] for joint in LIMITS)
+
+
+def test_holding_lb_keeps_only_the_strongest_direction(arm, cartesian):
+    start = arm.forward(cartesian.targets)[0]
+    for _ in range(25):
+        cartesian.update(*sample('left_bumper', left_x=0.4, left_y=1.0), DOWN, DT)
+    end = arm.forward(cartesian.targets)[0]
+    assert end[0] > start[0] + 0.005
+    assert end[1:] == pytest.approx(start[1:], abs=1e-12)
+
+
+def test_without_arm_kinematics_the_cartesian_group_is_skipped(teleop):
+    assert [group.name for group in teleop.groups] == ['base', 'upper']
+    press(teleop, 'start')
+    press(teleop, 'y')
+    press(teleop, 'y')
+    assert teleop.active_group.name == 'base'
+
+
 @pytest.mark.parametrize('change', [
     {'base.axes': ['left_x', 'left_y', 'trackpad']},
     {'stop_button': 'turbo'},
     {'base.scales': [1.0]},
     {'tool_limits': [1.0, 0.0]},
+    {'cartesian.axes': ['left_y', 'left_x', 'right_y']},
+    {'cartesian.mode': 'polar'},
 ])
 def test_invalid_mappings_are_rejected(params, change):
     with pytest.raises(ValueError):

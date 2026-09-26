@@ -77,6 +77,23 @@ class DriveMap:
         return {joint: sum(weight * output for weight, output in zip(row, outputs))
                 for joint, row in zip(self.joints, self.inverse)}
 
+    def synchronized(self, positions, velocities, counts, period, max_rpm):
+        """
+        Return (axis, rpm) per drive so that every drive reaches its next setpoint together.
+
+        Each target is the commanded pose one period ahead along the commanded velocity, and
+        each speed covers that drive's remaining distance, measured from its encoder, in one
+        period. Drives that ran ahead or fell behind are corrected on every call.
+        """
+        ahead = {joint: position + velocities.get(joint, 0.0) * period
+                 for joint, position in positions.items()}
+        moves = []
+        for axis, count in zip(self.to_counts(ahead), counts):
+            rpm = abs(axis - count) / self.counts_per_rev / period * 60.0
+            # Speed 0 means stop to the drive, so the slowest move is 1 rpm.
+            moves.append((axis, max(1, min(max_rpm, round(rpm)))))
+        return moves
+
 
 def drive_map_from_parameters(params, counts_per_rev):
     """Build a DriveMap from flat ROS parameter names such as 'wrist_left.joints'."""

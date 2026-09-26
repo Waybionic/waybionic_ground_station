@@ -24,6 +24,7 @@ if(BUILD_TESTING)
   add_launch_test(test/test_arm_model_launch.py ${isolated})
   add_launch_test(test/test_joint_demo_launch.py ${isolated})
   add_launch_test(test/test_teleop_launch.py ${isolated})
+  add_launch_test(test/test_cartesian_launch.py ${isolated})
 endif()
 
 install(PROGRAMS scripts/joint_demo.py scripts/camera_follower.py

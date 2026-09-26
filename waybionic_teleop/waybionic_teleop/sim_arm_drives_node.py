@@ -38,6 +38,7 @@ class SimArmDrives(Node):
         self.map = drive_map_from_parameters(params, mks_can.COUNTS_PER_REV)
         self.acc = int(params['acc'])
         self.max_rpm = int(params['max_rpm'])
+        self.period = 1.0 / float(params['rate_hz'])
         self.bitrate = int(params['bitrate'])
         drives = self.map.drives
         self.index = {drive.can_id: index for index, drive in enumerate(drives)}
@@ -49,7 +50,6 @@ class SimArmDrives(Node):
         self.last_command = [''] * len(drives)
         self.commanded = None
         self.velocities = {}
-        self.pending = False
         self.rejected = 0
         self.bus_errors = 0
         # Same start-up sequence the real drives need: bus FOC mode, replies and "move complete"
@@ -85,13 +85,12 @@ class SimArmDrives(Node):
                 self.rejected += 1
                 continue
             self.commanded[joint], self.velocities[joint] = position, velocity
-            self.pending = True
 
     def tick(self):
         now = time.monotonic()
         dt, self.last_tick = min(now - self.last_tick, 0.1), now
-        if self.pending:
-            self.pending = False
+        # Speeds follow the encoders, so the targets are refreshed every tick.
+        if self.commanded is not None:
             self.send_targets()
         self.bus.step(dt)
         for drive in self.map.drives:
@@ -109,11 +108,9 @@ class SimArmDrives(Node):
         self.state_publisher.publish(message)
 
     def send_targets(self):
-        counts = self.map.to_counts(self.commanded)
-        speeds = self.map.to_rpm(self.velocities)
-        for index, (drive, axis, rpm) in enumerate(zip(self.map.drives, counts, speeds)):
-            # Allow some speed margin so each streamed target is reached before the next one.
-            speed = min(self.max_rpm, math.ceil(rpm * 1.5) + 1)
+        moves = self.map.synchronized(self.commanded, self.velocities, self.counts, self.period,
+                                      self.max_rpm)
+        for index, (drive, (axis, speed)) in enumerate(zip(self.map.drives, moves)):
             if self.sent[index] == (axis, speed):
                 continue
             try:
