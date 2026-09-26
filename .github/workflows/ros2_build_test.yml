@@ -1,4 +1,4 @@
-name: ROS 2 Jazzy Build and Test
+name: ROS 2 Jazzy Docker Compose Build and Test
 
 on:
   push:
@@ -6,33 +6,26 @@ on:
   pull_request:
     branches: [ "main" ]
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     runs-on: ubuntu-24.04
-    container:
-      image: ros:jazzy
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          path: src/${{ github.event.repository.name }}
 
-      - name: Install Dependencies (rosdep)
-        run: |
-          apt-get update
-          rosdep update
-          rosdep install --from-paths src --ignore-src -r -y
+      - name: Build and Test with Docker Compose
+        run: docker compose --progress plain build test
 
-      - name: Build Packages
-        shell: bash
-        run: |
-          source /opt/ros/jazzy/setup.bash
-          colcon build
+  build-and-test-arm64:
+    runs-on: ubuntu-24.04-arm
 
-      - name: Run Tests
-        shell: bash
-        run: |
-          source /opt/ros/jazzy/setup.bash
-          colcon test
-          colcon test-result --all
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Build and Test with Docker Compose
+        run: docker compose --progress plain build test
