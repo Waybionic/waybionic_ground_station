@@ -22,10 +22,11 @@ def generate_test_description():
     ground_station_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(launch_file),
         launch_arguments={
-            'launch_rviz': 'false',
-            'use_joint_state_publisher_gui': 'false',
+            'launch_rviz': '0',
+            'use_joint_state_publisher_gui': '0',
             'start_temporary_diagnostics_publisher': 'true',
-            'follow_camera': 'false'
+            'use_diagnostics': '0',
+            'follow_camera': 'False'
         }.items()
     )
 
