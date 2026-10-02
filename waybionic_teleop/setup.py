@@ -19,7 +19,7 @@ setup(
     maintainer='Yassin Soliman',
     maintainer_email='solimanyassin@gmail.com',
     description=(
-        'Xbox controller teleoperation and simulated CAN joint drives for the WayBionic arm.'
+        'Controller teleoperation and simulated CAN joint drives for the WayBionic arm.'
     ),
     license='Apache-2.0',
     tests_require=['pytest'],
