@@ -66,6 +66,18 @@ def pressed(buttons):
     return [name for name, value in zip(gamepad.BUTTONS, buttons) if value]
 
 
+def fake_pygame(sdl):
+    """Expose SDL constants where Pygame 2.6 publishes them."""
+    pygame = SimpleNamespace(event=SimpleNamespace(pump=lambda: None))
+    for name in sdl_bridge.AXIS_NAMES:
+        setattr(pygame, 'CONTROLLER_AXIS_' + name,
+                getattr(sdl, 'CONTROLLER_AXIS_' + name))
+    for name in sdl_bridge.BUTTON_NAMES.values():
+        setattr(pygame, 'CONTROLLER_BUTTON_' + name,
+                getattr(sdl, 'CONTROLLER_BUTTON_' + name))
+    return pygame
+
+
 def test_dualsense_controls_match_existing_teleop_layout():
     """Keep DualSense axes and buttons compatible with teleop packets."""
     sdl = FakeSDL()
@@ -95,8 +107,7 @@ def test_disconnect_sends_neutral_and_reconnect_requires_release():
     sdl = FakeSDL()
     first = FakeController()
     sdl.devices = [first]
-    bridge = sdl_bridge.SDLBridge(
-        SimpleNamespace(event=SimpleNamespace(pump=lambda: None)), sdl)
+    bridge = sdl_bridge.SDLBridge(fake_pygame(sdl), sdl)
     assert bridge.poll(0.0)[2] is False  # neutral reset
     assert bridge.poll(0.01)[2] is True
     first.buttons[sdl.CONTROLLER_BUTTON_START] = True
@@ -124,8 +135,7 @@ def test_trigger_or_stick_held_blocks_connection():
     pad = FakeController()
     pad.axes[sdl.CONTROLLER_AXIS_TRIGGERLEFT] = 20000
     sdl.devices = [pad]
-    bridge = sdl_bridge.SDLBridge(
-        SimpleNamespace(event=SimpleNamespace(pump=lambda: None)), sdl)
+    bridge = sdl_bridge.SDLBridge(fake_pygame(sdl), sdl)
     assert bridge.poll(0.0)[2] is False
     pad.axes.clear()
     pad.axes[sdl.CONTROLLER_AXIS_LEFTX] = 20000

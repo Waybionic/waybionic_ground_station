@@ -96,7 +96,7 @@ class SDLBridge:
             return *NEUTRAL, False, message
 
         try:
-            axes, buttons = to_joy(self.controller, self.sdl)
+            axes, buttons = to_joy(self.controller, self.pygame)
         except (OSError, RuntimeError):
             self.close()
             self.next_scan = now + 1.0
