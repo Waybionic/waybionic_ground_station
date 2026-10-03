@@ -311,7 +311,7 @@ Press **Ctrl+C** in each window to stop.
 | Incision group: right stick up/down | Tilt the tool about the incision point |
 | Incision group: right stick left/right | Tool roll |
 | RT / LT | Close / open the placeholder end effector |
-| D-pad up/down | Speed: 10, 25, 50 or 100% of 60 deg/s, or of 50 mm/s and 30 deg/s of tilt in the Cartesian group |
+| D-pad up/down | Speed: 10, 25, 50 or 100% of 60 deg/s, or of 50 mm/s and 30 deg/s of tilt in the Cartesian and incision groups |
 | A (hold) | Return to the zero pose (not in the incision group) |
 
 Start is refused until the sticks are centred and the triggers released. The
@@ -330,7 +330,9 @@ tip was when you selected the group, shown as a pink dot in RViz. The tool alway
 passes through that point, whether you insert it, withdraw it or tilt it, and the
 return to the zero pose is off so the tool is never dragged sideways through the
 incision. With five joints, the tool can only tilt in the arm's vertical plane:
-tilting sideways about the incision point would need a sixth joint.
+tilting sideways about the incision point would need a sixth joint. If the arm is
+re-enabled with the tool no longer through the incision point, the group stops
+rather than pull it back; select the group again to set a new incision point.
 
 The RViz camera follows the tool as the arm moves; drag to orbit and scroll to zoom
 as usual, or add `follow_camera:=false` to the launch command for a fixed view.

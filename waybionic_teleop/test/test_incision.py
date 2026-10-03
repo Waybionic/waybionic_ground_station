@@ -93,6 +93,34 @@ def test_sideways_stick_and_going_home_do_nothing_here(teleop):
     assert teleop.targets == pytest.approx(start, abs=1e-9)
 
 
+def test_roll_turns_the_tool_without_moving_it_off_the_incision(teleop, arm):
+    run(teleop, 1.0, left_y=1.0)
+    run(teleop, 0.3)
+    _, depth = through(arm, teleop.targets, teleop.incision)
+    roll, pitch = teleop.targets['joint_5'], arm.forward(teleop.targets)[1]
+    run(teleop, 0.5, right_x=1.0)
+    run(teleop, 0.3)
+    distance, rolled_depth = through(arm, teleop.targets, teleop.incision)
+    assert abs(teleop.targets['joint_5'] - roll) > 0.1
+    assert distance < 1e-5 and rolled_depth == pytest.approx(depth, abs=1e-5)
+    assert arm.forward(teleop.targets)[1] == pytest.approx(pitch, abs=1e-9)
+
+
+def test_re_enabling_away_from_the_incision_point_moves_nothing(teleop, arm):
+    run(teleop, 1.0, left_y=1.0)
+    run(teleop, 0.3)
+    teleop.update(*sample('b'), dict(teleop.targets), DT)
+    teleop.update(*sample(), dict(teleop.targets), DT)
+    # While disabled, the arm ends up somewhere the axis misses the incision point.
+    moved = {**teleop.targets, 'joint_2': teleop.targets['joint_2'] + 0.1}
+    teleop.update(*sample('start'), moved, DT)
+    teleop.update(*sample(), moved, DT)
+    assert teleop.enabled
+    run(teleop, 0.5, left_y=1.0)
+    assert teleop.targets == pytest.approx(moved, abs=1e-9)
+    assert teleop.blocked == ['incision'] and 'press Y' in teleop.note
+
+
 def test_selecting_the_group_again_sets_a_new_incision_point(teleop, arm):
     run(teleop, 1.0, left_y=1.0)
     run(teleop, 0.3)

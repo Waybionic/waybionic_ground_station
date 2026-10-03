@@ -9,6 +9,9 @@ ACTIONS = ('enable', 'stop', 'group', 'home', 'faster', 'slower', 'lock', 'tilt_
 CARTESIAN_AXES = ('x', 'y', 'z', 'roll')
 INCISION_AXES = ('insert', 'pivot', 'roll')
 MOVES = {'cartesian': CARTESIAN_AXES, 'incision': INCISION_AXES}
+# How far the tool axis may pass from the incision point before the incision group stops.
+INCISION_TOLERANCE = 0.002
+INCISION_LOST = 'The tool is off the incision point; press Y to choose the incision group again'
 
 
 def clamp(value, low, high):
@@ -287,10 +290,16 @@ class ArmTeleop:
         tip, pitch = kinematics.forward(before)
         if self.incision is None:
             self.incision = tip
+        offset = [a - b for a, b in zip(tip, self.incision)]
+        depth = sum(a * b for a, b in zip(offset, kinematics.axis(before)))
+        if math.sqrt(max(sum(a * a for a in offset) - depth * depth, 0.0)) > INCISION_TOLERANCE:
+            # The arm was re-enabled away from the incision point: never pull it back there.
+            self.insert = self.tilt = self.roll = 0.0
+            self.blocked = ['incision']
+            self.note, self.warning = INCISION_LOST, True
+            return
         # Aim for the point on the new axis through the incision, at the new depth, so the
         # incision never drifts off the axis.
-        depth = sum((a - b) * c for a, b, c in zip(tip, self.incision,
-                                                   kinematics.axis(before)))
         target = [point + (depth + self.insert * dt) * direction for point, direction
                   in zip(self.incision, kinematics.axis(before, pitch + self.tilt * dt))]
         velocity = [(goal - now) / dt for goal, now in zip(target, tip)]
