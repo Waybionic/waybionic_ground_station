@@ -8,6 +8,7 @@ channels:
 dependencies:
   - ros-jazzy-ros-base
   - ros-jazzy-rviz2
+  - ros-jazzy-rviz-imu-plugin
   - ros-jazzy-xacro
   - ros-jazzy-joint-state-publisher-gui
   - colcon-common-extensions
@@ -17,3 +18,6 @@ dependencies:
   - make
   - ninja
   - pytest <9
+  # colcon still relies on the legacy `develop` and `test` commands removed by
+  # newer setuptools. Keep Python ROS packages editable and testable on macOS.
+  - setuptools <72

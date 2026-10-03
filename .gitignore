@@ -1,7 +1,15 @@
+diagnostics-sessions/
+*.db3
+*.mcap
+
 # ROS folders
 build/
 install/
 log/
+
+# Python caches
+__pycache__/
+*.py[cod]
 
 # imported ROS projects
 easy_handeye2/

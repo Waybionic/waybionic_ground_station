@@ -125,6 +125,18 @@ DiagnosticsPanel::DiagnosticsPanel(QWidget * parent)
   configureSource(use_mock_diagnostics_);
 }
 
+DiagnosticsPanel::~DiagnosticsPanel()
+{
+  // Stop the timer before the members it reads are destroyed, then detach the
+  // live subscription so no executor callback outlives the panel.
+  if (refresh_timer_ != nullptr) {
+    refresh_timer_->stop();
+  }
+  if (diagnostics_source_) {
+    diagnostics_source_->stop();
+  }
+}
+
 void DiagnosticsPanel::onInitialize()
 {
   if (auto ros_node_abstraction = getDisplayContext()->getRosNodeAbstraction().lock()) {
@@ -275,17 +287,29 @@ void DiagnosticsPanel::buildUi()
 void DiagnosticsPanel::configureSource(const bool use_mock_diagnostics)
 {
   use_mock_diagnostics_ = use_mock_diagnostics;
-  mock_diagnostics_source_ = nullptr;
+
+  // Detach the outgoing source before releasing it. Retiring the subscription
+  // first means an executor callback can no longer publish into a source the
+  // panel has stopped using, and it prevents a second subscription from
+  // existing alongside the old one.
+  auto retired_source = std::move(diagnostics_source_);
+  if (retired_source) {
+    retired_source->stop();
+  }
+  mock_diagnostics_source_.reset();
 
   if (use_mock_diagnostics_ || !rviz_node_) {
-    auto mock_source = std::make_unique<MockDiagnosticsSource>();
-    mock_diagnostics_source_ = mock_source.get();
-    diagnostics_source_ = std::move(mock_source);
+    mock_diagnostics_source_ = std::make_shared<MockDiagnosticsSource>();
+    diagnostics_source_ = mock_diagnostics_source_;
   } else {
-    diagnostics_source_ = std::make_unique<RosDiagnosticsSource>(rviz_node_, diagnostics_topic_);
+    diagnostics_source_ = std::make_shared<RosDiagnosticsSource>(rviz_node_, diagnostics_topic_);
   }
 
   updateSourceControls();
+
+  // Released only after the replacement is installed, so no refresh can observe
+  // a panel without a source.
+  retired_source.reset();
 }
 
 bool DiagnosticsPanel::readUseMockDiagnosticsParameter(const bool default_value)
@@ -316,16 +340,23 @@ std::string DiagnosticsPanel::readDiagnosticsTopicParameter(const std::string & 
 
 void DiagnosticsPanel::refresh()
 {
+  // Pin the source for the whole tick so a mode switch cannot swap it out
+  // between reading the messages and rendering them.
+  const auto source = diagnostics_source_;
+  if (!source) {
+    return;
+  }
+
   const auto now = clock_.now();
-  const auto messages = diagnostics_source_->messages(now);
-  updateSystemStatus(messages, now);
+  const auto messages = source->messages(now);
+  updateSystemStatus(*source, messages, now);
   updateTelemetryTable(messages, now);
   updateAlerts(messages);
 }
 
 void DiagnosticsPanel::setMockDiagnosticsState(const MockDiagnosticsState mode)
 {
-  if (mock_diagnostics_source_ == nullptr) {
+  if (!mock_diagnostics_source_) {
     return;
   }
 
@@ -340,6 +371,7 @@ void DiagnosticsPanel::setUseMockDiagnostics(const bool use_mock_diagnostics)
 }
 
 void DiagnosticsPanel::updateSystemStatus(
+  const DiagnosticsSource & source,
   const std::vector<DiagnosticMessage> & messages,
   const rclcpp::Time & now)
 {
@@ -364,8 +396,8 @@ void DiagnosticsPanel::updateSystemStatus(
   state_label_->style()->unpolish(state_label_);
   state_label_->style()->polish(state_label_);
 
-  source_label_->setText(QString::fromStdString(diagnostics_source_->sourceName()));
-  ros_connection_label_->setText(QString::fromStdString(diagnostics_source_->connectionStatus(now)));
+  source_label_->setText(QString::fromStdString(source.sourceName()));
+  ros_connection_label_->setText(QString::fromStdString(source.connectionStatus(now)));
   heartbeat_label_->setText(has_stale ? "STALE" : "OK");
   heartbeat_label_->setStyleSheet(QString("color: %1; font-weight: 800;").arg(has_stale ? "#9aa4ad" : "#3ddc84"));
   safety_label_->setStyleSheet(QString("color: %1; font-weight: 700;").arg(has_alert ? "#ff4d5e" : "#8ea3b1"));
@@ -389,7 +421,7 @@ void DiagnosticsPanel::updateSourceControls()
     use_mock_diagnostics_checkbox_->setChecked(use_mock_diagnostics_);
   }
 
-  const bool mock_enabled = mock_diagnostics_source_ != nullptr;
+  const bool mock_enabled = static_cast<bool>(mock_diagnostics_source_);
   if (normal_button_ != nullptr) {
     normal_button_->setEnabled(mock_enabled);
     if (!mock_enabled) {

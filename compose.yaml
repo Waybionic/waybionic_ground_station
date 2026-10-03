@@ -1,0 +1,119 @@
+x-tested-image: &tested-image
+  image: waybionic-ground-station:jazzy
+  build:
+    context: .
+    dockerfile: docker/Dockerfile
+    target: test
+
+services:
+  demo:
+    <<: *tested-image
+    init: true
+    stop_signal: SIGINT
+    stop_grace_period: 20s
+    environment:
+      ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+    command:
+      - ros2
+      - launch
+      - waybionic_bringup
+      - ground_station.launch.py
+      - launch_rviz:=false
+      - use_joint_state_publisher_gui:=false
+      - start_temporary_diagnostics_publisher:=true
+
+  test:
+    <<: *tested-image
+    profiles: [test]
+    # Tests run during the Dockerfile's test stage; a failure fails the build.
+    command: ["true"]
+
+  development:
+    profiles: [development]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: development
+    init: true
+    command: [sleep, infinity]
+    volumes:
+      - type: bind
+        source: .
+        target: /waybionic_ws/src/waybionic_ground_station
+        bind:
+          selinux: z
+
+  linux-gui:
+    <<: *tested-image
+    profiles: [linux-gui]
+    init: true
+    stop_signal: SIGINT
+    environment:
+      DISPLAY: ${DISPLAY:-:0}
+      XAUTHORITY: /tmp/waybionic.xauth
+      QT_QPA_PLATFORM: xcb
+      QT_X11_NO_MITSHM: "1"
+      LIBGL_ALWAYS_SOFTWARE: "1"
+      ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+    # Permit the desktop socket on SELinux hosts without relabeling it.
+    security_opt:
+      - label=disable
+    volumes:
+      - type: bind
+        source: .
+        target: /waybionic_ws/src/waybionic_ground_station
+      - type: bind
+        source: /tmp/.X11-unix
+        target: /tmp/.X11-unix
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${WAYBIONIC_XAUTHORITY:-/tmp/waybionic-missing.xauth}
+        target: /tmp/waybionic.xauth
+        read_only: true
+        bind:
+          create_host_path: false
+    command:
+      - bash
+      - -c
+      - |
+        colcon build --symlink-install &&
+        source /waybionic_ws/install/setup.bash &&
+        exec ros2 launch waybionic_bringup ground_station.launch.py
+
+  wslg:
+    <<: *tested-image
+    profiles: [wslg]
+    init: true
+    stop_signal: SIGINT
+    stdin_open: true
+    tty: true
+    environment:
+      DISPLAY: ":0"
+      QT_X11_NO_MITSHM: "1"
+      # Renders on the Windows GPU through WSL's D3D12 driver; WAYBIONIC_GL_DRIVER=llvmpipe uses the CPU.
+      GALLIUM_DRIVER: ${WAYBIONIC_GL_DRIVER:-d3d12}
+      LD_LIBRARY_PATH: /usr/lib/wsl/lib
+      ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+    devices:
+      - /dev/dxg:/dev/dxg
+    volumes:
+      - type: bind
+        source: /mnt/host/wslg/.X11-unix
+        target: /tmp/.X11-unix
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /usr/lib/wsl
+        target: /usr/lib/wsl
+        read_only: true
+        bind:
+          create_host_path: false
+    command:
+      - ros2
+      - launch
+      - waybionic_bringup
+      - ground_station.launch.py
+      - start_temporary_diagnostics_publisher:=true

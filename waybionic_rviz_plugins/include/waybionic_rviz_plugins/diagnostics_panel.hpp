@@ -33,6 +33,7 @@ class DiagnosticsPanel : public rviz_common::Panel
 
 public:
   explicit DiagnosticsPanel(QWidget * parent = nullptr);
+  ~DiagnosticsPanel() override;
 
   void onInitialize() override;
   void save(rviz_common::Config config) const override;
@@ -46,7 +47,10 @@ private:
   void refresh();
   void setMockDiagnosticsState(MockDiagnosticsState mode);
   void setUseMockDiagnostics(bool use_mock_diagnostics);
-  void updateSystemStatus(const std::vector<DiagnosticMessage> & messages, const rclcpp::Time & now);
+  void updateSystemStatus(
+    const DiagnosticsSource & source,
+    const std::vector<DiagnosticMessage> & messages,
+    const rclcpp::Time & now);
   void updateTelemetryTable(const std::vector<DiagnosticMessage> & messages, const rclcpp::Time & now);
   void updateAlerts(const std::vector<DiagnosticMessage> & messages);
   void updateSourceControls();
@@ -58,8 +62,10 @@ private:
   QString optionalText(const std::optional<std::string> & value) const;
   QString alertText(const DiagnosticMessage & message) const;
 
-  std::unique_ptr<DiagnosticsSource> diagnostics_source_;
-  MockDiagnosticsSource * mock_diagnostics_source_{nullptr};
+  // Shared ownership so a refresh tick keeps its source alive even if a mode
+  // switch replaces the panel's source part-way through the tick.
+  std::shared_ptr<DiagnosticsSource> diagnostics_source_;
+  std::shared_ptr<MockDiagnosticsSource> mock_diagnostics_source_;
   rclcpp::Node::SharedPtr rviz_node_;
   rclcpp::Clock clock_{RCL_SYSTEM_TIME};
   std::string diagnostics_topic_{"/diagnostics"};

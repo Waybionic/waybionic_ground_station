@@ -1,0 +1,18 @@
+{
+  "name": "WayBionic ROS 2 Jazzy",
+  "dockerComposeFile": "../compose.yaml",
+  "service": "development",
+  "runServices": ["development"],
+  "shutdownAction": "stopCompose",
+  "workspaceFolder": "/waybionic_ws/src/waybionic_ground_station",
+  "remoteUser": "ubuntu",
+  "updateRemoteUserUID": true,
+  "postCreateCommand": "bash -c 'source /opt/ros/jazzy/setup.bash && cd /waybionic_ws && colcon build --symlink-install'",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.cwd": "/waybionic_ws"
+      }
+    }
+  }
+}
