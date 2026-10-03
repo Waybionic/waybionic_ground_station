@@ -265,9 +265,9 @@ Qt may report a default `XDG_RUNTIME_DIR`, and RViz may report that stereo is no
 supported; neither prevented this demo from starting. On Ctrl+C, the joint GUI
 can report exit code `-2`, indicating the requested SIGINT interruption.
 
-## Xbox Controller (Simulated Arm)
+## Xbox and PS5 Controllers (Simulated Arm)
 
-`teleop:=true` drives the arm with an Xbox controller through simulated CAN drives;
+`teleop:=true` drives the arm with a controller through simulated CAN drives;
 nothing is sent to hardware. The controller mapping is in
 `waybionic_teleop/config/xbox_teleop.yaml`, and the placeholder joint-to-drive map
 (MKS SERVO42D/57D CAN IDs, gear ratios and the wrist differential) is in
@@ -291,6 +291,24 @@ python -m waybionic_teleop.xinput_bridge
 The bridge sends the controller state to the container on `127.0.0.1:47300/udp`.
 Press **Ctrl+C** in each window to stop.
 
+**PS5 DualSense on Windows:** pair the controller in Windows Bluetooth settings or
+connect it by USB, then use the same `wslg-teleop` command above. In the second
+PowerShell window, use Python 3.13 or older, install Pygame once, and start the SDL
+bridge:
+
+```powershell
+python -m pip install pygame==2.6.1
+cd waybionic_teleop
+python -m waybionic_teleop.sdl_bridge
+```
+
+Run only one Windows bridge at a time. The SDL bridge uses the first recognized
+controller by default; use `--index 1` (or another SDL index) if multiple controllers
+are connected. It waits for all controls to be released when the controller first
+connects or reconnects. Windows must show the controller as connected, and the bridge
+must print `Controller ready` before Options can enable teleoperation. If Pygame
+cannot see the controller over Bluetooth, try USB and report which connection worked.
+
 **Linux (native ROS):** with the controller plugged in, run
 `ros2 launch waybionic_bringup ground_station.launch.py teleop:=true`.
 
@@ -307,6 +325,14 @@ Press **Ctrl+C** in each window to stop.
 | D-pad up/down | Speed: 10, 25, 50 or 100% of 60 deg/s |
 | A (hold) | Return to the zero pose |
 
+On PS5 DualSense, **Options** replaces Start/Menu, **Circle** replaces B,
+**Triangle** replaces Y, **Cross** replaces A, and the left/right triggers are
+L2/R2. The sticks, D-pad, and shoulder buttons keep the same positions. After
+connecting, test each row above with those names. Turn the controller off while
+teleoperation is enabled: the arm should hold its pose and show disabled. After
+reconnecting, teleoperation must remain disabled until you release the controls
+and press Options again.
+
 Start is refused until the sticks are centred and the triggers released. The
 diagnostics panel shows the teleop state, each joint, each drive's last CAN frame
 and the simulated bus load.
@@ -316,7 +342,7 @@ as usual, or add `follow_camera:=false` to the launch command for a fixed view.
 
 If the arm stops responding and the bridge's axis values stop changing while you
 move the sticks, Windows has stopped updating the controller. Turn the controller
-off and on (or unplug and replug it), then press Start again; the bridge
+off and on (or unplug and replug it), then press Start/Options again; the bridge
 reconnects by itself.
 
 ## Native Ubuntu Setup for RViz
