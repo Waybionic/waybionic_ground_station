@@ -18,6 +18,7 @@ dependencies:
   - make
   - ninja
   - pytest <9
+  - python-can
   # colcon still relies on the legacy `develop` and `test` commands removed by
   # newer setuptools. Keep Python ROS packages editable and testable on macOS.
   - setuptools <72
