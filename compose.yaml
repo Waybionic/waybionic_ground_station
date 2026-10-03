@@ -132,3 +132,19 @@ services:
       - teleop:=true
       - joy_source:=udp
       - joy_udp_bind:=0.0.0.0
+
+  # The teleop demo that plays itself whenever the controller is left idle.
+  wslg-demo:
+    <<: *wslg
+    profiles: [wslg-demo]
+    ports:
+      - 127.0.0.1:47300:47300/udp
+    command:
+      - ros2
+      - launch
+      - waybionic_bringup
+      - ground_station.launch.py
+      - teleop:=true
+      - joy_source:=udp
+      - joy_udp_bind:=0.0.0.0
+      - autoplay:=true
