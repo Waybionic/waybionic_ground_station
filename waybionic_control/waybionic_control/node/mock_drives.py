@@ -22,6 +22,9 @@ from waybionic_control.protocol import codec
 class MockDrivesNode(Node):
     """Node simulating 6 CAN-based joint controllers."""
 
+    TEST_HEALTH_FAULTS = {
+        'following_error', 'stalled', 'not_responding', 'disabled'}
+
     def __init__(self, **kwargs):
         """Initialize the MockDrivesNode and connect to the configured transport."""
         super().__init__('mock_drives', **kwargs)
@@ -59,10 +62,20 @@ class MockDrivesNode(Node):
         self.positions = {i: 0.0 for i in range(1, 7)}
         self.velocities = {i: 0.0 for i in range(1, 7)}
         self.targets = {i: 0.0 for i in range(1, 7)}
+        self.enabled = {i: True for i in range(1, 7)}
+        self.test_health_faults = {}
 
         self.timer = self.create_timer(0.1, self.timer_callback)
         self.count = 0
         self.get_logger().info('Mock drives started. Broadcasting 6 joints at 10Hz.')
+
+    def set_test_health_fault(self, joint_id, fault):
+        """Set a test-only health fault for one simulated joint, or clear it."""
+        if joint_id not in self.positions:
+            raise ValueError(f'Unknown simulated joint {joint_id}')
+        if fault is not None and fault not in self.TEST_HEALTH_FAULTS:
+            raise ValueError(f'Unknown test health fault {fault!r}')
+        self.test_health_faults[joint_id] = fault
 
     def timer_callback(self):
         if self.bus is None:
@@ -84,12 +97,19 @@ class MockDrivesNode(Node):
                     self.get_logger().warning(f'Ignored bad command: {e}')
 
         for joint_id in range(1, 7):
+            test_fault = self.test_health_faults.get(joint_id)
+            self.enabled[joint_id] = test_fault != 'disabled'
+            if test_fault == 'not_responding':
+                continue
             if simulate_faults and joint_id == 6 and 30 < self.count <= 70:
                 continue
 
-            diff = self.targets[joint_id] - self.positions[joint_id]
-            self.velocities[joint_id] = diff * 2.0
-            self.positions[joint_id] += diff * 0.5
+            if test_fault in ('following_error', 'stalled'):
+                self.velocities[joint_id] = 0.0
+            else:
+                diff = self.targets[joint_id] - self.positions[joint_id]
+                self.velocities[joint_id] = diff * 2.0
+                self.positions[joint_id] += diff * 0.5
 
             health_status = 1
             fault_code = 0

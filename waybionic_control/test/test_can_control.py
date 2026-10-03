@@ -124,7 +124,7 @@ class TestCanControlLogic(unittest.TestCase):
         self.assertEqual(statuses['joint_1'].level, DiagnosticStatus.OK)
         self.assertEqual(statuses['joint_1'].message, 'OK')
 
-        self.assertEqual(statuses['joint_2'].level, DiagnosticStatus.ERROR)
+        self.assertEqual(statuses['joint_2'].level, DiagnosticStatus.STALE)
         self.assertEqual(statuses['joint_2'].message, 'STALE (No heartbeat)')
 
     def test_health_zero_reports_error(self):
@@ -277,6 +277,7 @@ class TestCanControlLogic(unittest.TestCase):
         self.node.publish_diagnostics()
         statuses = {s.hardware_id: s
                     for s in self.node.diag_pub.publish.call_args[0][0].status}
+        self.assertEqual(statuses['joint_4'].level, DiagnosticStatus.STALE)
         self.assertEqual(statuses['joint_4'].message, 'STALE (No heartbeat)')
 
         faulted = codec.encode_joint_state(0.5, 0.0, 1, 0xAA)

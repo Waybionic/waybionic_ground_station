@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import math
 import time
 
 import can
@@ -20,6 +21,7 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 
+from waybionic_control.drive_health import DriveHealthMonitor, DriveHealthState
 from waybionic_control.protocol import codec
 
 
@@ -73,6 +75,12 @@ class CanHostNode(Node):
         self.last_seen = {i: 0.0 for i in range(1, 7)}
         self.faults = {i: 0 for i in range(1, 7)}
         self.healths = {i: 1 for i in range(1, 7)}
+        self.targets = {i: None for i in range(1, 7)}
+        self.commanded_velocities = {i: 0.0 for i in range(1, 7)}
+        self.positions = {i: None for i in range(1, 7)}
+        self.enabled = {i: True for i in range(1, 7)}
+        self.drive_health_monitors = {
+            i: DriveHealthMonitor() for i in range(1, 7)}
         self.last_cmd_time = 0.0
 
         self.create_timer(0.05, self.read_bus)
@@ -107,6 +115,8 @@ class CanHostNode(Node):
                             is_fd=True
                         )
                         self.bus.send(can_msg)
+                        self.targets[joint_id] = target_pos
+                        self.commanded_velocities[joint_id] = target_vel
                 except (ValueError, IndexError, can.CanError) as e:
                     self.get_logger().error(f'Command error: {e}')
 
@@ -125,6 +135,7 @@ class CanHostNode(Node):
                 try:
                     pos, vel, health, fault = codec.decode_joint_state(msg.data)
                     self.last_seen[joint_id] = time.time()
+                    self.positions[joint_id] = pos
                     self.faults[joint_id] = fault
                     self.healths[joint_id] = health
                     self.publish_joint_state(joint_id, pos, vel)
@@ -173,17 +184,55 @@ class CanHostNode(Node):
             cmd_stat.message = f'ACTIVE ({cmd_age:.1f}s ago)'
         diag_array.status.append(cmd_stat)
 
+        monotonic_now = time.monotonic()
         for joint_id in range(1, 7):
             status = DiagnosticStatus()
             status.name = f'can.bus: Joint {joint_id} Health'
             status.hardware_id = f'joint_{joint_id}'
 
+            encoder_position = self.positions[joint_id]
+            target_position = self.targets[joint_id]
+            has_error_data = encoder_position is not None and target_position is not None
+            encoder_radians = encoder_position if encoder_position is not None else 0.0
+            target_radians = target_position if target_position is not None else encoder_radians
+            position_error_degrees = (
+                math.degrees(target_radians - encoder_radians)
+                if has_error_data else None)
+            reply_age = current_time - self.last_seen[joint_id]
+            motion_commanded = self.commanded_velocities[joint_id] != 0.0
+            drive_state = self.drive_health_monitors[joint_id].evaluate(
+                target_position=math.degrees(target_radians),
+                encoder_position=math.degrees(encoder_radians),
+                motion_commanded=motion_commanded,
+                enabled=self.enabled[joint_id],
+                reply_age_seconds=reply_age,
+                now_seconds=monotonic_now,
+            )
+
+            status.values.append(KeyValue(key='state', value=drive_state.value))
+            status.values.append(KeyValue(
+                key='target_position_deg',
+                value=(f'{math.degrees(target_radians):.3f}'
+                       if target_position is not None else 'unknown')))
+            status.values.append(KeyValue(
+                key='encoder_position_deg',
+                value=(f'{math.degrees(encoder_radians):.3f}'
+                       if encoder_position is not None else 'unknown')))
+            status.values.append(KeyValue(
+                key='target_encoder_error_deg',
+                value=(f'{position_error_degrees:.3f}'
+                       if position_error_degrees is not None else 'unknown')))
+            status.values.append(KeyValue(
+                key='reply_age_sec', value=f'{reply_age:.3f}'))
             status.values.append(KeyValue(key='fault_code', value=hex(self.faults[joint_id])))
             status.values.append(KeyValue(key='health', value=str(self.healths[joint_id])))
 
-            if current_time - self.last_seen[joint_id] > 0.5:
-                status.level = DiagnosticStatus.ERROR
+            if drive_state is DriveHealthState.NOT_RESPONDING:
+                status.level = DiagnosticStatus.STALE
                 status.message = 'STALE (No heartbeat)'
+            elif drive_state is not DriveHealthState.OK:
+                status.level = DiagnosticStatus.ERROR
+                status.message = drive_state.value
             elif self.faults[joint_id] != 0:
                 status.level = DiagnosticStatus.ERROR
                 status.message = f'HARDWARE FAULT (Code: {hex(self.faults[joint_id])})'
