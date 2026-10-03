@@ -64,3 +64,22 @@ def test_link_meshes_are_valid_z_up_collada(robot):
             indices = [int(value) for value in group.find(f'{COLLADA}p').text.split()]
             assert len(indices) == 3 * int(group.get('count')) > 0
             assert 0 <= min(indices) and max(indices) < vertices
+
+
+def test_every_mesh_is_inside_its_collision_box(robot):
+    for link in robot.findall('link'):
+        if link.get('name') == 'tool_link':
+            continue
+        boxes = link.findall('collision')
+        assert len(boxes) == 1, link.get('name')
+        center = [float(value) for value in boxes[0].find('origin').get('xyz').split()]
+        size = [float(value) for value in boxes[0].find('geometry/box').get('size').split()]
+        assert boxes[0].find('origin').get('rpy') == '0 0 0'
+        uri = link.find('visual/geometry/mesh').get('filename')
+        mesh = ET.parse(PACKAGE / uri[len('package://waybionic_description/'):]).getroot()
+        values = [float(value) for value in mesh.find(f'.//{COLLADA}float_array').text.split()]
+        for axis in range(3):
+            points = values[axis::3]
+            # The box is written to 0.1 mm.
+            assert center[axis] - size[axis] / 2 <= min(points) + 1e-4
+            assert max(points) <= center[axis] + size[axis] / 2 + 1e-4

@@ -322,6 +322,15 @@ about its own axis as the base turns, so a tool pointing straight down keeps its
 heading. Tilting with the D-pad moves the shoulder, elbow and wrist around the tip,
 which stays in place.
 
+Every group stops a move before any part of the arm comes within 10 mm of the
+table or folds into the arm's own base. The checks use a box around each link,
+which you can see by ticking **Collision Enabled** on RViz's RobotModel display.
+When a move stops, the diagnostics panel names the part, for example
+`At limit: forearm_link: table`. If the arm stands on a raised mount, set
+`table_height` in `waybionic_teleop/config/xbox_teleop.yaml` to the table's height
+above the bottom of the base. `collision_clearance` in the same file sets the 10 mm
+margin.
+
 The RViz camera follows the tool as the arm moves; drag to orbit and scroll to zoom
 as usual, or add `follow_camera:=false` to the launch command for a fixed view.
 
