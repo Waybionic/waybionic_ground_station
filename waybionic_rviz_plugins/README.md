@@ -173,7 +173,7 @@ ros2 run waybionic_rviz_plugins diagnostics_recorder.py \
   --duration 30 \
   --output-directory ~/diagnostics-sessions/fault-001 \
   --source-label mock \
-  --tested-commit 0a2e9e5
+  --tested-commit <commit>
 ```
 
 For a recording stopped manually, omit `--duration` and press `Ctrl+C` in the
@@ -183,7 +183,7 @@ recorder terminal after the session has run:
 ros2 run waybionic_rviz_plugins diagnostics_recorder.py \
   --output-directory ~/diagnostics-sessions/fault-ctrl-c \
   --source-label mock \
-  --tested-commit 0a2e9e5
+  --tested-commit <commit>
 ```
 
 The output directory must not already exist. A successful session contains a
@@ -206,20 +206,18 @@ recording. A recorder interrupted with `Ctrl+C` finalizes normally when the bag
 contains messages. Existing session directories are never overwritten.
 
 Inspect or replay a session in an isolated ROS domain so it cannot interfere
-with an active robot or publisher. The following commands were verified with
-the Task 5 fixture and ROS domain `71`:
+with an active robot or publisher. These commands use ROS domain `71` and a
+generic session path:
 
 ```bash
-ROS_DOMAIN_ID=71 ros2 bag info ~/diagnostics-sessions/task5-imu-stall/bag
-ROS_DOMAIN_ID=71 ros2 bag play ~/diagnostics-sessions/task5-imu-stall/bag
+ROS_DOMAIN_ID=71 ros2 bag info ~/diagnostics-sessions/fault-001/bag
+ROS_DOMAIN_ID=71 ros2 bag play ~/diagnostics-sessions/fault-001/bag
 ROS_DOMAIN_ID=71 ros2 topic echo /diagnostics
 ```
 
-Run the replay subscriber before `ros2 bag play`. A ROS subscriber received all
-17 Task 5 messages, including healthy IMU statuses before and after the stored
-gap. The preserved `DiagnosticArray.header.stamp` values can be historical, so
-a live consumer may calculate them as stale even when the stored diagnostic
-level is `OK`.
+Run the replay subscriber before `ros2 bag play`. The preserved
+`DiagnosticArray.header.stamp` values can be historical, so a live consumer
+may calculate them as stale even when the stored diagnostic level is `OK`.
 
 Label replayed data as `recorded/mock` when sharing it. Replay does not require
 the original diagnostics publisher to be running. Generated bag directories
@@ -245,14 +243,8 @@ Switching between mock and live replaces the active source while a ROS callback 
 
 ## Platform Notes
 
-- Recorder and MCAP validation was performed on Ubuntu 24.04 under WSL2 with
-  ROS 2 Jazzy.
-- The workspace was rebuilt before final validation. The missing `python3-can`
-  dependency was installed through rosdep using the apt package provider.
-- Final full-workspace validation passed: 237 tests, 0 errors, 0 failures, and
-  0 skipped.
-- macOS/RoboStack, native Windows, and other hosts are untested for recorder
-  behavior and are not claimed as supported by this validation.
+Validated on Ubuntu 24.04 under WSL2 with ROS 2 Jazzy. macOS/RoboStack and
+native Windows are untested.
 
 ## Related Docs
 
