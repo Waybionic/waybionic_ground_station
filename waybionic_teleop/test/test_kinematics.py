@@ -138,6 +138,21 @@ def test_a_sideways_cut_moves_all_five_joints_and_keeps_the_blade_heading(arm):
         assert [row[0] for row in urdf_pose(joints)[1]] == pytest.approx(heading, abs=1e-9)
 
 
+def spin(before, after):
+    """Return the turn about the tool's own axis between two nearby poses."""
+    first, second = urdf_pose(before)[1], urdf_pose(after)[1]
+    relative = multiply([list(row) for row in zip(*first)], second)
+    return (relative[1][0] - relative[0][1]) / 2.0
+
+
+@pytest.mark.parametrize('pitch', [math.pi / 2, 2 * math.pi / 3])
+def test_a_sideways_cut_never_spins_a_tilted_tool_about_its_axis(arm, pitch):
+    start = {**DOWN, 'joint_4': pitch - DOWN['joint_2'] - DOWN['joint_3'], 'joint_5': 0.4}
+    path = cut(arm, (0.0, 0.02, 0.0), 2.0, joints=start)
+    assert abs(path[-1]['joint_1'] - start['joint_1']) > 0.05
+    assert abs(sum(spin(a, b) for a, b in zip(path, path[1:]))) < 1e-9
+
+
 def test_tilting_pivots_the_tool_about_a_fixed_tip(arm):
     path = cut(arm, (0.0, 0.0, 0.0), 1.0, pitch_rate=-0.2)
     start, pitch = arm.forward(path[0])

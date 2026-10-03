@@ -116,6 +116,7 @@ class ArmTeleop:
         self.velocities = dict.fromkeys(self.limits, 0.0)
         self.linear = (0.0, 0.0, 0.0)
         self.tilt = 0.0
+        self.roll = 0.0
         self.held = set()
         self.blocked = []
         self.note = 'Press Start (Xbox Menu button) to enable'
@@ -146,7 +147,7 @@ class ArmTeleop:
             self.enable(measured, axes)
         if 'group' in pressed:
             self.group = (self.group + 1) % len(self.groups)
-            self.linear, self.tilt = (0.0, 0.0, 0.0), 0.0
+            self.stop_cartesian()
         if 'faster' in pressed:
             self.level = min(self.level + 1, len(self.config.speed_levels) - 1)
         if 'slower' in pressed:
@@ -163,30 +164,36 @@ class ArmTeleop:
             return
         config = self.config
         sticks = {axis for group in config.groups for axis in group.axes}
+        buttons = {config.buttons[action] for action in ('home', 'tilt_up', 'tilt_down')}
         if (any(self.stick(axes, axis) for axis in sticks)
                 or any(self.trigger(axes, axis) > config.deadzone
-                       for axis in (config.tool_close_axis, config.tool_open_axis))):
+                       for axis in (config.tool_close_axis, config.tool_open_axis))
+                or buttons & self.held):
             # A stuck or held input must never start moving the arm the moment it is enabled.
-            self.note = 'Center the sticks and release the triggers, then press Start'
+            self.note = 'Center the sticks and release the triggers and buttons, then press Start'
             self.warning = True
             return
         # Start from the measured pose so enabling never makes the arm jump.
         self.targets = {joint: measured[joint] for joint in self.limits}
         self.velocities = dict.fromkeys(self.limits, 0.0)
-        self.linear, self.tilt = (0.0, 0.0, 0.0), 0.0
+        self.stop_cartesian()
         self.enabled, self.note, self.warning = True, '', False
 
     def disable(self, measured, note, warning=False):
         self.enabled, self.note, self.warning = False, note, warning
         self.velocities = dict.fromkeys(self.limits, 0.0)
-        self.linear, self.tilt = (0.0, 0.0, 0.0), 0.0
+        self.stop_cartesian()
         self.targets.update({joint: measured[joint] for joint in self.limits if joint in measured})
+
+    def stop_cartesian(self):
+        self.linear, self.tilt, self.roll = (0.0, 0.0, 0.0), 0.0, 0.0
 
     def move(self, axes, homing, dt):
         config = self.config
         desired = dict.fromkeys(self.limits, 0.0)
         self.blocked = []
         if homing:
+            self.stop_cartesian()
             for joint, (lower, upper) in self.limits.items():
                 if joint != config.tool_joint:
                     error = clamp(0.0, lower, upper) - self.targets[joint]
@@ -237,10 +244,12 @@ class ArmTeleop:
             (config.buttons['tilt_down'] in self.held) - (config.buttons['tilt_up'] in self.held))
         step = config.max_accel * dt
         tilt = self.tilt + clamp(tilt - self.tilt, -step, step)
+        roll = self.roll + clamp(roll * self.speed - self.roll, -step, step)
         before = {joint: self.targets[joint] for joint in self.kinematics.joints}
         after, fraction, self.blocked = self.kinematics.jog(
-            before, velocity, tilt, roll * self.speed, dt, self.limits, config.max_speed)
-        self.linear, self.tilt = tuple(value * fraction for value in velocity), tilt * fraction
+            before, velocity, tilt, roll, dt, self.limits, config.max_speed)
+        self.linear = tuple(value * fraction for value in velocity)
+        self.tilt, self.roll = tilt * fraction, roll * fraction
         for joint in self.kinematics.joints:
             self.velocities[joint] = (after[joint] - before[joint]) / dt
             self.targets[joint] = after[joint]

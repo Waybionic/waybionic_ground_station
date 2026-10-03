@@ -61,6 +61,29 @@ def test_a_drive_that_fell_behind_is_sped_up(drives):
     assert behind[1:] == on_time[1:]
 
 
+def test_the_setpoint_ahead_stops_at_a_joint_limit(drives):
+    mapping = arm_map(drives, 30.0)
+    upper = LIMITS['joint_2'][1]
+    pose = {**DOWN, 'joint_2': upper - 0.001}
+    moves = mapping.synchronized(pose, {'joint_2': 0.5}, mapping.to_counts(pose),
+                                 1.0 / drives['rate_hz'], drives['max_rpm'], LIMITS)
+    assert [axis for axis, rpm in moves] == mapping.to_counts({**pose, 'joint_2': upper})
+
+
+def test_a_saturated_drive_slows_every_drive_by_the_same_factor(drives):
+    mapping = arm_map(drives, 30.0)
+    counts = mapping.to_counts(DOWN)
+    velocities = {'joint_1': 2.0, 'joint_2': 0.5}
+    period, max_rpm = 1.0 / drives['rate_hz'], drives['max_rpm']
+    free = mapping.synchronized(DOWN, velocities, counts, period, 100 * max_rpm)
+    capped = mapping.synchronized(DOWN, velocities, counts, period, max_rpm)
+    fastest = max(rpm for axis, rpm in free)
+    assert fastest > max_rpm and max(rpm for axis, rpm in capped) == max_rpm
+    assert [axis for axis, rpm in capped] == [axis for axis, rpm in free]
+    assert [rpm for axis, rpm in capped] == pytest.approx(
+        [max(1.0, rpm * max_rpm / fastest) for axis, rpm in free], abs=1.0)
+
+
 def cut(drives, teleop_params, ratio, level, seconds):
     """Hold LB and push left for a sideways cut; return the tip's worst distance from the line."""
     mapping = arm_map(drives, ratio)

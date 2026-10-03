@@ -36,6 +36,27 @@ def nearest_within(angle, reference, bounds):
     return min(options, key=lambda value: abs(value - reference)) if options else None
 
 
+def joint_limits(urdf, joints, required=True):
+    """Return {joint: (lower, upper)} for the named joints of a URDF string."""
+    try:
+        elements = ET.fromstring(urdf).findall('joint')
+    except ET.ParseError as error:
+        raise ValueError(f'robot_description is not valid XML: {error}') from None
+    limits = {}
+    for element in elements:
+        name, limit = element.get('name'), element.find('limit')
+        if name not in joints:
+            continue
+        if element.get('type') == 'continuous':
+            limits[name] = (-math.inf, math.inf)
+        elif limit is not None and element.get('type') in ('revolute', 'prismatic'):
+            limits[name] = (float(limit.get('lower', 0.0)), float(limit.get('upper', 0.0)))
+    missing = [joint for joint in joints if joint not in limits]
+    if missing and required:
+        raise ValueError('robot_description has no movable joint ' + ', '.join(missing))
+    return limits
+
+
 class ArmKinematics:
     """Tool-tip position and pitch from joint angles, and joint angles from a tip pose."""
 
@@ -124,7 +145,8 @@ class ArmKinematics:
 
         pitch_rate tilts the tool about its tip. The whole step shrinks, never one joint, so
         the tip stays on the line when a joint would pass max_rate or a limit. Roll turns
-        against the yaw so the tool keeps its heading.
+        against the yaw, so the tool doesn't spin about its own axis as the base turns; with
+        the tool pointing straight down, that keeps a blade's heading.
         """
         start, pitch = self.forward(joints)
         yaw, roll = self.joints[0], self.joints[4]

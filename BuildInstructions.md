@@ -316,9 +316,11 @@ diagnostics panel shows the teleop state, each joint, each drive's last CAN fram
 and the simulated bus load.
 
 The Cartesian group moves the tool tip along straight lines in the base frame and
-keeps the tool's tilt and heading: every joint moves together, and the tip stops
-at the edge of the workspace instead of leaving the line. Tilting with the D-pad
-moves the shoulder, elbow and wrist around the tip, which stays in place.
+keeps the tool's tilt: every joint moves together, and the tip stops at the edge
+of the workspace instead of leaving the line. The roll also stops the tool spinning
+about its own axis as the base turns, so a tool pointing straight down keeps its
+heading. Tilting with the D-pad moves the shoulder, elbow and wrist around the tip,
+which stays in place.
 
 The RViz camera follows the tool as the arm moves; drag to orbit and scroll to zoom
 as usual, or add `follow_camera:=false` to the launch command for a fixed view.

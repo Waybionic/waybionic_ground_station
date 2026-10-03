@@ -8,7 +8,6 @@ the logic lives in :mod:`waybionic_teleop.teleop`. The node also reports its sta
 
 import math
 import time
-import xml.etree.ElementTree as ET
 
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 import rclpy
@@ -19,28 +18,11 @@ from sensor_msgs.msg import JointState, Joy
 from std_msgs.msg import String
 from visualization_msgs.msg import Marker, MarkerArray
 
-from waybionic_teleop.kinematics import ArmKinematics
+from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
 JAW_SIZE = (0.006, 0.014, 0.03)
 JAW_OPEN_GAP = 0.024
-
-
-def joint_limits(urdf, joints):
-    """Return {joint: (lower, upper)} for the named joints of a URDF string."""
-    limits = {}
-    for element in ET.fromstring(urdf).findall('joint'):
-        name, limit = element.get('name'), element.find('limit')
-        if name not in joints:
-            continue
-        if element.get('type') == 'continuous':
-            limits[name] = (-math.inf, math.inf)
-        elif limit is not None and element.get('type') in ('revolute', 'prismatic'):
-            limits[name] = (float(limit.get('lower', 0.0)), float(limit.get('upper', 0.0)))
-    missing = [joint for joint in joints if joint not in limits]
-    if missing:
-        raise ValueError('robot_description has no movable joint ' + ', '.join(missing))
-    return limits
 
 
 def status(name, level, value, unit, message):
@@ -82,7 +64,7 @@ class XboxTeleop(Node):
         joints = {joint for group in self.config.groups for joint in group.joints}
         try:
             limits = joint_limits(message.data, joints)
-        except (ET.ParseError, ValueError) as error:
+        except ValueError as error:
             self.teleop, self.problem = None, str(error)
             self.get_logger().error(f'Teleop disabled: {error}')
             return

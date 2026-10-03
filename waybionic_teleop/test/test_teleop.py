@@ -77,6 +77,15 @@ def test_enable_refuses_held_or_stuck_inputs(teleop, axes):
     assert not teleop.enabled and teleop.warning and 'Center' in teleop.note
 
 
+@pytest.mark.parametrize('button', ['dpad_left', 'dpad_right', 'a'])
+def test_enable_refuses_held_tilt_and_home_buttons(params, arm, button):
+    teleop = ArmTeleop(config_from_parameters(params), LIMITS, arm)
+    press(teleop, 'y', DOWN)
+    press(teleop, 'y', DOWN)
+    teleop.update(*sample('start', button), DOWN, DT)
+    assert not teleop.enabled and teleop.warning and 'release' in teleop.note
+
+
 def test_base_group_moves_yaw_shoulder_and_elbow(teleop):
     press(teleop, 'start')
     run(teleop, 1.0, left_x=1.0, left_y=-1.0, right_y=0.5)
@@ -173,6 +182,27 @@ def test_the_dpad_tilts_the_tool_about_its_tip(arm, cartesian):
     # 15 deg/s at the initial speed level, less the short ramp.
     assert arm.forward(cartesian.targets)[1] - pitch == pytest.approx(-math.radians(7.5),
                                                                       abs=math.radians(0.3))
+
+
+def test_releasing_a_after_homing_does_not_resume_the_last_move(arm, cartesian):
+    for _ in range(round(0.5 / DT)):
+        cartesian.update(*sample('dpad_right', left_x=1.0, right_x=1.0), DOWN, DT)
+    for _ in range(3):
+        cartesian.update(*sample('a'), DOWN, DT)
+    held = dict(cartesian.targets)
+    cartesian.update(*sample(), DOWN, DT)
+    assert cartesian.targets == pytest.approx(held, abs=1e-12)
+
+
+def test_cartesian_roll_follows_the_acceleration_ramp(params, cartesian):
+    step = math.radians(params['max_accel_deg_s2']) * DT
+    rates = []
+    for _ in range(3):
+        cartesian.update(*sample(right_x=1.0), DOWN, DT)
+        rates.append(cartesian.roll)
+    cartesian.update(*sample(), DOWN, DT)
+    assert rates == pytest.approx([step, 2 * step, 3 * step])
+    assert cartesian.roll == pytest.approx(2 * step)
 
 
 def test_without_arm_kinematics_the_cartesian_group_is_skipped(teleop):

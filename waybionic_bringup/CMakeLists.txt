@@ -22,9 +22,9 @@ if(BUILD_TESTING)
   set(isolated RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py")
   add_launch_test(test/test_ground_station_launch.py ${isolated})
   add_launch_test(test/test_arm_model_launch.py ${isolated})
+  add_launch_test(test/test_cartesian_launch.py ${isolated})
   add_launch_test(test/test_joint_demo_launch.py ${isolated})
   add_launch_test(test/test_teleop_launch.py ${isolated})
-  add_launch_test(test/test_cartesian_launch.py ${isolated})
 endif()
 
 install(PROGRAMS scripts/joint_demo.py scripts/camera_follower.py
