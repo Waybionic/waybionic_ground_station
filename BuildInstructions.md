@@ -293,7 +293,8 @@ Press **Ctrl+C** in each window to stop.
 
 **PS5 DualSense on Windows:** pair the controller in Windows Bluetooth settings or
 connect it by USB, then use the same `wslg-teleop` command above. In the second
-PowerShell window, install Pygame once and start the SDL bridge:
+PowerShell window, use Python 3.13 or older, install Pygame once, and start the SDL
+bridge:
 
 ```powershell
 python -m pip install pygame==2.6.1
