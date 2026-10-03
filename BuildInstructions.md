@@ -1,8 +1,8 @@
 # Ground Station Setup, Build, and Launch
 
-The ground station currently uses a placeholder robot with a base box and
-moveable cylinder arm. The primary development target is **Ubuntu 24.04 (Noble)
-with ROS 2 Jazzy**.
+The ground station shows the five-joint WayBionic arm, exported from the
+mechanical team's SolidWorks assembly. The primary development target is
+**Ubuntu 24.04 (Noble) with ROS 2 Jazzy**.
 
 Use **Docker Compose for development and headless build/test checks**. ROS and its build
 tools live inside the container; you do not need a host ROS installation for
@@ -242,10 +242,16 @@ a terminal with an outdated `PATH`:
 & "$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin\docker.exe" compose run --rm --build wslg
 ```
 
-RViz and the Joint State Publisher GUI open as separate windows. Move the slider
-to move the placeholder arm, and use the diagnostics panel's mock controls to
-try normal and fault states. This demo uses simulated data, not a physical arm.
-Press **Ctrl+C** in PowerShell to stop it.
+RViz and the Joint State Publisher GUI open as separate windows. Move the
+`joint_1` to `joint_5` sliders to move the arm, and use the diagnostics panel's
+mock controls to try normal and fault states. This demo uses simulated data, not
+a physical arm. Press **Ctrl+C** in PowerShell to stop it.
+
+To sweep each joint in turn instead, put the launch command after `wslg`:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin\docker.exe" compose run --rm --build wslg ros2 launch waybionic_bringup ground_station.launch.py demo_mode:=true
+```
 
 The display socket path is specific to Docker Desktop's WSL2 backend. RViz renders on
 the Windows GPU through WSL's D3D12 driver, using the read-only `/dev/dxg` device and
@@ -434,7 +440,8 @@ ros2 launch waybionic_bringup ground_station.launch.py
 ```
 - **RViz** and **Joint State Publisher GUI** (separate small window) will pop up after the last command
 - RViz opens pre-configured with `base_link` fixed frame, `RobotModel`, and `TF` displays already loaded
-- Move the slider in the Joint State Publisher GUI (small window) to move the arm
+- Move the `joint_1` to `joint_5` sliders in the Joint State Publisher GUI (small window) to move the arm: base yaw, shoulder, elbow, wrist pitch, and wrist roll
+- Joint demo: `ros2 launch waybionic_bringup ground_station.launch.py demo_mode:=true` sweeps each joint in turn (simulated, no hardware) and shows a pass/fail row per joint in the diagnostics panel; `demo_speed:=60` changes the speed in degrees per second
 
 For mock and live diagnostics checks, continue with the
 [diagnostics guide](waybionic_rviz_plugins/README.md). For team access, branches,
