@@ -90,7 +90,8 @@ build downloads ROS and Qt dependencies; later builds can reuse cached layers.
 Rebuild after source changes because this image contains a snapshot of the source.
 
 [CI](.github/workflows/ros2_build_test.yml) runs this Compose test build on native
-x86-64 and ARM64 Linux runners. A passing container build does not verify RViz
+x86-64 and ARM64 Linux runners for every pull request, including one stacked on
+another pull request's branch. A passing container build does not verify RViz
 windows, camera access, USB devices, GPU acceleration, or networking with a robot.
 
 #### Headless Demo
@@ -161,13 +162,22 @@ frozen dependency lock. Keep the built image when reproducing a problem; record
 its identifier with:
 
 ```console
-docker image inspect waybionic-ground-station:jazzy --format '{{.Id}}'
+docker image inspect ghcr.io/waybionic/waybionic_ground_station:jazzy --format '{{.Id}}'
 ```
 
-CI currently builds and tests images; it does not publish a shared development
-image. Sharing an immutable, verified project image is a follow-up once the
-container build has been validated. Base-image updates must pass both CI
-architectures before adoption.
+After each merge to main, CI publishes the tested image for x86-64 and ARM64 as
+`ghcr.io/waybionic/waybionic_ground_station:jazzy`, also tagged with the commit's
+short hash. Local builds reuse its layers, so a first build skips most of the
+dependency install. To run main without building, pull the image and start the
+service without `--build`:
+
+```console
+docker compose pull demo
+docker compose up demo
+```
+
+Build your branch (`docker compose up --build demo`) to test your own changes.
+Base-image updates must pass both CI architectures before adoption.
 
 The default container configuration is **headless**. For RViz, use the Linux GUI or
 Windows WSLg demo below, or a native path. Do not add privileged containers or broad
