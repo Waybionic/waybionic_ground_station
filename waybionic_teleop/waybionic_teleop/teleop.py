@@ -232,9 +232,12 @@ class ArmTeleop:
         """Undo this step's arm motion if it would take a link into the table or the base."""
         if self.collision is None:
             return
-        hits = self.collision.hits(self.targets)
-        # A pose that already collides may still move, so the arm can be backed out.
-        if not hits or self.collision.hits(before):
+        hits, depth = self.collision.check(self.targets)
+        if not hits:
+            return
+        # Backing out of a collision is allowed; going deeper or into something new is not.
+        was, was_depth = self.collision.check(before)
+        if was and set(hits) <= set(was) and depth <= was_depth + 1e-9:
             return
         for joint, position in before.items():
             if joint != self.config.tool_joint:

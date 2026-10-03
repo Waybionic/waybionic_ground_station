@@ -59,6 +59,30 @@ def test_table_height_and_clearance_are_configurable():
 def test_a_urdf_without_collision_boxes_is_refused():
     with pytest.raises(ValueError, match='no collision box'):
         ArmCollision.from_urdf(URDF.replace('<collision>', '<!--').replace('</collision>', '-->'))
+    # Every link the checks rely on needs its box, including the upper arm.
+    upper_arm = URDF.index('<link name="upper_arm_link">')
+    start = URDF.index('<collision>', upper_arm)
+    end = URDF.index('</collision>', start) + len('</collision>')
+    with pytest.raises(ValueError, match='upper_arm_link'):
+        ArmCollision.from_urdf(URDF[:start] + URDF[end:])
+
+
+def test_teleop_backs_out_of_a_collision_but_never_goes_deeper(parameters, check):
+    teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
+                       LIMITS, ArmKinematics.from_urdf(URDF), check)
+    # The forearm already reaches into the table.
+    start = pose(90, 75, 0)
+    assert 'forearm_link: table' in check.hits(start)
+    for button in ('start', 'y'):
+        teleop.update(*sample(button), start, DT)
+        teleop.update(*sample(), start, DT)
+    for _ in range(round(0.5 / DT)):
+        teleop.update(*sample(left_y=1.0), dict(teleop.targets), DT)
+    assert teleop.targets['joint_3'] == pytest.approx(start['joint_3'])
+    assert 'forearm_link: table' in teleop.blocked
+    for _ in range(round(0.5 / DT)):
+        teleop.update(*sample(left_y=-1.0), dict(teleop.targets), DT)
+    assert teleop.targets['joint_3'] < start['joint_3'] - 0.1
 
 
 def test_teleop_stops_before_the_forearm_reaches_the_table(parameters, check):

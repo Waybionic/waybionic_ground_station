@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ET
 BODY = ('base_link', 'shoulder_link')
 FOLDING = ('forearm_link', 'wrist_pitch_link', 'wrist_left_gear_link', 'wrist_right_gear_link',
            'wrist_roll_link')
+REQUIRED = BODY + ('upper_arm_link',) + FOLDING
 
 
 def _vector(element, name, default=(0.0, 0.0, 0.0)):
@@ -75,7 +76,7 @@ class ArmCollision:
                 boxes.setdefault(link.get('name'), []).append((
                     _vector(origin, 'xyz'), _rpy(*_vector(origin, 'rpy')),
                     tuple(size / 2.0 for size in _vector(box, 'size'))))
-        missing = [name for name in BODY + FOLDING if name not in boxes]
+        missing = [name for name in REQUIRED if name not in boxes]
         if missing:
             raise ValueError('robot_description has no collision box for ' + ', '.join(missing))
         joints, children = {}, set()
@@ -130,31 +131,38 @@ class ArmCollision:
 
     def hits(self, positions):
         """Return what would collide at these joint positions, such as 'forearm_link: table'."""
+        return self.check(positions)[0]
+
+    def check(self, positions):
+        """Return (hits, depth): the collisions, and how far into them the arm reaches in m."""
         poses = self.poses(positions)
-        found = []
+        found, depth = [], 0.0
         for link in self.boxes:
             if link in BODY:
                 continue
-            for center, axes, half in self.world_boxes(poses, link):
-                lowest = center[2] - sum(h * abs(axis[2]) for h, axis in zip(half, axes))
-                if lowest < self.table_z + self.clearance:
-                    found.append(f'{link}: table')
-                    break
+            lowest = min(center[2] - sum(h * abs(axis[2]) for h, axis in zip(half, axes))
+                         for center, axes, half in self.world_boxes(poses, link))
+            if lowest < self.table_z + self.clearance:
+                found.append(f'{link}: table')
+                depth += self.table_z + self.clearance - lowest
         for link in FOLDING:
             for body in BODY:
-                if any(_overlap(box, obstacle, self.clearance)
-                       for box in self.world_boxes(poses, link)
-                       for obstacle in self.world_boxes(poses, body)):
+                overlaps = [_overlap(box, obstacle, self.clearance)
+                            for box in self.world_boxes(poses, link)
+                            for obstacle in self.world_boxes(poses, body)]
+                if any(overlap > 0.0 for overlap in overlaps):
                     found.append(f'{link}: {body}')
-        return found
+                    depth += max(overlaps)
+        return found, depth
 
 
 def _overlap(a, b, margin):
-    """Return True if two oriented boxes come within margin of each other (separating axes)."""
+    """Return how far two oriented boxes overlap within margin (separating axes), or 0."""
     (center_a, axes_a, half_a), (center_b, axes_b, half_b) = a, b
     gap = tuple(cb - ca for ca, cb in zip(center_a, center_b))
     candidates = list(axes_a) + list(axes_b) + [
         _cross(u, v) for u in axes_a for v in axes_b]
+    overlap = math.inf
     for axis in candidates:
         length = math.sqrt(_dot(axis, axis))
         if length < 1e-9:
@@ -162,6 +170,7 @@ def _overlap(a, b, margin):
         axis = tuple(value / length for value in axis)
         reach = (sum(h * abs(_dot(u, axis)) for h, u in zip(half_a, axes_a))
                  + sum(h * abs(_dot(u, axis)) for h, u in zip(half_b, axes_b)) + margin)
-        if abs(_dot(gap, axis)) > reach:
-            return False
-    return True
+        overlap = min(overlap, reach - abs(_dot(gap, axis)))
+        if overlap <= 0.0:
+            return 0.0
+    return overlap
