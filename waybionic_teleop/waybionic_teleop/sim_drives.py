@@ -108,17 +108,19 @@ class SimulatedBus:
         self.errors = 0
 
     def send(self, can_id, data):
+        """Deliver a frame; return False if no drive could take it."""
         self._count(data)
         drive = self.drives.get(can_id)
         if drive is None:
             self.errors += 1
-            return
+            return False
         try:
             replies = drive.receive(data)
         except ValueError:
             self.errors += 1
-            return
+            return False
         self._queue(can_id, replies)
+        return True
 
     def receive(self):
         """Return the next (can_id, data) reply, or None when the buffer is empty."""

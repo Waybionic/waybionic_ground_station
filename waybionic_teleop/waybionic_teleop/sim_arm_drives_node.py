@@ -31,6 +31,8 @@ from waybionic_teleop.sim_drives import SimulatedBus, SimulatedServo
 REPLY_TIMEOUT_S = 0.5
 # Zeroing waits for the joint commands to stop, so teleop must be disabled first.
 QUIET_BEFORE_ZERO_S = 1.0
+# Every drive must confirm these before it moves, so none runs without its heartbeat stop.
+SETUP = (mks_can.SET_MODE, mks_can.SET_RESPONSE, mks_can.ENABLE, mks_can.SET_HEARTBEAT)
 
 
 def status(name, level, value, unit, message, **extra):
@@ -77,6 +79,8 @@ class SimArmDrives(Node):
         self.max_unanswered = max(3, round(REPLY_TIMEOUT_S / self.period))
         self.lost = [False] * len(drives)
         self.zeroed = [False] * len(drives)
+        self.unconfirmed = [set(SETUP) for _ in drives]
+        self.setup_time = [None] * len(drives)
         self.state = ['starting'] * len(drives)
         self.sent = [None] * len(drives)
         self.last_command = [''] * len(drives)
@@ -120,6 +124,8 @@ class SimArmDrives(Node):
         # Bus FOC mode, replies and "move complete" reports on, shaft enabled, and a heartbeat
         # stop if the host goes quiet.
         can_id = self.map.drives[index].can_id
+        self.unconfirmed[index] = set(SETUP)
+        self.setup_time[index] = time.monotonic()
         for data in (mks_can.set_mode(can_id),
                      mks_can.set_response(can_id, respond=True, active=True),
                      mks_can.enable(can_id),
@@ -194,7 +200,7 @@ class SimArmDrives(Node):
         if not all(self.zeroed) or None in self.counts:
             return
         positions = self.map.to_positions(self.counts)
-        if self.commanded is None:
+        if self.commanded is None and not any(self.unconfirmed):
             # Hold wherever the drives already are until the first command arrives.
             self.commanded = dict(positions)
         message = JointState(name=list(positions), position=list(positions.values()))
@@ -202,7 +208,11 @@ class SimArmDrives(Node):
         self.state_publisher.publish(message)
 
     def check_replies(self):
+        now = time.monotonic()
         for index, drive in enumerate(self.map.drives):
+            if self.unconfirmed[index] and now - self.setup_time[index] > REPLY_TIMEOUT_S:
+                # A lost setup frame or reply: ask again rather than move without it.
+                self.set_up(index)
             if (self.heard[index] is None or self.lost[index]
                     or self.unanswered[index] <= self.max_unanswered):
                 continue
@@ -221,9 +231,10 @@ class SimArmDrives(Node):
             except ValueError as error:
                 self.get_logger().warning(f'{drive.name}: {error}', throttle_duration_sec=2.0)
                 continue
-            self.bus.send(drive.can_id, data)
-            self.sent[index] = (axis, speed)
-            self.last_command[index] = mks_can.hex_frame(drive.can_id, data)
+            # A frame the interface refused is sent again on the next tick.
+            if self.bus.send(drive.can_id, data):
+                self.sent[index] = (axis, speed)
+                self.last_command[index] = mks_can.hex_frame(drive.can_id, data)
 
     def drain(self, now):
         while (reply := self.bus.receive()) is not None:
@@ -255,8 +266,10 @@ class SimArmDrives(Node):
                 self.zeroed[index], self.counts[index] = True, None
             elif arguments[:1] == b'\x00':
                 self.state[index] = f'setup {code:02X}h failed'
-            elif self.state[index] == 'starting':
-                self.state[index] = 'ready'
+            elif code in SETUP:
+                self.unconfirmed[index].discard(code)
+                if not self.unconfirmed[index] and self.state[index] == 'starting':
+                    self.state[index] = 'ready'
         except ValueError as error:
             self.bus_errors += 1
             self.get_logger().warning(str(error), throttle_duration_sec=2.0)

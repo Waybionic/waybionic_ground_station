@@ -22,15 +22,17 @@ class CanBus:
         self.errors = 0
 
     def send(self, can_id, data):
+        """Transmit a frame; return False if the interface refused it."""
         self._count(data)
         message = can.Message(arbitration_id=can_id, data=data, is_extended_id=False)
         try:
             self.bus.send(message)
         except can.CanError:
             self.errors += 1
-            return
+            return False
         if self.echoes is not None:
             self.echoes.append((can_id, bytes(data)))
+        return True
 
     def receive(self, timeout=0.0):
         """Return the next (can_id, data) frame from another node, or None."""

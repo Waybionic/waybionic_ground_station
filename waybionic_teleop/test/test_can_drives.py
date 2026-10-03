@@ -171,3 +171,42 @@ def test_stale_commands_hold_the_last_target(make_node):
     node.on_command(JointState(name=['joint_1'], position=[0.0], velocity=[1.0]))
     assert node.velocities == {'joint_1': 1.0}
     assert spin_until(executor, lambda: not node.velocities)
+
+
+def test_nothing_moves_until_every_drive_confirms_its_heartbeat(make_node, monkeypatch):
+    node, executor = make_node(zero_on_start=False)
+    assert spin_until(executor, lambda: all(state == 'ready' for state in node.state))
+    shoulder = node.bus.drives[2]
+    answer = shoulder.receive
+    # The shoulder misses its first heartbeat setting, as if the frame were lost.
+    missed = []
+
+    def lossy(data):
+        if data[0] == mks_can.SET_HEARTBEAT and not missed:
+            missed.append(data)
+            return []
+        return answer(data)
+    monkeypatch.setattr(shoulder, 'receive', lossy)
+    node.set_up(1)
+    assert zero(node).success
+    spin_for(executor, 0.2)
+    assert node.unconfirmed[1] == {mks_can.SET_HEARTBEAT} and node.commanded is None
+    # The setup is sent again, and the arm can then move.
+    assert spin_until(executor, lambda: node.commanded is not None)
+    assert shoulder.heartbeat_ms == node.heartbeat_ms
+
+
+def test_a_target_the_interface_refused_is_sent_again(make_node, monkeypatch):
+    node, executor = make_node()
+    assert spin_until(executor, lambda: node.commanded is not None)
+    send, refused = node.bus.send, []
+
+    def flaky(can_id, data):
+        if data[0] == mks_can.ABSOLUTE_AXIS and data[1:3] != b'\x00\x00' and not refused:
+            refused.append(can_id)
+            return False
+        return send(can_id, data)
+    monkeypatch.setattr(node.bus, 'send', flaky)
+    command(node, joint_1=0.3)
+    assert spin_until(executor, lambda: abs(positions(node)['joint_1'] - 0.3) < 1e-3)
+    assert refused == [1]
