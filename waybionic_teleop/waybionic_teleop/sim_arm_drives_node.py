@@ -1,9 +1,14 @@
 """
-Run the arm's joint drives in simulation: /joint_commands in, CAN frames, /joint_states out.
+Run the arm's joint drives: /joint_commands in, MKS CAN frames, /joint_states out.
 
-The node talks to the drives only through CAN frames from :mod:`waybionic_teleop.mks_can`, so
-replacing :class:`~waybionic_teleop.sim_drives.SimulatedBus` with a real CAN interface keeps
-the command, feedback and diagnostics path unchanged. Nothing here reaches hardware.
+The drives are simulated on an in-process bus unless ``interface`` names a python-can interface
+(socketcan, slcan, udp_multicast, ...) and ``channel`` the adapter, in which case the same
+frames go to real MKS SERVO drives. The command, feedback and diagnostics path is identical.
+
+The encoders count from where the drives were powered on, so nothing moves until every drive
+has been zeroed with the arm in the zero pose: at start-up in simulation, and through the
+``~/zero`` service on real drives. A drive that stops answering is treated as power-cycled:
+every drive stops and the arm must be zeroed again.
 """
 
 import math
@@ -16,6 +21,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
+from std_srvs.srv import Trigger
 
 from waybionic_teleop import mks_can
 from waybionic_teleop.drive_map import drive_map_from_parameters
@@ -23,6 +29,8 @@ from waybionic_teleop.kinematics import joint_limits
 from waybionic_teleop.sim_drives import SimulatedBus, SimulatedServo
 
 REPLY_TIMEOUT_S = 0.5
+# Zeroing waits for the joint commands to stop, so teleop must be disabled first.
+QUIET_BEFORE_ZERO_S = 1.0
 
 
 def status(name, level, value, unit, message, **extra):
@@ -32,10 +40,11 @@ def status(name, level, value, unit, message, **extra):
 
 
 class SimArmDrives(Node):
-    """Stream joint targets to simulated MKS drives and publish their encoder feedback."""
+    """Stream joint targets to MKS drives and publish their encoder feedback."""
 
-    def __init__(self):
-        super().__init__('sim_arm_drives', automatically_declare_parameters_from_overrides=True)
+    def __init__(self, **kwargs):
+        super().__init__('sim_arm_drives', automatically_declare_parameters_from_overrides=True,
+                         **kwargs)
         params = {name: self.get_parameter(name).value
                   for name in self.list_parameters([], 0).names}
         self.map = drive_map_from_parameters(params, mks_can.COUNTS_PER_REV)
@@ -43,41 +52,109 @@ class SimArmDrives(Node):
         self.max_rpm = int(params['max_rpm'])
         self.period = 1.0 / float(params['rate_hz'])
         self.bitrate = int(params['bitrate'])
+        self.heartbeat_ms = int(params['heartbeat_ms'])
+        self.command_timeout = float(params.get('command_timeout_s', 0.5))
+        self.interface = params.get('interface', 'sim')
+        channel = params.get('channel', '')
         drives = self.map.drives
         self.index = {drive.can_id: index for index, drive in enumerate(drives)}
-        self.bus = SimulatedBus([SimulatedServo(drive.can_id) for drive in drives], self.bitrate)
+        if self.interface == 'sim':
+            self.bus = SimulatedBus([SimulatedServo(drive.can_id) for drive in drives],
+                                    self.bitrate)
+            self.bus_label = 'simulated MKS bus'
+        elif not channel:
+            raise ValueError(f'the {self.interface} interface needs a channel, '
+                             'such as can0, /dev/ttyACM0 or 239.74.163.2')
+        else:
+            # python-can is only needed for a real bus.
+            from waybionic_teleop.can_bus import CanBus
+            self.bus = CanBus(self.interface, channel, self.bitrate)
+            self.bus_label = f'{self.interface} {channel}'
         self.counts = [None] * len(drives)
         self.heard = [None] * len(drives)
+        self.unanswered = [0] * len(drives)
+        # Counted in polls rather than seconds, so a host that stalls does not trip it.
+        self.max_unanswered = max(3, round(REPLY_TIMEOUT_S / self.period))
+        self.lost = [False] * len(drives)
+        self.zeroed = [False] * len(drives)
         self.state = ['starting'] * len(drives)
         self.sent = [None] * len(drives)
         self.last_command = [''] * len(drives)
         self.commanded = None
         self.velocities = {}
+        self.command_time = -math.inf
         self.limits = {}
         self.rejected = 0
         self.bus_errors = 0
-        # Same start-up sequence the real drives need: bus FOC mode, replies and "move complete"
-        # reports on, shaft enabled, and a heartbeat stop if the host goes quiet.
-        for drive in drives:
-            for data in (mks_can.set_mode(drive.can_id),
-                         mks_can.set_response(drive.can_id, respond=True, active=True),
-                         mks_can.enable(drive.can_id),
-                         mks_can.set_heartbeat(drive.can_id, int(params['heartbeat_ms']))):
-                self.bus.send(drive.can_id, data)
+        for index in range(len(drives)):
+            self.set_up(index)
+        zero_on_start = params.get('zero_on_start', self.interface == 'sim')
+        if zero_on_start:
+            self.zero()
         topic = params.get('diagnostics_topic', '/diagnostics')
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(String, 'robot_description', self.on_description, latched)
         self.create_subscription(JointState, 'joint_commands', self.on_command, 10)
+        self.create_service(Trigger, '~/zero', self.on_zero)
         self.state_publisher = self.create_publisher(JointState, 'joint_states', 10)
         self.diagnostics_publisher = self.create_publisher(DiagnosticArray, topic, 10)
         self.last_tick = time.monotonic()
         self.report_time, self.report_frames, self.report_bits = self.last_tick, 0, 0
+        self.report_errors = 0
         self.create_timer(1.0 / float(params['rate_hz']), self.tick)
         self.create_timer(0.5, self.report)
-        self.get_logger().info(
-            'Simulated drives: '
-            + ', '.join(f'{drive.name}=CAN {drive.can_id}' for drive in drives)
-            + ' (placeholder MKS SERVO map, no hardware)')
+        drive_list = ', '.join(f'{drive.name}=CAN {drive.can_id}' for drive in drives)
+        if self.interface == 'sim':
+            self.get_logger().info(
+                f'Simulated drives: {drive_list} (placeholder MKS SERVO map, no hardware)')
+        else:
+            self.get_logger().info(f'MKS drives on {self.bus_label}: {drive_list}')
+        if not zero_on_start:
+            self.get_logger().warning(f'Not zeroed. {self.zero_hint()}')
+
+    def zero_hint(self):
+        return ('Put the arm in the zero pose with teleop disabled, then run: ros2 service call '
+                f'{self.get_fully_qualified_name()}/zero std_srvs/srv/Trigger')
+
+    def set_up(self, index):
+        # Bus FOC mode, replies and "move complete" reports on, shaft enabled, and a heartbeat
+        # stop if the host goes quiet.
+        can_id = self.map.drives[index].can_id
+        for data in (mks_can.set_mode(can_id),
+                     mks_can.set_response(can_id, respond=True, active=True),
+                     mks_can.enable(can_id),
+                     mks_can.set_heartbeat(can_id, self.heartbeat_ms)):
+            self.bus.send(can_id, data)
+
+    def stop_all(self):
+        """Stop every drive where it is and drop the targets until the arm is zeroed again."""
+        for drive in self.map.drives:
+            self.bus.send(drive.can_id, mks_can.stop(drive.can_id, self.acc))
+        self.commanded, self.velocities = None, {}
+        self.sent = [None] * len(self.map.drives)
+
+    def zero(self):
+        """Make the current pose every drive's zero."""
+        self.stop_all()
+        for drive in self.map.drives:
+            self.bus.send(drive.can_id, mks_can.set_zero(drive.can_id))
+        self.zeroed = [False] * len(self.map.drives)
+
+    def on_zero(self, request, response):
+        if time.monotonic() - self.command_time < QUIET_BEFORE_ZERO_S:
+            response.message = 'Joint commands are still arriving; disable teleop (Start) first'
+            return response
+        self.zero()
+        deadline = time.monotonic() + REPLY_TIMEOUT_S
+        while not all(self.zeroed) and time.monotonic() < deadline:
+            time.sleep(0.005)
+            self.drain(time.monotonic())
+        missing = [drive.name for drive, done in zip(self.map.drives, self.zeroed) if not done]
+        response.success = not missing
+        response.message = ('Zeroed every drive' if response.success
+                            else 'No zero reply from ' + ', '.join(missing))
+        self.get_logger().info(response.message)
+        return response
 
     def on_description(self, message):
         try:
@@ -86,6 +163,7 @@ class SimArmDrives(Node):
             self.get_logger().error(f'Joint limits unavailable: {error}')
 
     def on_command(self, message):
+        self.command_time = time.monotonic()
         if self.commanded is None:
             return
         for index, joint in enumerate(message.name):
@@ -101,15 +179,19 @@ class SimArmDrives(Node):
     def tick(self):
         now = time.monotonic()
         dt, self.last_tick = min(now - self.last_tick, 0.1), now
+        if now - self.command_time > self.command_timeout:
+            # Hold the last target rather than run on along a stale velocity.
+            self.velocities = {}
+        self.check_replies()
         # Speeds follow the encoders, so the targets are refreshed every tick.
         if self.commanded is not None:
             self.send_targets()
         self.bus.step(dt)
-        for drive in self.map.drives:
+        for index, drive in enumerate(self.map.drives):
             self.bus.send(drive.can_id, mks_can.read_encoder(drive.can_id))
-        while (reply := self.bus.receive()) is not None:
-            self.on_reply(*reply, now)
-        if None in self.counts:
+            self.unanswered[index] += 1
+        self.drain(now)
+        if not all(self.zeroed) or None in self.counts:
             return
         positions = self.map.to_positions(self.counts)
         if self.commanded is None:
@@ -118,6 +200,15 @@ class SimArmDrives(Node):
         message = JointState(name=list(positions), position=list(positions.values()))
         message.header.stamp = self.get_clock().now().to_msg()
         self.state_publisher.publish(message)
+
+    def check_replies(self):
+        for index, drive in enumerate(self.map.drives):
+            if (self.heard[index] is None or self.lost[index]
+                    or self.unanswered[index] <= self.max_unanswered):
+                continue
+            self.lost[index], self.zeroed[index] = True, False
+            self.stop_all()
+            self.get_logger().error(f'{drive.name} stopped answering; every drive is stopped')
 
     def send_targets(self):
         moves = self.map.synchronized(self.commanded, self.velocities, self.counts, self.period,
@@ -134,16 +225,34 @@ class SimArmDrives(Node):
             self.sent[index] = (axis, speed)
             self.last_command[index] = mks_can.hex_frame(drive.can_id, data)
 
+    def drain(self, now):
+        while (reply := self.bus.receive()) is not None:
+            self.on_reply(*reply, now)
+
     def on_reply(self, can_id, data, now):
         index = self.index.get(can_id)
         try:
             code, arguments = mks_can.parse(can_id, data)
             if index is None:
                 raise ValueError(f'reply from unknown CAN ID {can_id}')
+        except ValueError as error:
+            self.bus_errors += 1
+            self.get_logger().warning(str(error), throttle_duration_sec=2.0)
+            return
+        if self.lost[index]:
+            # It may have been power-cycled, which loses its settings and its zero.
+            self.lost[index], self.state[index] = False, 'starting'
+            self.set_up(index)
+            self.get_logger().warning(
+                f'{self.map.drives[index].name} answers again. {self.zero_hint()}')
+        try:
             if code == mks_can.READ_ENCODER:
                 self.counts[index] = mks_can.encoder_value(arguments)
             elif code == mks_can.ABSOLUTE_AXIS and arguments:
                 self.state[index] = mks_can.RUN_STATUS.get(arguments[0], f'status {arguments[0]}')
+            elif code == mks_can.SET_ZERO and arguments[:1] == b'\x01':
+                # Later encoder replies were read after the zero.
+                self.zeroed[index], self.counts[index] = True, None
             elif arguments[:1] == b'\x00':
                 self.state[index] = f'setup {code:02X}h failed'
             elif self.state[index] == 'starting':
@@ -152,26 +261,31 @@ class SimArmDrives(Node):
             self.bus_errors += 1
             self.get_logger().warning(str(error), throttle_duration_sec=2.0)
             return
-        self.heard[index] = now
+        self.heard[index], self.unanswered[index] = now, 0
 
     def report(self):
         now = time.monotonic()
         elapsed = max(now - self.report_time, 1e-3)
         frames = (self.bus.frames - self.report_frames) / elapsed
         load = (self.bus.bits - self.report_bits) / elapsed / self.bitrate * 100.0
-        self.report_time, self.report_frames, self.report_bits = (
-            now, self.bus.frames, self.bus.bits)
         errors = self.bus_errors + self.bus.errors
-        level = (DiagnosticStatus.ERROR if errors else
+        new_errors = errors - self.report_errors
+        self.report_time, self.report_frames, self.report_bits, self.report_errors = (
+            now, self.bus.frames, self.bus.bits, errors)
+        level = (DiagnosticStatus.ERROR if new_errors else
                  DiagnosticStatus.WARN if load > 70.0 else DiagnosticStatus.OK)
         statuses = [status(
             'can.bus', level, f'{frames:.0f}', 'frames/s',
-            f'{load:.0f}% worst-case load at {self.bitrate // 1000} kbit/s (simulated MKS bus)',
+            f'{load:.0f}% worst-case load at {self.bitrate // 1000} kbit/s ({self.bus_label})',
             load_percent=f'{load:.1f}', errors=errors, rejected_commands=self.rejected)]
-        if None not in self.counts:
+        if not all(self.zeroed):
+            statuses.append(status('arm.zero', DiagnosticStatus.WARN, 'no', '',
+                                   f'Not zeroed. {self.zero_hint()}'))
+        elif None not in self.counts:
             positions = self.map.to_positions(self.counts)
+            commanded = self.commanded or {}
             for joint, position in positions.items():
-                target = math.degrees(self.commanded.get(joint, position))
+                target = math.degrees(commanded.get(joint, position))
                 statuses.append(status(f'arm.{joint}', DiagnosticStatus.OK,
                                        f'{math.degrees(position):+.1f}', 'deg',
                                        f'target {target:+.1f} deg'))
@@ -180,26 +294,38 @@ class SimArmDrives(Node):
             failed = 'failed' in self.state[index]
             turns = '' if self.counts[index] is None else (
                 f'{self.counts[index] / mks_can.COUNTS_PER_REV:+.3f}')
+            text = 'no reply' if silent else self.state[index]
+            if not silent and not self.zeroed[index]:
+                text += ', not zeroed'
+            level = (DiagnosticStatus.ERROR if silent or failed else
+                     DiagnosticStatus.OK if self.zeroed[index] else DiagnosticStatus.WARN)
             statuses.append(status(
-                f'drive.{drive.name}',
-                DiagnosticStatus.ERROR if silent or failed else DiagnosticStatus.OK, turns, 'rev',
-                f'CAN ID {drive.can_id}: ' + ('no reply' if silent else self.state[index])
+                f'drive.{drive.name}', level, turns, 'rev',
+                f'CAN ID {drive.can_id}: {text}'
                 + (f'; last {self.last_command[index]}' if self.last_command[index] else ''),
                 can_id=drive.can_id, last_command=self.last_command[index]))
         message = DiagnosticArray(status=statuses)
         message.header.stamp = self.get_clock().now().to_msg()
         self.diagnostics_publisher.publish(message)
 
+    def close(self):
+        """Stop the drives and release the bus; the drives' heartbeat would also stop them."""
+        self.stop_all()
+        self.bus.shutdown()
+
 
 def main():
     rclpy.init()
-    node = SimArmDrives()
+    node = None
     try:
+        node = SimArmDrives()
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        node.destroy_node()
+        if node is not None:
+            node.close()
+            node.destroy_node()
         rclpy.try_shutdown()
 
 

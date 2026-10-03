@@ -59,6 +59,15 @@ def test_heartbeat_stops_a_moving_motor_when_the_host_goes_quiet():
     assert (servo.heartbeat_stops, servo.rpm, servo.target) == (1, 0.0, None)
 
 
+def test_set_zero_makes_the_current_position_zero():
+    servo = ready_servo()
+    servo.receive(mks_can.absolute_axis(1, 5000, 300, 0))
+    run(servo, 0.5)
+    assert servo.receive(mks_can.set_zero(1)) == [mks_can.frame(1, mks_can.SET_ZERO, [1])]
+    _, arguments = mks_can.parse(1, servo.receive(mks_can.read_encoder(1))[0])
+    assert mks_can.encoder_value(arguments) == 0
+
+
 def test_bus_routes_replies_and_counts_bad_frames():
     bus = SimulatedBus([SimulatedServo(1), SimulatedServo(2)], 500000)
     bus.send(2, mks_can.read_encoder(2))
