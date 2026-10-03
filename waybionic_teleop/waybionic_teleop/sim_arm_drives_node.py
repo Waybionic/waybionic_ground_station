@@ -13,10 +13,13 @@ from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
+from std_msgs.msg import String
 
 from waybionic_teleop import mks_can
 from waybionic_teleop.drive_map import drive_map_from_parameters
+from waybionic_teleop.kinematics import joint_limits
 from waybionic_teleop.sim_drives import SimulatedBus, SimulatedServo
 
 REPLY_TIMEOUT_S = 0.5
@@ -38,6 +41,7 @@ class SimArmDrives(Node):
         self.map = drive_map_from_parameters(params, mks_can.COUNTS_PER_REV)
         self.acc = int(params['acc'])
         self.max_rpm = int(params['max_rpm'])
+        self.period = 1.0 / float(params['rate_hz'])
         self.bitrate = int(params['bitrate'])
         drives = self.map.drives
         self.index = {drive.can_id: index for index, drive in enumerate(drives)}
@@ -49,7 +53,7 @@ class SimArmDrives(Node):
         self.last_command = [''] * len(drives)
         self.commanded = None
         self.velocities = {}
-        self.pending = False
+        self.limits = {}
         self.rejected = 0
         self.bus_errors = 0
         # Same start-up sequence the real drives need: bus FOC mode, replies and "move complete"
@@ -61,6 +65,8 @@ class SimArmDrives(Node):
                          mks_can.set_heartbeat(drive.can_id, int(params['heartbeat_ms']))):
                 self.bus.send(drive.can_id, data)
         topic = params.get('diagnostics_topic', '/diagnostics')
+        latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.create_subscription(String, 'robot_description', self.on_description, latched)
         self.create_subscription(JointState, 'joint_commands', self.on_command, 10)
         self.state_publisher = self.create_publisher(JointState, 'joint_states', 10)
         self.diagnostics_publisher = self.create_publisher(DiagnosticArray, topic, 10)
@@ -72,6 +78,12 @@ class SimArmDrives(Node):
             'Simulated drives: '
             + ', '.join(f'{drive.name}=CAN {drive.can_id}' for drive in drives)
             + ' (placeholder MKS SERVO map, no hardware)')
+
+    def on_description(self, message):
+        try:
+            self.limits = joint_limits(message.data, self.map.joints, required=False)
+        except ValueError as error:
+            self.get_logger().error(f'Joint limits unavailable: {error}')
 
     def on_command(self, message):
         if self.commanded is None:
@@ -85,13 +97,12 @@ class SimArmDrives(Node):
                 self.rejected += 1
                 continue
             self.commanded[joint], self.velocities[joint] = position, velocity
-            self.pending = True
 
     def tick(self):
         now = time.monotonic()
         dt, self.last_tick = min(now - self.last_tick, 0.1), now
-        if self.pending:
-            self.pending = False
+        # Speeds follow the encoders, so the targets are refreshed every tick.
+        if self.commanded is not None:
             self.send_targets()
         self.bus.step(dt)
         for drive in self.map.drives:
@@ -109,11 +120,9 @@ class SimArmDrives(Node):
         self.state_publisher.publish(message)
 
     def send_targets(self):
-        counts = self.map.to_counts(self.commanded)
-        speeds = self.map.to_rpm(self.velocities)
-        for index, (drive, axis, rpm) in enumerate(zip(self.map.drives, counts, speeds)):
-            # Allow some speed margin so each streamed target is reached before the next one.
-            speed = min(self.max_rpm, math.ceil(rpm * 1.5) + 1)
+        moves = self.map.synchronized(self.commanded, self.velocities, self.counts, self.period,
+                                      self.max_rpm, self.limits)
+        for index, (drive, (axis, speed)) in enumerate(zip(self.map.drives, moves)):
             if self.sent[index] == (axis, speed):
                 continue
             try:

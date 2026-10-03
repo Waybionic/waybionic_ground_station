@@ -298,18 +298,29 @@ Press **Ctrl+C** in each window to stop.
 | --- | --- |
 | Start (Xbox Menu button, three lines) | Enable or disable; the arm starts disabled |
 | B | Stop and hold the current pose |
-| Y | Switch group: base (joints 1-3) or upper (joints 2-5) |
+| Y | Switch group: base (joints 1-3), upper (joints 2-5) or Cartesian (tool tip) |
 | Base group: left stick | Base yaw (left/right) and shoulder (up/down) |
 | Base group: right stick up/down | Elbow |
 | Upper group: left stick | Shoulder (left/right) and elbow (up/down) |
 | Upper group: right stick | Wrist roll (left/right) and wrist pitch (up/down) |
+| Cartesian group: left stick | Tool tip left/right and forward/back, in straight lines |
+| Cartesian group: right stick | Tool roll (left/right) and tool tip up/down |
+| Cartesian group: LB (hold) | Move along one axis only: the stick direction pushed furthest |
+| Cartesian group: D-pad left/right | Tilt the tool about its tip; the tip stays still |
 | RT / LT | Close / open the placeholder end effector |
-| D-pad up/down | Speed: 10, 25, 50 or 100% of 60 deg/s |
+| D-pad up/down | Speed: 10, 25, 50 or 100% of 60 deg/s, or of 50 mm/s and 30 deg/s of tilt in the Cartesian group |
 | A (hold) | Return to the zero pose |
 
 Start is refused until the sticks are centred and the triggers released. The
 diagnostics panel shows the teleop state, each joint, each drive's last CAN frame
 and the simulated bus load.
+
+The Cartesian group moves the tool tip along straight lines in the base frame and
+keeps the tool's tilt: every joint moves together, and the tip stops at the edge
+of the workspace instead of leaving the line. The roll also stops the tool spinning
+about its own axis as the base turns, so a tool pointing straight down keeps its
+heading. Tilting with the D-pad moves the shoulder, elbow and wrist around the tip,
+which stays in place.
 
 The RViz camera follows the tool as the arm moves; drag to orbit and scroll to zoom
 as usual, or add `follow_camera:=false` to the launch command for a fixed view.

@@ -77,6 +77,32 @@ class DriveMap:
         return {joint: sum(weight * output for weight, output in zip(row, outputs))
                 for joint, row in zip(self.joints, self.inverse)}
 
+    def synchronized(self, positions, velocities, counts, period, max_rpm, limits=None):
+        """
+        Return (axis, rpm) per drive so that every drive reaches its next setpoint together.
+
+        Each target is the commanded pose one period ahead along the commanded velocity, kept
+        within the joint limits, and each speed covers that drive's remaining distance, measured
+        from its encoder, in one period. If any drive would pass max_rpm, every speed is scaled
+        by the same factor, so the drives still arrive together. Drives that ran ahead or fell
+        behind are corrected on every call.
+        """
+        limits = limits or {}
+        ahead = {}
+        for joint, position in positions.items():
+            lower, upper = limits.get(joint, (-math.inf, math.inf))
+            target = position + velocities.get(joint, 0.0) * period
+            # Never aim past a limit, but leave a position that is already outside one alone.
+            ahead[joint] = min(max(target, min(lower, position)), max(upper, position))
+        axes = self.to_counts(ahead)
+        rates = [abs(axis - count) / self.counts_per_rev / period * 60.0
+                 for axis, count in zip(axes, counts)]
+        fastest = max(rates, default=0.0)
+        scale = max_rpm / fastest if fastest > max_rpm else 1.0
+        # Speed 0 means stop to the drive, so the slowest move is 1 rpm.
+        return [(axis, max(1, min(max_rpm, round(rate * scale))))
+                for axis, rate in zip(axes, rates)]
+
 
 def drive_map_from_parameters(params, counts_per_rev):
     """Build a DriveMap from flat ROS parameter names such as 'wrist_left.joints'."""

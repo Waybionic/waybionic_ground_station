@@ -8,7 +8,6 @@ the logic lives in :mod:`waybionic_teleop.teleop`. The node also reports its sta
 
 import math
 import time
-import xml.etree.ElementTree as ET
 
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 import rclpy
@@ -19,27 +18,11 @@ from sensor_msgs.msg import JointState, Joy
 from std_msgs.msg import String
 from visualization_msgs.msg import Marker, MarkerArray
 
+from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
 JAW_SIZE = (0.006, 0.014, 0.03)
 JAW_OPEN_GAP = 0.024
-
-
-def joint_limits(urdf, joints):
-    """Return {joint: (lower, upper)} for the named joints of a URDF string."""
-    limits = {}
-    for element in ET.fromstring(urdf).findall('joint'):
-        name, limit = element.get('name'), element.find('limit')
-        if name not in joints:
-            continue
-        if element.get('type') == 'continuous':
-            limits[name] = (-math.inf, math.inf)
-        elif limit is not None and element.get('type') in ('revolute', 'prismatic'):
-            limits[name] = (float(limit.get('lower', 0.0)), float(limit.get('upper', 0.0)))
-    missing = [joint for joint in joints if joint not in limits]
-    if missing:
-        raise ValueError('robot_description has no movable joint ' + ', '.join(missing))
-    return limits
 
 
 def status(name, level, value, unit, message):
@@ -50,8 +33,9 @@ def status(name, level, value, unit, message):
 class XboxTeleop(Node):
     """Turn controller input into streamed joint targets while the operator has it enabled."""
 
-    def __init__(self):
-        super().__init__('xbox_teleop', automatically_declare_parameters_from_overrides=True)
+    def __init__(self, **kwargs):
+        super().__init__('xbox_teleop', automatically_declare_parameters_from_overrides=True,
+                         **kwargs)
         params = {name: self.get_parameter(name).value
                   for name in self.list_parameters([], 0).names}
         self.config = config_from_parameters(params)
@@ -78,16 +62,26 @@ class XboxTeleop(Node):
         self.create_timer(0.5, self.report)
 
     def load(self, message):
+        if self.teleop is not None and self.teleop.enabled:
+            # The new description replaces the teleop state, so hold the arm where it is first.
+            self.teleop.disable(self.measured, 'Robot description changed')
+            self.publish_command()
+            self.get_logger().warning('Robot description changed: teleop disabled, arm held')
         joints = {joint for group in self.config.groups for joint in group.joints}
         try:
             limits = joint_limits(message.data, joints)
-        except (ET.ParseError, ValueError) as error:
+        except ValueError as error:
             self.teleop, self.problem = None, str(error)
             self.get_logger().error(f'Teleop disabled: {error}')
             return
-        self.teleop, self.problem = ArmTeleop(self.config, limits), ''
+        try:
+            kinematics = ArmKinematics.from_urdf(message.data, self.base_frame, self.tool_frame)
+        except ValueError as error:
+            kinematics = None
+            self.get_logger().warning(f'Cartesian group unavailable: {error}')
+        self.teleop, self.problem = ArmTeleop(self.config, limits, kinematics), ''
         self.get_logger().info('Xbox teleop ready (press Start to enable): ' + '; '.join(
-            f'{group.name}: {group.describe()}' for group in self.config.groups))
+            f'{group.name}: {group.describe()}' for group in self.teleop.groups))
 
     def on_joy(self, message):
         self.joy, self.joy_time = message, time.monotonic()
@@ -180,9 +174,13 @@ class XboxTeleop(Node):
             statuses.append(status('teleop.state', DiagnosticStatus.ERROR, 'disabled', '',
                                    self.problem))
         else:
-            note = teleop.note or ('At limit: ' + ', '.join(teleop.blocked) if teleop.blocked
-                                   else 'B stops, Y switches group, A holds to go home')
             group = teleop.active_group
+            cartesian = group.mode == 'cartesian'
+            hint = 'B stops, Y switches group, A holds to go home'
+            note = teleop.note or ('At limit: ' + ', '.join(teleop.blocked) if teleop.blocked
+                                   else ('LB moves along one axis; ' if cartesian else '') + hint)
+            speed = (f'{1000.0 * teleop.linear_speed:.1f} mm/s' if cartesian
+                     else f'{math.degrees(teleop.speed):.0f} deg/s')
             low, high = self.config.tool_limits
             closed = (self.measured.get(self.config.tool_joint, low) - low) / (high - low)
             statuses += [
@@ -191,7 +189,7 @@ class XboxTeleop(Node):
                        '', note),
                 status('teleop.group', DiagnosticStatus.OK, group.name, '', group.describe()),
                 status('teleop.speed', DiagnosticStatus.OK, f'{self.speed_percent():.0f}', '%',
-                       f'{math.degrees(teleop.speed):.0f} deg/s max; D-pad up/down changes it'),
+                       f'{speed} max; D-pad up/down changes it'),
                 status('teleop.tool', DiagnosticStatus.OK, f'{100.0 * closed:.0f}', '%',
                        'closed (placeholder end effector); RT closes, LT opens'),
             ]
