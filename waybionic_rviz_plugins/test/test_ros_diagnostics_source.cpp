@@ -308,11 +308,17 @@ TEST_F(DiagnosticsTrafficFixture, ChurnLeavesNoLingeringSubscription)
   constexpr int kIterations = 25;
   for (int iteration = 0; iteration < kIterations; ++iteration) {
     auto live_source = makeSource();
+    if (iteration == kIterations - 1) {
+      // Let the executor collect the last subscription first; that ordering used to flake.
+      std::this_thread::sleep_for(100ms);
+    }
     live_source->stop();
   }
 
-  // A leaked subscription would keep the publisher's subscriber count above zero.
+  // A leaked subscription would keep the publisher's subscriber count above zero. An executor
+  // blocked in rcl_wait still owns the last subscription it collected, so publish to wake it.
   EXPECT_TRUE(waitFor([&]() {
+    publisher_->publish(makeArray(diagnostic_msgs::msg::DiagnosticStatus::OK, "0"));
     return publisher_node_->count_subscribers(kTopic) == 0u;
   }, 15s)) << "expected every retired source to drop its subscription";
 }
