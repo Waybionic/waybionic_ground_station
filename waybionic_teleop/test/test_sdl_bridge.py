@@ -143,3 +143,16 @@ def test_trigger_or_stick_held_blocks_connection():
     pad.axes.clear()
     assert bridge.poll(0.02)[2] is False
     assert bridge.poll(0.03)[2] is True
+
+
+def test_missing_controller_reports_a_useful_status():
+    """Tell the operator when the bridge is running without a controller."""
+    sdl = FakeSDL()
+    bridge = sdl_bridge.SDLBridge(fake_pygame(sdl), sdl)
+
+    axes, buttons, connected, message = bridge.poll(0.0)
+
+    assert not connected and (axes, buttons) == sdl_bridge.NEUTRAL
+    assert message == ('No controller detected; connect a PS5 DualSense '
+                       'controller')
+    assert bridge.poll(0.5)[3] is None

@@ -92,6 +92,9 @@ class SDLBridge:
                     name = self.sdl.name_forindex(index)
                     message = f'Controller connected: {name}'
                     break
+            if self.controller is None:
+                message = ('No controller detected; connect a PS5 DualSense '
+                           'controller')
         if self.controller is None:
             return *NEUTRAL, False, message
 
