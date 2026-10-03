@@ -1,0 +1,37 @@
+# Placeholder Xbox mapping for the simulated arm. Axis and button names follow the joy
+# game_controller_node layout in waybionic_teleop/gamepad.py; joint limits come from the URDF.
+xbox_teleop:
+  ros__parameters:
+    # Two updates per 60 Hz display frame keep motion in RViz free of judder.
+    rate_hz: 120.0
+    input_timeout_s: 0.5
+    deadzone: 0.15
+    max_speed_deg_s: 60.0
+    max_accel_deg_s2: 480.0
+    speed_levels: [0.1, 0.25, 0.5, 1.0]
+    initial_speed_level: 2
+    home_gain: 2.0
+    enable_button: start
+    stop_button: b
+    # Quoted because ROS parameter files read a bare y as true.
+    group_button: 'y'
+    home_button: a
+    faster_button: dpad_up
+    slower_button: dpad_down
+    groups: [base, upper]
+    base:
+      joints: [joint_1, joint_2, joint_3]
+      axes: [left_x, left_y, right_y]
+      scales: [1.0, 1.0, 1.0]
+    upper:
+      joints: [joint_2, joint_3, joint_4, joint_5]
+      axes: [left_x, left_y, right_y, right_x]
+      scales: [1.0, 1.0, 1.0, 1.0]
+    # Placeholder end effector until Biomedical defines the tool: 0 is open, 1 is closed.
+    tool_joint: tool_grip
+    tool_limits: [0.0, 1.0]
+    tool_speed: 1.0
+    tool_close_axis: right_trigger
+    tool_open_axis: left_trigger
+    tool_frame: tool_link
+    base_frame: base_link

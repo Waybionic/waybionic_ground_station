@@ -1,0 +1,43 @@
+# Placeholder joint-to-drive map for the simulated MKS SERVO42D/57D CAN bus. The CAN IDs, gear
+# ratios and factors are not hardware values; replace them once Electrical and Mechanical
+# confirm the drives. factors give each motor's output angle per joint angle, so the wrist
+# differential turns both side-gear motors together for pitch and oppositely for roll.
+sim_arm_drives:
+  ros__parameters:
+    rate_hz: 120.0
+    # MKS default is 500 kbit/s; 1 Mbit/s keeps six drives at 120 Hz near 40% bus load.
+    bitrate: 1000000
+    acc: 240
+    max_rpm: 300
+    heartbeat_ms: 500
+    drives: [base_yaw, shoulder, elbow, wrist_left, wrist_right, tool]
+    base_yaw:
+      can_id: 1
+      gear_ratio: 1.0
+      joints: [joint_1]
+      factors: [1.0]
+    shoulder:
+      can_id: 2
+      gear_ratio: 1.0
+      joints: [joint_2]
+      factors: [1.0]
+    elbow:
+      can_id: 3
+      gear_ratio: 1.0
+      joints: [joint_3]
+      factors: [1.0]
+    wrist_left:
+      can_id: 4
+      gear_ratio: 1.0
+      joints: [joint_4, joint_5]
+      factors: [1.0, -1.0]
+    wrist_right:
+      can_id: 5
+      gear_ratio: 1.0
+      joints: [joint_4, joint_5]
+      factors: [1.0, 1.0]
+    tool:
+      can_id: 6
+      gear_ratio: 1.0
+      joints: [tool_grip]
+      factors: [1.0]
