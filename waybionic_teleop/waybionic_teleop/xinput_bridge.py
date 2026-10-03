@@ -153,6 +153,9 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        # Never leave the controller vibrating after the bridge stops.
+        if rumble_until is not None and active is not None:
+            set_state(active, ctypes.byref(vibration(0.0)))
         sender.close()
 
 
