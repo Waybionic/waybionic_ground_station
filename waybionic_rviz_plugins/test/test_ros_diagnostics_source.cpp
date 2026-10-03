@@ -309,7 +309,14 @@ TEST_F(DiagnosticsTrafficFixture, ChurnLeavesNoLingeringSubscription)
   for (int iteration = 0; iteration < kIterations; ++iteration) {
     auto live_source = makeSource();
     if (iteration == kIterations - 1) {
-      // Let the executor collect the last subscription first; that ordering used to flake.
+      // Once a message reaches this source, the executor has collected its subscription. The
+      // pause lets the remaining messages drain, so the executor is back waiting and holds the
+      // subscription when stop() retires it: the ordering that used to flake.
+      ASSERT_TRUE(waitFor([&]() {
+        publisher_->publish(makeArray(diagnostic_msgs::msg::DiagnosticStatus::OK, "0"));
+        const auto messages = live_source->messages(now());
+        return !messages.empty() && messages.front().signal_name == "board.temperature";
+      }, 5s)) << "the last source never received a message";
       std::this_thread::sleep_for(100ms);
     }
     live_source->stop();
