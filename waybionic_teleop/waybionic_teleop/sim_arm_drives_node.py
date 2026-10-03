@@ -184,10 +184,12 @@ class SimArmDrives(Node):
 
     def tick(self):
         now = time.monotonic()
-        dt, self.last_tick = min(now - self.last_tick, 0.1), now
-        if now - self.command_time > self.command_timeout:
-            # Hold the last target rather than run on along a stale velocity.
-            self.velocities = {}
+        dt, self.last_tick = now - self.last_tick, now
+        if any(self.velocities.values()) and now - self.command_time > self.command_timeout:
+            # The commands stopped mid-move, say because teleop exited: stop where the arm is
+            # rather than run on to the last target.
+            self.stop_all()
+            self.get_logger().warning('Joint commands stopped mid-move; every drive is stopped')
         self.check_replies()
         # Speeds follow the encoders, so the targets are refreshed every tick.
         if self.commanded is not None:

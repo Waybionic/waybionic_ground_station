@@ -165,12 +165,17 @@ def test_a_drive_that_stops_answering_stops_the_arm_until_it_is_zeroed_again(mak
     assert spin_until(executor, lambda: node.commanded is not None)
 
 
-def test_stale_commands_hold_the_last_target(make_node):
+def test_commands_that_stop_mid_move_stop_the_drives(make_node):
     node, executor = make_node()
     assert spin_until(executor, lambda: node.commanded is not None)
-    node.on_command(JointState(name=['joint_1'], position=[0.0], velocity=[1.0]))
-    assert node.velocities == {'joint_1': 1.0}
+    # One command toward a far target, then silence, as if teleop had exited mid-move.
+    node.on_command(JointState(name=['joint_1'], position=[100.0], velocity=[1.0]))
     assert spin_until(executor, lambda: not node.velocities)
+    assert spin_until(executor, lambda: node.commanded is not None)
+    held = node.commanded['joint_1']
+    spin_for(executor, 0.5)
+    assert 1.0 < held < 50.0
+    assert node.map.to_positions(node.counts)['joint_1'] == pytest.approx(held, abs=0.05)
 
 
 def test_nothing_moves_until_every_drive_confirms_its_heartbeat(make_node, monkeypatch):

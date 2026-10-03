@@ -40,10 +40,16 @@ def test_parse_rejects_bad_checksums_and_lengths(can_id, data):
         mks_can.parse(can_id, data)
 
 
-@pytest.mark.parametrize('axis, speed, acc', [(0x800000, 100, 2), (0, 3001, 2), (0, 100, 256)])
+@pytest.mark.parametrize('axis, speed, acc', [
+    (0x800000, 100, 2), (-0x800001, 100, 2), (0, 3001, 2), (0, 100, 256)])
 def test_absolute_axis_rejects_out_of_range_arguments(axis, speed, acc):
     with pytest.raises(ValueError):
         mks_can.absolute_axis(1, axis, speed, acc)
+
+
+def test_absolute_axis_takes_the_whole_int24_range():
+    assert mks_can.absolute_axis(1, -0x800000, 100, 2)[4:7] == b'\x80\x00\x00'
+    assert mks_can.absolute_axis(1, 0x7FFFFF, 100, 2)[4:7] == b'\x7f\xff\xff'
 
 
 def test_hex_frame_matches_candump():
