@@ -10,6 +10,7 @@ This file needs only Python 3 and OpenCV, not ROS.
 """
 
 import argparse
+import os
 import socket
 import sys
 import time
@@ -49,6 +50,8 @@ def main():
     except ImportError:
         raise SystemExit('The camera bridge needs OpenCV: pip install opencv-python') from None
     capture = open_camera(cv2, args)
+    # A local video file can stand in for a camera: it loops at the requested frame rate.
+    video_file = os.path.isfile(args.camera)
     number, sender, report = 0, None, time.monotonic()
     next_frame = report
     print(f'Sending camera {args.camera} to {args.host}:{args.port} (Ctrl+C to stop)')
@@ -57,8 +60,7 @@ def main():
             ok, image = capture.read()
             stamp_ns = time.time_ns()
             if not ok:
-                if not args.camera.isdigit():
-                    # Loop a video file so it can stand in for a camera.
+                if video_file:
                     capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     continue
                 raise SystemExit('The camera stopped sending frames')
@@ -84,8 +86,8 @@ def main():
                 print(f'\r{30 / (now - report):5.1f} fps at {width}x{height}', end='',
                       flush=True)
                 report = now
-            if not args.camera.isdigit() and args.fps > 0:
-                # A camera sets its own pace; a video file is played at the requested rate.
+            if video_file and args.fps > 0:
+                # A camera or stream sets its own pace; a video file plays at the set rate.
                 next_frame += 1.0 / args.fps
                 time.sleep(max(0.0, next_frame - time.monotonic()))
     except KeyboardInterrupt:
