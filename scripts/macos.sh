@@ -107,7 +107,8 @@ build_workspace() {
   echo "Building workspace..."
   (
     cd "$ROOT"
-    run_environment colcon build --symlink-install
+    run_environment colcon build --symlink-install \
+      --cmake-args "-DCMAKE_OSX_SYSROOT=$CONDA_BUILD_SYSROOT"
   )
 }
 

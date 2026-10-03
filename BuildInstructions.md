@@ -470,6 +470,7 @@ required. Intel macOS is not verified.
    xcode-select --install
    brew install git
    brew install --cask miniforge
+   conda init "$(basename "$SHELL")"
    ```
 
    If Homebrew is missing, install it from [brew.sh](https://brew.sh/) first.
@@ -514,7 +515,8 @@ Keep this Terminal window open. Within a few seconds:
 - The RViz splash screen is replaced by the main window.
 - `DiagnosticsPanel` displays **WayBionic Engineering Monitor** and
   **Current State: NORMAL**.
-- Joint State Publisher displays the `base_to_arm` slider.
+- Joint State Publisher displays the `joint_1` to `joint_5` sliders. Move them
+  to check base yaw, shoulder, elbow, wrist pitch, and wrist roll.
 
 To stop the application, return to the launch Terminal and press
 <kbd>Control</kbd>+<kbd>C</kbd>.
@@ -522,6 +524,10 @@ To stop the application, return to the launch Terminal and press
 Always use `scripts/macos.sh`. It selects the macOS SDK and Cyclone DDS and
 loads the workspace correctly. Do not source `install/setup.bash` from zsh or
 replace the helper with direct `colcon` or `ros2 launch` commands.
+
+`setup` installs Cyclone DDS explicitly. Builds pass the selected SDK to
+CMake as `CMAKE_OSX_SYSROOT`; an existing `CONDA_BUILD_SYSROOT` takes precedence
+over `xcrun --show-sdk-path`.
 
 ### Verify ROS nodes
 
@@ -618,7 +624,8 @@ Stop the application, clean the plugin's CMake cache, and rebuild it:
 ```bash
 ./scripts/macos.sh run colcon build \
   --packages-select waybionic_rviz_plugins \
-  --cmake-clean-cache --symlink-install
+  --cmake-clean-cache --symlink-install \
+  --cmake-args "-DCMAKE_OSX_SYSROOT=${CONDA_BUILD_SYSROOT:-$(xcrun --show-sdk-path)}"
 ```
 
 The panel should display **WayBionic Engineering Monitor** after the next

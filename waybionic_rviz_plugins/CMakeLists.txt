@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.8)
+cmake_minimum_required(VERSION 3.13)
 project(waybionic_rviz_plugins)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)")
