@@ -32,7 +32,7 @@ def _inside(point, box, start):
     # Inside the box, or no further out than start on each axis, so a tip that starts outside
     # can still be moved back in.
     low, high = box
-    return all(min(lower, begin) - TOLERANCE <= value <= max(upper, begin) + TOLERANCE
+    return all(min(lower - TOLERANCE, begin) <= value <= max(upper + TOLERANCE, begin)
                for value, lower, upper, begin in zip(point, low, high, start))
 
 
@@ -153,9 +153,8 @@ class ArmKinematics:
 
         pitch_rate tilts the tool about its tip. The whole step shrinks, never one joint, so
         the tip stays on the line when a joint would pass max_rate or a limit. Roll turns
-        against the yaw, so the tool doesn't spin about its own axis as the base turns; with
-        the tool pointing straight down, that keeps a blade's heading. keep_in, ((x, y, z) min,
-        (x, y, z) max) in the base frame, stops the tip at the box walls.
+        against the yaw so the tool keeps its heading. keep_in, ((x, y, z) min, (x, y, z) max)
+        in the base frame, stops the tip at the box walls.
         """
         start, pitch = self.forward(joints)
         yaw, roll = self.joints[0], self.joints[4]

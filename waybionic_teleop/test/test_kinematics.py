@@ -220,3 +220,30 @@ def test_other_arm_layouts_are_rejected(change):
     old, new, count = change
     with pytest.raises(ValueError, match='Cartesian moves need'):
         ArmKinematics.from_urdf(URDF.replace(old, new, count))
+
+
+def test_a_diagonal_cut_stops_on_its_line_at_the_keep_in_box(arm):
+    start, _ = arm.forward(DOWN)
+    box = ((-1.0, -1.0, -1.0), (1.0, 1.0, start[2] + 0.01))
+    velocity = (0.01, 0.01, 0.02)
+    path = [DOWN]
+    for _ in range(round(20.0 / DT)):  # keep pushing long after reaching the wall
+        joints, fraction, blocked = arm.jog(path[-1], velocity, 0.0, 0.0, DT, LIMITS,
+                                            MAX_RATE, box)
+        path.append(joints)
+    direction = [value / math.hypot(*velocity) for value in velocity]
+    for joints in path:
+        tip = arm.forward(joints)[0]
+        assert distance_from_line(tip, start, direction) < 1e-9
+        assert tip[2] <= box[1][2] + 1e-8
+    assert blocked == ['keep_in']
+
+
+def test_tilting_and_rolling_at_the_keep_in_box_keep_the_tip_inside(arm):
+    start, _ = arm.forward(DOWN)
+    box = ((-1.0, -1.0, -1.0), (1.0, 1.0, start[2] + 0.01))
+    path = cut(arm, (0.0, 0.0, 0.02), 1.0)  # reach the top face first
+    joints, wall = path[-1], arm.forward(path[-1])[0]
+    for _ in range(round(5.0 / DT)):
+        joints, _, _ = arm.jog(joints, (0.0, 0.0, 0.0), 0.3, 0.5, DT, LIMITS, MAX_RATE, box)
+        assert arm.forward(joints)[0] == pytest.approx(wall, abs=1e-9)
