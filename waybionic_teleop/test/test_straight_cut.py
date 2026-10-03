@@ -17,7 +17,7 @@ LIMITS = {'joint_1': (-math.pi, math.pi), 'joint_2': (-1.5708, 1.5708),
           'joint_3': (-1.5708, 1.5708), 'joint_4': (-1.5708, 1.5708),
           'joint_5': (-1.5708, 1.5708)}
 DOWN = {'joint_1': 0.1, 'joint_2': 0.5, 'joint_3': 1.4, 'joint_4': math.pi - 1.9,
-        'joint_5': 0.0, 'tool_grip': 0.0}
+        'joint_5': 0.0, 'left_claw': 0.0, 'right_claw': 0.0}
 SUBSTEPS = 10
 
 
@@ -120,6 +120,7 @@ def cut(drives, teleop_params, ratio, level, seconds):
 
     def tick(*pressed, **axes):
         measured = mapping.to_positions([servo.axis for servo in servos])
+        measured.update({'left_claw': 0.0, 'right_claw': 0.0})
         teleop.update(*sample(*pressed, **axes), measured, period)
         if teleop.targets:
             moves = mapping.synchronized(teleop.command_targets,

@@ -3,7 +3,7 @@ Drive the arm from an Xbox controller: /joy in, /joint_commands out.
 
 Mapping and limits come from config/xbox_teleop.yaml and the robot_description joint limits;
 the logic lives in :mod:`waybionic_teleop.teleop`. The node also reports its state on
-/diagnostics and draws a placeholder end effector and a status label in RViz.
+/diagnostics and draws provisional claw markers and a status label in RViz.
 """
 
 import math
@@ -249,23 +249,26 @@ class XboxTeleop(Node):
                 state += '\n' + stop_reason(teleop.blocked)
         else:
             state = 'DISABLED\nPRESS-MENU' if fresh else 'NO-CONTROLLER'
-        return f'{teleop.active_group.name.upper()}\n{self.speed_percent():.0f}%\n{state}'
+        selected = teleop.tool_modes[teleop.tool_mode]
+        tool = 'BOTH' if len(selected) == 2 else selected[0].replace('_claw', '').upper()
+        return f'{teleop.active_group.name.upper()}\n{tool}\n{self.speed_percent():.0f}%\n{state}'
 
     def speed_percent(self):
         return 100.0 * self.config.speed_levels[self.teleop.level]
 
     def publish_markers(self, fresh):
         low, high = self.config.tool_limits
-        closed = min(max((self.measured.get(self.config.tool_joint, low) - low) / (high - low),
-                         0.0), 1.0)
-        gap = JAW_OPEN_GAP * (1.0 - closed)
         markers = MarkerArray()
-        # Placeholder jaws until Biomedical provides the end effector model.
-        for index, side in enumerate((-1.0, 1.0)):
+        # Temporary visuals until Biomedical provides the full assembly.
+        for index, (side, joint) in enumerate(
+                zip((-1.0, 1.0), self.config.tool_joints)):
+            closed = min(max((self.measured.get(joint, low) - low) / (high - low),
+                             0.0), 1.0)
+            offset = (JAW_OPEN_GAP * (1.0 - closed) + JAW_SIZE[0]) / 2.0
             jaw = Marker(ns='tool', id=index, type=Marker.CUBE, action=Marker.ADD,
                          frame_locked=True)
             jaw.header.frame_id = self.tool_frame
-            jaw.pose.position.x = side * (gap + JAW_SIZE[0]) / 2.0
+            jaw.pose.position.x = side * offset
             jaw.pose.position.z = JAW_SIZE[2] / 2.0
             jaw.pose.orientation.w = 1.0
             jaw.scale.x, jaw.scale.y, jaw.scale.z = JAW_SIZE
@@ -318,7 +321,6 @@ class XboxTeleop(Node):
             speed = (f'{1000.0 * teleop.linear_speed:.1f} mm/s' if group.mode != 'joint'
                      else f'{math.degrees(teleop.speed):.0f} deg/s')
             low, high = self.config.tool_limits
-            closed = (self.measured.get(self.config.tool_joint, low) - low) / (high - low)
             statuses += [
                 status('teleop.state', DiagnosticStatus.WARN if teleop.warning
                        else DiagnosticStatus.OK, 'enabled' if teleop.enabled else 'disabled',
@@ -326,9 +328,15 @@ class XboxTeleop(Node):
                 status('teleop.group', DiagnosticStatus.OK, group.name, '', group.describe()),
                 status('teleop.speed', DiagnosticStatus.OK, f'{self.speed_percent():.0f}', '%',
                        f'{speed} max; D-pad up/down changes it'),
-                status('teleop.tool', DiagnosticStatus.OK, f'{100.0 * closed:.0f}', '%',
-                       'closed (placeholder end effector); RT closes, LT opens'),
+                status('teleop.tool_mode', DiagnosticStatus.OK,
+                       ','.join(teleop.tool_modes[teleop.tool_mode]), '',
+                       'X selects left, right or both; RT closes, LT opens'),
             ]
+            for joint in self.config.tool_joints:
+                closed = (self.measured.get(joint, low) - low) / (high - low)
+                statuses.append(status(
+                    f'teleop.{joint}', DiagnosticStatus.OK,
+                    f'{100.0 * closed:.0f}', '%', 'provisional claw closure'))
         message = DiagnosticArray(status=statuses)
         message.header.stamp = self.get_clock().now().to_msg()
         self.diagnostics_publisher.publish(message)

@@ -15,13 +15,13 @@ def arm_map(parameters):
         parameters('arm_drives.yaml', 'sim_arm_drives'), COUNTS)
 
 
-def test_placeholder_map_covers_every_arm_joint(arm_map):
-    assert arm_map.joints == ['joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5', 'tool_grip']
-    assert [drive.can_id for drive in arm_map.drives] == [1, 2, 3, 4, 5, 6]
+def test_arm_map_covers_the_five_arm_joints(arm_map):
+    assert arm_map.joints == ['joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5']
+    assert [drive.can_id for drive in arm_map.drives] == [1, 2, 3, 4, 5]
 
 
 def test_positions_round_trip_through_counts(arm_map):
-    positions = dict(zip(arm_map.joints, [0.5, -1.2, 0.3, 0.7, -0.4, 0.8]))
+    positions = dict(zip(arm_map.joints, [0.5, -1.2, 0.3, 0.7, -0.4]))
     decoded = arm_map.to_positions(arm_map.to_counts(positions))
     assert all(abs(decoded[joint] - positions[joint]) <= 2 * math.pi / COUNTS
                for joint in positions)

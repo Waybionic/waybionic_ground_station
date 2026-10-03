@@ -61,10 +61,10 @@ def test_feedback_reports_pair_disagreement(tool_map):
 
 
 def test_invalid_pair_calibration_is_rejected():
-    """Each claw must have one positive and one negative motor mapping."""
+    """Motor direction is configurable, but must be a unit sign."""
     left = ClawCalibration('left', 0.0, 30.0, 0.0, 10.0, (
         MotorCalibration('a', 1, 80.0, 0), MotorCalibration('b', 1, 80.0, 0)))
     right = ClawCalibration('right', 0.0, 30.0, 0.0, 10.0, (
-        MotorCalibration('c', 1, 80.0, 0), MotorCalibration('d', -1, 80.0, 0)))
-    with pytest.raises(ValueError, match='opposing motor pair'):
+        MotorCalibration('c', 0, 80.0, 0), MotorCalibration('d', -1, 80.0, 0)))
+    with pytest.raises(ValueError, match='direction'):
         ToolMotorMap((left, right))

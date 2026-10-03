@@ -1,7 +1,7 @@
-"""Map two calibrated claw positions to four opposing motor step targets."""
+"""Map two claw positions to four configurable motor step targets."""
 
-import math
 from dataclasses import dataclass
+import math
 
 
 @dataclass(frozen=True)
@@ -16,7 +16,7 @@ class MotorCalibration:
 
 @dataclass(frozen=True)
 class ClawCalibration:
-    """One claw's limits, reference and two opposing motors."""
+    """One claw's limits, reference and two configured motors."""
 
     name: str
     lower: float
@@ -43,9 +43,10 @@ class ToolMotorMap:
                     or not claw.lower <= claw.reference <= claw.upper
                     or claw.max_speed <= 0):
                 raise ValueError(f'invalid limits for {claw.name}')
-            directions = {motor.direction for motor in claw.motors}
-            if len(claw.motors) != 2 or directions != {-1, 1}:
-                raise ValueError(f'{claw.name} needs an opposing motor pair')
+            if len(claw.motors) != 2:
+                raise ValueError(f'{claw.name} needs two motors')
+            if any(motor.direction not in (-1, 1) for motor in claw.motors):
+                raise ValueError(f'{claw.name} direction must be -1 or 1')
             for motor in claw.motors:
                 if (not motor.name or not math.isfinite(motor.steps_per_unit)
                         or motor.steps_per_unit <= 0

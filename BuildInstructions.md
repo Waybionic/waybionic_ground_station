@@ -294,9 +294,12 @@ can report exit code `-2`, indicating the requested SIGINT interruption.
 
 ## Xbox Controller (Simulated Arm)
 
-`teleop:=true` drives the arm with an Xbox controller through simulated CAN drives;
-nothing is sent to hardware unless you choose a drive bus, as described in
-[Real MKS drives over CAN](#real-mks-drives-over-can). The controller mapping is in
+`teleop:=true` drives the arm and a provisional two-claw tool with an Xbox
+controller. The four tool motors are simulated. Arm drives are simulated unless
+you choose a real bus as described in [Real MKS drives over CAN](#real-mks-drives-over-can).
+The clamp uses provisional STL placement and normalized 0-to-1 travel; its
+simulation calibration is in `waybionic_teleop/config/tool_drives.yaml`.
+The controller mapping is in
 `waybionic_teleop/config/xbox_teleop.yaml`, and the placeholder joint-to-drive map
 (MKS SERVO42D/57D CAN IDs, gear ratios and the wrist differential) is in
 `waybionic_teleop/config/arm_drives.yaml`.
@@ -347,7 +350,8 @@ Bluetooth controllers are not listed in `/dev/input/by-id`; connect the controll
 | Incision group: left stick up/down | Insert or withdraw the tool along its own axis |
 | Incision group: right stick up/down | Tilt the tool about the incision point |
 | Incision group: right stick left/right | Tool roll |
-| RT / LT | Close / open the placeholder end effector |
+| X | Select left claw, right claw or both; release triggers before switching |
+| RT / LT | Close / open the selected simulated claw(s) |
 | D-pad up/down | Speed: 10, 25, 50 or 100% of 60 deg/s, or of 50 mm/s and 30 deg/s of tilt in the Cartesian and incision groups |
 | A (hold) | Return to the zero pose (not in the incision group) |
 
@@ -359,8 +363,9 @@ commands only after receiving a valid URDF and a fresh teleop enable, which tele
 on every update. If the enable stops for 0.5 s (for example because teleop stopped), the
 drives stop. A host pause past the 500 ms drive heartbeat also stops the simulated servos.
 In both cases teleop must be disabled and Start released and pressed again before motion
-resumes. The diagnostics panel shows the command gate, teleop state, each joint, each
-drive's last CAN frame and the simulated bus load.
+resumes. The diagnostics panel shows the command gate, teleop state, arm drives,
+both claws, four simulated tool motor counts and MKS frame previews, and bus load.
+The tool motors do not use the arm's CAN bus simulator.
 
 When a move stops at a limit, the controller rumbles briefly, at most once a second. The
 RViz label also turns red and names the cause, for example `STOPPED-joint_3` or

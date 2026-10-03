@@ -193,6 +193,13 @@ def generate_launch_description():
                     sim_time]
     )
 
+    tool_drives_node = Node(
+        package='waybionic_teleop', executable='sim_tool_motors',
+        name='sim_tool_motors', output='screen', condition=IfCondition(teleop),
+        parameters=[os.path.join(teleop_config_dir, 'tool_drives.yaml'),
+                    diagnostics_topic, sim_time]
+    )
+
     drives_node = Node(
         package='waybionic_teleop', executable='sim_arm_drives', name='sim_arm_drives',
         output='screen', condition=IfCondition(teleop),
@@ -270,5 +277,5 @@ def generate_launch_description():
         camera_bind_arg, camera_log_arg,
         launch_rviz_arg, rviz_config_arg, file_check, rsp_node, jsp_gui_node, joint_demo_node,
         joy_node, joy_udp_node, autoplay_node, teleop_node, drives_node, camera_follower_node,
-        temp_diag_pub_node, camera_launch, rviz_node
+        tool_drives_node, temp_diag_pub_node, camera_launch, rviz_node
     ])

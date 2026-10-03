@@ -12,7 +12,7 @@ from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 LIMITS = {'joint_1': (-math.pi, math.pi), 'joint_2': (-1.5708, 1.5708),
           'joint_3': (-1.5708, 1.5708), 'joint_4': (-1.5708, 1.5708),
           'joint_5': (-1.5708, 1.5708)}
-HOME = dict.fromkeys([*LIMITS, 'tool_grip'], 0.0)
+HOME = dict.fromkeys([*LIMITS, 'left_claw', 'right_claw'], 0.0)
 # Tool pointing straight down in front of the base, where straight cuts start.
 DOWN = {**HOME, 'joint_1': 0.1, 'joint_2': 0.5, 'joint_3': 1.4, 'joint_4': math.pi - 1.9}
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
@@ -143,12 +143,29 @@ def test_joint_limits_stop_motion_and_are_reported(teleop):
     assert teleop.blocked == ['joint_2']
 
 
-def test_triggers_close_and_open_the_tool_within_its_range(teleop):
+def test_triggers_control_selected_claw_and_both_within_limits(teleop):
     press(teleop, 'start')
     run(teleop, 2.0, right_trigger=-1.0)
-    assert teleop.targets['tool_grip'] == 1.0
+    assert teleop.targets['left_claw'] == pytest.approx(0.5)
+    assert teleop.targets['right_claw'] == 0.0
+    press(teleop, 'x')
+    run(teleop, 2.0, right_trigger=-1.0)
+    assert teleop.targets['left_claw'] == pytest.approx(0.5)
+    assert teleop.targets['right_claw'] == pytest.approx(0.5)
+    press(teleop, 'x')
+    run(teleop, 2.0, right_trigger=-1.0)
+    assert teleop.targets['left_claw'] == pytest.approx(1.0)
+    assert teleop.targets['right_claw'] == pytest.approx(1.0)
     run(teleop, 0.5, left_trigger=-1.0)
-    assert teleop.targets['tool_grip'] == pytest.approx(0.5)
+    assert teleop.targets['left_claw'] == pytest.approx(0.875)
+    assert teleop.targets['right_claw'] == pytest.approx(0.875)
+
+
+def test_tool_selection_refuses_held_trigger(teleop):
+    press(teleop, 'start')
+    teleop.update(*sample('x', right_trigger=-1.0), HOME, DT)
+    assert teleop.tool_mode == 0
+    assert teleop.warning
 
 
 def test_a_trigger_resting_inside_the_deadzone_leaves_the_tool_still(teleop):
@@ -255,6 +272,7 @@ def test_without_arm_kinematics_the_cartesian_group_is_skipped(teleop):
     {'stop_button': 'turbo'},
     {'base.scales': [1.0]},
     {'tool_limits': [1.0, 0.0]},
+    {'tool_joints': ['left_claw', 'left_claw']},
     {'cartesian.axes': ['left_y', 'left_x', 'right_y']},
     {'cartesian.mode': 'polar'},
 ])
