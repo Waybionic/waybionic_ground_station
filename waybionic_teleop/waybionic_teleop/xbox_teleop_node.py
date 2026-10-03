@@ -153,6 +153,16 @@ class XboxTeleop(Node):
         label.color.r, label.color.g, label.color.b, label.color.a = (
             (0.5, 1.0, 0.5, 1.0) if enabled else (1.0, 0.8, 0.3, 1.0))
         markers.markers.append(label)
+        incision = self.teleop.incision if self.teleop.active_group.mode == 'incision' else None
+        point = Marker(ns='incision', id=0, type=Marker.SPHERE,
+                       action=Marker.ADD if incision else Marker.DELETE)
+        point.header.frame_id = self.base_frame
+        point.pose.orientation.w = 1.0
+        if incision:
+            point.pose.position.x, point.pose.position.y, point.pose.position.z = incision
+        point.scale.x = point.scale.y = point.scale.z = 0.016
+        point.color.r, point.color.g, point.color.b, point.color.a = 1.0, 0.2, 0.6, 0.8
+        markers.markers.append(point)
         self.marker_publisher.publish(markers)
 
     def report(self):
@@ -171,9 +181,11 @@ class XboxTeleop(Node):
             group = teleop.active_group
             cartesian = group.mode == 'cartesian'
             hint = 'B stops, Y switches group, A holds to go home'
+            if group.mode == 'incision':
+                hint = 'Tilt stays in the arm plane; going home is off here; B stops, Y switches'
             note = teleop.note or ('At limit: ' + ', '.join(teleop.blocked) if teleop.blocked
                                    else ('LB moves along one axis; ' if cartesian else '') + hint)
-            speed = (f'{1000.0 * teleop.linear_speed:.1f} mm/s' if cartesian
+            speed = (f'{1000.0 * teleop.linear_speed:.1f} mm/s' if group.mode != 'joint'
                      else f'{math.degrees(teleop.speed):.0f} deg/s')
             low, high = self.config.tool_limits
             closed = (self.measured.get(self.config.tool_joint, low) - low) / (high - low)
