@@ -16,28 +16,28 @@ The opt-in old-arm model is `waybionic_old_arm.urdf.xacro` with these joints:
 ## Current State
 
 ```text
-MotionTestNode -- /joint_states --> robot_state_publisher --> RViz RobotModel
-       ^
-       |
-RViz MotionTestPanel -- String RUN/HOME/STOP
+Simulation: MotionTestNode -- /old_arm/joint_states --> robot_state_publisher --> RViz
+
+Hardware: RViz MotionTestPanel -- /old_arm_motion_test/command --> Arduino bridge
+      Arduino bridge -- /old_arm/joint_states --> robot_state_publisher --> RViz
 ```
 
-The motion test currently publishes generated positions directly to
-`/joint_states`. That is suitable for visualization, but it is not a hardware
-control path: it represents commanded positions as if they were measured
-positions.
+The simulation motion test publishes generated positions for visualization.
+The Arduino bridge accepts the existing `RUN`, `HOME`, and `STOP` commands,
+translates them to the serial protocol, and publishes an estimated joint state
+from the accepted command timeline. It does not provide measured servo
+feedback.
 
-There is currently no Arduino transport, encoder feedback path,
-`ros2_control` hardware plugin, trajectory controller, or motion action in the
-workspace.
+There is no `ros2_control` hardware plugin, trajectory controller, or motion
+action in the workspace yet; those remain the longer-term control interface.
 
 The archived handoff provides a usable first transport contract:
 
 - Arduino Uno R4 WiFi at 115200 baud over USB serial.
 - Servo signals: D1 `base_yaw`, D2 `shoulder`, D3 `elbow`, D4 `wrist_roll`.
 - Hold switch: D7 to ground using `INPUT_PULLUP`.
-- Commands: `ID`, `MOVE,s1,s2,s3,s4,durationMs`, `JOG,servo,delta,durationMs`,
-  and `HOLD`.
+- Commands: `ID`, `MOVE,s1,s2,s3,s4,durationMs`,
+  `JOG,servo,delta,durationMs`, and `HOLD`.
 - Responses: `READY,IK4,1`, `OK,MOVE`, `OK,JOG`, `OK,ARRIVED`, `OK,HOLD`,
   `OK,SWITCH HOLD`, and `ERROR,...`.
 
@@ -93,30 +93,30 @@ time as the physical hardware state publisher.
 ### Physical Hardware
 
 ```text
-motion_test/action client --> trajectory controller --> Arduino
+RViz MotionTestPanel --> /old_arm_motion_test/command --> waybionic_hardware
+waybionic_hardware --> serial/USB --> Arduino
 Arduino command status --> estimated /joint_states --> robot_state_publisher --> RViz
 ```
 
-The launch file should select exactly one mode, for example with a
+`old_arm.launch.py` selects exactly one mode with a
 `hardware_mode` argument whose values are `simulation` and `arduino`.
 
 ## ROS Interfaces
 
-These are the proposed stable interfaces between packages:
+These are the current and planned interfaces between packages:
 
-| Purpose | Interface |
-| --- | --- |
-| Joint position estimate or measurement | `/joint_states`, `sensor_msgs/msg/JointState` |
-| Motion command | `/joint_trajectory_controller/follow_joint_trajectory`, `control_msgs/action/FollowJointTrajectory` |
-| Optional lower-level command stream | `/joint_trajectory_controller/joint_trajectory`, `trajectory_msgs/msg/JointTrajectory` |
-| Hardware and safety state | `/diagnostics`, `diagnostic_msgs/msg/DiagnosticArray` |
+| Purpose | Current interface | Planned interface |
+| --- | --- | --- |
+| Joint position estimate | `/old_arm/joint_states`, `sensor_msgs/msg/JointState` | Measured `/joint_states` feedback |
+| Motion command | `/old_arm_motion_test/command`, `std_msgs/msg/String` | `FollowJointTrajectory` action |
+| Hardware and safety state | `/diagnostics`, `diagnostic_msgs/msg/DiagnosticArray` | Controller/action feedback |
 
-The motion test should become an action client. Actions provide acceptance,
-feedback, completion, cancellation, and failure results, which the current
-`RUN`/`HOME`/`STOP` string topic cannot provide.
+The motion test should eventually become an action client. Actions provide
+acceptance, feedback, completion, cancellation, and failure results, which the
+current `RUN`/`HOME`/`STOP` string topic cannot provide.
 
-The existing string topic can remain temporarily as a simulation-only adapter
-while the action path is introduced.
+The existing string topic is currently used by both the RViz panel and the
+Arduino bridge as the first integration interface.
 
 The first bridge implementation is available as `waybionic_hardware` and
 accepts the existing `/old_arm_motion_test/command` topic. It translates
@@ -144,20 +144,20 @@ not overwrite this upright motion-test state by publishing zero positions.
 - Replace estimated state with measured state when encoders or potentiometers
    are added.
 - Publish hardware diagnostics and connection/watchdog faults.
-- Refuse motion when disconnected, stale, out of range, or stopped.
+- Refuse motion when disconnected, unhandshaken, faulted, stale, out of range,
+  or stopped.
 
-The first implementation can use a small serial bridge if a full
-`ros2_control` plugin is not yet ready. The public ROS interfaces should still
-match the target design so the bridge can later be replaced without changing
-RViz or the motion test.
+The current implementation is this small serial bridge. A full
+`ros2_control` plugin remains a future replacement that should preserve the
+RViz and motion-test interfaces.
 
 ### `waybionic_motion_test`
 
 - Generate safe, bounded test trajectories.
-- Send trajectories through the controller/action interface.
-- Verify Arduino acknowledgment and arrival reports for each target.
-- Verify measured feedback against each target once sensors are available.
-- Abort on action failure, stale feedback, limit violation, or timeout.
+- Publish bounded simulation trajectories.
+- Keep physical command sequencing behind the bridge's `HOME` and `RUN` gates.
+- Verify Arduino acknowledgment and arrival reports in the bridge.
+- Add action and measured-feedback verification when those interfaces exist.
 - Keep a simulation implementation for development without hardware.
 
 It must not publish synthetic `/joint_states` in physical mode.
@@ -165,8 +165,9 @@ It must not publish synthetic `/joint_states` in physical mode.
 ### `waybionic_rviz_plugins`
 
 - Keep the existing `RobotModel` visualization.
-- Update `MotionTestPanel` to use the action interface.
-- Show connection, current joint values, target, progress, and failure reason.
+- Keep the current `RUN`/`HOME`/`STOP` panel for the bridge adapter.
+- Show the movement-test controls and diagnostics state.
+- Update the panel to use the action interface when the controller is added.
 - Keep emergency stop separate from normal test completion.
 
 ### `waybionic_bringup`
@@ -213,41 +214,49 @@ It must not publish synthetic `/joint_states` in physical mode.
 
 ## Current Bringup Commands
 
-Simulation remains the default:
+Simulation remains the default old-arm mode:
 
-```text
-ros2 launch waybionic_bringup ground_station.launch.py
+```bash
+ros2 launch waybionic_bringup old_arm.launch.py \
+   hardware_mode:=simulation \
+   use_joint_state_publisher_gui:=false \
+   start_motion_test:=true
 ```
 
 Arduino mode requires an explicit serial port:
 
-```text
-ros2 launch waybionic_bringup ground_station.launch.py \
-   hardware_mode:=arduino arduino_port:=/dev/ttyACM0
+```bash
+ros2 launch waybionic_bringup old_arm.launch.py \
+   hardware_mode:=arduino \
+   arduino_port:=/dev/ttyACM0 \
+   arduino_baud:=115200 \
+   arduino_dry_run:=false \
+   use_joint_state_publisher_gui:=false
 ```
 
 The bridge can be exercised without an Arduino:
 
-```text
-ros2 launch waybionic_bringup ground_station.launch.py \
-   hardware_mode:=arduino arduino_dry_run:=true launch_rviz:=false
+```bash
+ros2 launch waybionic_bringup old_arm.launch.py \
+   hardware_mode:=arduino \
+   arduino_dry_run:=true \
+   launch_rviz:=false \
+   use_joint_state_publisher_gui:=false
 ```
 
 The first physical test should use the external servo-power switch, confirm
 the arm is supported and clear, then use `HOME` before `RUN`. The current
 bridge intentionally does not claim measured position feedback.
 
-## Definition of Done
+## Current Validation
 
-- RViz follows the Arduino command estimate in the first physical version and
-   measured feedback once sensors are added.
-- The motion test moves the physical arm through a bounded sequence.
-- A disconnected or faulted Arduino prevents motion and is visible in the
-  panel and `/diagnostics`.
-- A stop request cancels the active command and leaves the arm in a known
-  state.
-- Simulation still works without an Arduino.
-- No node other than the selected state source publishes `/joint_states`.
+- Simulation movement is validated without an Arduino.
+- The bridge has dry-run coverage and serial-bridge safety tests.
+- `HOME` is required before `RUN`; `STOP`, disconnects, malformed responses,
+   watchdog expiry, and latched faults stop or refuse motion.
+- The Arduino command estimate is published on `/old_arm/joint_states`.
+- Isolated launch tests and the full workspace test suite pass.
+- Physical hardware validation requires an approved powered-arm test.
 
 ## Decisions Still Needed
 
