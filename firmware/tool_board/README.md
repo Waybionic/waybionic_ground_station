@@ -85,7 +85,9 @@ cansend can0 007#F5001EC800200002  # half a turn at 30 rpm: 007#F501FD, then 007
 cansend can0 007#9299              # zero here: 007#92019A
 ```
 
-The `waybionic_teleop` tests check this firmware's frame code against `mks_can.py`.
+The `waybionic_teleop` tests check this firmware's frame code against `mks_can.py`. They
+also run the motor logic in `tool_motor.h` with a fake stepper driver: moves, travel limits,
+the heartbeat stop, stops, enable and zero.
 
 ## Using It from the Ground Station
 
