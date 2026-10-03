@@ -1,7 +1,7 @@
 # Controller research
 
 ## Surgeon-Oriented Controller Comparison
-> This would be a controller to get much later. A lot of specifically surgeon-oriented controllers are **very** expensive.
+> This would likely be a controller to get much later. A lot of specifically surgeon-oriented controllers are **very** expensive.
 
 | Controller | Precision | Joint or Tool-tip | Enable/Deadman | Ergonomics | Haptics | ROS2 | Cost |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -15,14 +15,3 @@
 The Haply MinVerse would be a good choice for a long term controller. It is very suitable for controlling surgeries and provides haptics as well. 
 
 Fallback: The SpaceMouse controller would be good for simply controlling the arm. Since it has lots of buttons, many different shortcuts can be mapped and it is a bit cheaper compared to the MinVerse. 
-
-## Controller Mapping
-
-> Note: The MinVerse only has two buttons, the other two are reserved for power and calibration.
-
-| Input | Action |
-| --- | --- |
-| Button 1 | Enable or disable arm |
-| Button 2 | Toggle between base joints and upper joints |
-
-Since the controller itself is able to move in a 3D space, moving the robot like that would be a lot easier to configure.
