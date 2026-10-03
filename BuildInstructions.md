@@ -294,6 +294,10 @@ Press **Ctrl+C** in each window to stop.
 **Linux (native ROS):** with the controller plugged in, run
 `ros2 launch waybionic_bringup ground_station.launch.py teleop:=true`.
 
+**Linux (Docker):** with the controller plugged in, run
+`./scripts/linux-gui.sh --controller`. This starts teleop in the
+[Linux GUI](#linux-gui-demo) container, which reads the host's controllers.
+
 | Input | Action |
 | --- | --- |
 | Start (Xbox Menu button, three lines) | Enable or disable; the arm starts disabled |
@@ -314,6 +318,11 @@ Press **Ctrl+C** in each window to stop.
 Start is refused until the sticks are centred and the triggers released. The
 diagnostics panel shows the teleop state, each joint, each drive's last CAN frame
 and the simulated bus load.
+
+When a move stops at a limit, the controller rumbles briefly. The RViz label also
+turns red and names the cause, for example `STOPPED-joint_3` or `OUT-OF-REACH`. Rumble
+works with a controller plugged into the ground station and through the Windows
+bridge.
 
 The Cartesian group moves the tool tip along straight lines in the base frame and
 keeps the tool's tilt: every joint moves together, and the tip stops at the edge

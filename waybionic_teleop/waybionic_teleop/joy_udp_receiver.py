@@ -7,9 +7,9 @@ from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from sensor_msgs.msg import Joy
+from sensor_msgs.msg import Joy, JoyFeedback
 
-from waybionic_teleop.gamepad import PACKET_SIZE, unpack
+from waybionic_teleop.gamepad import pack_rumble, PACKET_SIZE, unpack
 
 
 class JoyUdpReceiver(Node):
@@ -26,6 +26,8 @@ class JoyUdpReceiver(Node):
         self.socket.setblocking(False)
         self.joy_publisher = self.create_publisher(Joy, 'joy', 10)
         self.diagnostics_publisher = self.create_publisher(DiagnosticArray, topic, 10)
+        # Same rumble topic as game_controller_node, passed back to the host bridge.
+        self.create_subscription(JoyFeedback, 'joy/set_feedback', self.on_feedback, 10)
         self.sequence = None
         self.last_packet = None
         self.connected = False
@@ -68,6 +70,14 @@ class JoyUdpReceiver(Node):
             message.header.frame_id = 'joy'
             self.joy_publisher.publish(message)
             self.published += 1
+
+    def on_feedback(self, message):
+        if message.type != JoyFeedback.TYPE_RUMBLE or message.id != 0 or self.sender is None:
+            return
+        try:
+            self.socket.sendto(pack_rumble(message.intensity), self.sender)
+        except OSError as error:
+            self.get_logger().warning(f'Rumble not sent: {error}', throttle_duration_sec=5.0)
 
     def report(self):
         now = time.monotonic()
