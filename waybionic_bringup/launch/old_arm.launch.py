@@ -11,6 +11,9 @@ from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node, PushRosNamespace, SetRemap
 
 
+_PYTHON_QUOTE = "'"
+
+
 def generate_launch_description():
     """Reuse the ground station with an isolated model and joint-state topic."""
     description = get_package_share_directory('waybionic_description')
@@ -48,6 +51,7 @@ def generate_launch_description():
             description='Seconds for each synchronized motion segment'),
         DeclareLaunchArgument(
             'hardware_mode', default_value='simulation',
+            choices=['simulation', 'arduino'],
             description='Arm mode: simulation or arduino'),
         DeclareLaunchArgument(
             'arduino_port', default_value='',
@@ -80,9 +84,12 @@ def generate_launch_description():
         name='old_arm_motion_test',
         output='screen',
         condition=IfCondition(PythonExpression([
-            "'", LaunchConfiguration('start_motion_test'), "' == 'true' and '",
-            LaunchConfiguration('hardware_mode'), "' == 'simulation' and '",
-            LaunchConfiguration('use_joint_state_publisher_gui'), "' != 'true'"
+            _PYTHON_QUOTE, LaunchConfiguration('start_motion_test'),
+            _PYTHON_QUOTE + '.lower() in ("true", "1") and ' + _PYTHON_QUOTE,
+            LaunchConfiguration('hardware_mode'),
+            _PYTHON_QUOTE + '.lower() == "simulation" and ' + _PYTHON_QUOTE,
+            LaunchConfiguration('use_joint_state_publisher_gui'),
+            _PYTHON_QUOTE + '.lower() not in ("true", "1")',
         ])),
         parameters=[
             {'segment_duration': LaunchConfiguration(
@@ -96,7 +103,8 @@ def generate_launch_description():
         name='waybionic_arduino_bridge',
         output='screen',
         condition=IfCondition(PythonExpression([
-            "'", LaunchConfiguration('hardware_mode'), "' == 'arduino'"
+            _PYTHON_QUOTE, LaunchConfiguration('hardware_mode'),
+            _PYTHON_QUOTE + '.lower() == "arduino"',
         ])),
         parameters=[
             {'port': LaunchConfiguration('arduino_port')},

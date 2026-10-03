@@ -6,7 +6,7 @@ Use the same four-joint arm model in RViz for both simulation and a connected
 Arduino, while allowing the motion test to command the physical arm and report
 failures instead of only animating a simulated pose.
 
-The current model is `old_arm_prototype.urdf` with these joints:
+The opt-in old-arm model is `waybionic_old_arm.urdf.xacro` with these joints:
 
 - `base_yaw`
 - `shoulder`

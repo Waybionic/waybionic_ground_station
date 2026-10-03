@@ -41,7 +41,7 @@ def generate_launch_description():
     default_model_path = os.path.join(
         waybionic_desc_dir,
         'urdf',
-        'old_arm_prototype.urdf',
+        'waybionic_placeholder.urdf',
     )
 
     default_rviz_config_path = os.path.join(
