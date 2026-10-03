@@ -333,8 +333,8 @@ reconnects by itself.
 
 ### Self-Running Demo
 
-`autoplay:=true` plays a scripted demo whenever the controller has been left alone for
-30 seconds. The demo lifts the arm, draws a square and a vertical line with the tool
+`autoplay:=true` plays a scripted demo as soon as the ground station is ready, and again
+whenever the controller has been left alone for 30 seconds. The demo lifts the arm, draws a square and a vertical line with the tool
 tip, and tilts the tool about its tip, showing the path and a caption in RViz.
 Touching any button, stick or trigger stops the demo at once and hands you the arm.
 Leave the controller alone for 30 seconds and the demo starts again. Autoplay runs

@@ -1,10 +1,10 @@
 """
 Play the controller demo whenever nobody is using the controller.
 
-The real controller arrives on joy_operator and is passed on to teleop's joy topic. After
-idle_s seconds without a button, stick or trigger moving, the demo takes over joy; the moment
-someone touches the controller again, it stops and passes the controller through. The demo
-draws the tool tip's path and a caption in RViz.
+The real controller arrives on joy_operator and is passed on to teleop's joy topic. The demo
+takes over joy as soon as teleop is ready, and again after idle_s seconds without a button,
+stick or trigger moving; the moment someone touches the controller, it stops and passes the
+controller through. The demo draws the tool tip's path and a caption in RViz.
 """
 
 import math
@@ -40,6 +40,7 @@ class Autoplay(Node):
         self.joints = {}
         self.kinematics = None
         self.playing = False
+        # Nobody has used the controller yet, so the demo starts as soon as teleop is ready.
         self.last_used = -math.inf
         self.ticks = 0
         self.caption, self.trail, self.fixed = None, [], None

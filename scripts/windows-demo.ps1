@@ -36,26 +36,25 @@ if ($LASTEXITCODE -ne 0) {
     }
 }
 
-# The bridge needs only Python 3. Without Python installed, Windows still has a python.exe
-# placeholder that fails, so try each command.
+# The bridge needs Python 3. Without Python installed, Windows still has a python.exe
+# placeholder that fails, and python may be Python 2, so ask each one for version 3.
 $python = $null
+$pythonArguments = @()
 foreach ($name in 'py', 'python', 'python3') {
     $command = Get-Command $name -ErrorAction SilentlyContinue
     if (-not $command) {
         continue
     }
-    & $command.Source --version *> $null
+    $prefix = if ($command.Name -eq 'py.exe') { @('-3') } else { @() }
+    & $command.Source @prefix -c 'import sys; sys.exit(sys.version_info[0] != 3)' *> $null
     if ($LASTEXITCODE -eq 0) {
-        $python = $command
+        $python, $pythonArguments = $command, $prefix
         break
     }
 }
 $bridge = $null
 if ($python) {
-    $arguments = @('-m', 'waybionic_teleop.xinput_bridge')
-    if ($python.Name -eq 'py.exe') {
-        $arguments = @('-3') + $arguments
-    }
+    $arguments = $pythonArguments + @('-m', 'waybionic_teleop.xinput_bridge')
     $bridge = Start-Process -FilePath $python.Source -ArgumentList $arguments -PassThru `
         -WorkingDirectory (Join-Path $root 'waybionic_teleop')
 } else {
