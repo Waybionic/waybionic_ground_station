@@ -13,9 +13,11 @@ import ctypes
 import socket
 import time
 
-from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS, pack
+from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS, pack, unpack_rumble
 
 ERROR_SUCCESS = 0
+# game_controller_node rumbles for a second per request unless told to stop; so does this.
+RUMBLE_S = 1.0
 XINPUT_BUTTONS = {
     0x0001: 'dpad_up', 0x0002: 'dpad_down', 0x0004: 'dpad_left', 0x0008: 'dpad_right',
     0x0010: 'start', 0x0020: 'back', 0x0040: 'left_stick', 0x0080: 'right_stick',
@@ -39,6 +41,18 @@ class XInputState(ctypes.Structure):
     _fields_ = [('packet_number', ctypes.c_uint32), ('gamepad', XInputGamepad)]
 
 
+class XInputVibration(ctypes.Structure):
+    """XINPUT_VIBRATION from the Windows SDK."""
+
+    _fields_ = [('left_motor', ctypes.c_ushort), ('right_motor', ctypes.c_ushort)]
+
+
+def vibration(intensity):
+    """Return both motors at the same speed for an intensity between 0 and 1."""
+    speed = round(min(max(intensity, 0.0), 1.0) * 65535)
+    return XInputVibration(left_motor=speed, right_motor=speed)
+
+
 def to_joy(gamepad):
     """Return axes and buttons in game_controller_node order and sign convention."""
     def stick(value):
@@ -56,18 +70,20 @@ def to_joy(gamepad):
 
 
 def load_xinput():
-    """Return XInputGetState from the newest XInput DLL on this machine."""
+    """Return XInputGetState and XInputSetState from the newest XInput DLL on this machine."""
     loader = getattr(ctypes, 'WinDLL', None)
     if loader is None:
         raise SystemExit('XInput is Windows-only; on Linux use joy_source:=device instead.')
     for name in ('xinput1_4', 'xinput1_3', 'xinput9_1_0'):
         try:
-            get_state = loader(name).XInputGetState
+            library = loader(name)
         except OSError:
             continue
+        get_state, set_state = library.XInputGetState, library.XInputSetState
         get_state.argtypes = [ctypes.c_uint, ctypes.POINTER(XInputState)]
-        get_state.restype = ctypes.c_uint
-        return get_state
+        set_state.argtypes = [ctypes.c_uint, ctypes.POINTER(XInputVibration)]
+        get_state.restype = set_state.restype = ctypes.c_uint
+        return get_state, set_state
     raise SystemExit('No XInput DLL found.')
 
 
@@ -79,11 +95,13 @@ def main():
     parser.add_argument('--slot', type=int, choices=range(4),
                         help='XInput controller slot (default: first connected)')
     args = parser.parse_args()
-    get_state = load_xinput()
+    get_state, set_state = load_xinput()
     sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sender.setblocking(False)
     state = XInputState()
     slots = [args.slot] if args.slot is not None else list(range(4))
     active, sequence, next_scan, announced, shown = None, 0, 0.0, None, ''
+    rumble_until = None
     period = 1.0 / args.rate
     neutral = [0.0] * len(AXES), [0] * len(BUTTONS)
     print(f'Sending controller state to {args.host}:{args.port} (Ctrl+C to stop)')
@@ -103,8 +121,26 @@ def main():
                 announced = active
             axes, buttons = to_joy(state.gamepad) if active is not None else neutral
             sequence += 1
-            sender.sendto(pack(sequence, axes, buttons, active is not None),
-                          (args.host, args.port))
+            try:
+                sender.sendto(pack(sequence, axes, buttons, active is not None),
+                              (args.host, args.port))
+            except BlockingIOError:
+                pass
+            # The ground station answers on the same socket when the arm stops at a limit.
+            while True:
+                try:
+                    intensity = unpack_rumble(sender.recvfrom(64)[0])
+                except ValueError:
+                    continue
+                except OSError:
+                    break
+                if active is not None:
+                    set_state(active, ctypes.byref(vibration(intensity)))
+                    rumble_until = started + RUMBLE_S if intensity > 0 else None
+            if rumble_until is not None and started >= rumble_until:
+                if active is not None:
+                    set_state(active, ctypes.byref(vibration(0.0)))
+                rumble_until = None
             if active is not None and sequence % 30 == 0:
                 # The packet count only rises while Windows delivers fresh controller input.
                 held = ' '.join(name for name, pressed in zip(BUTTONS, buttons) if pressed)

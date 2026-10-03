@@ -10,17 +10,20 @@ fail() {
 build=false
 detach=false
 stop=false
+service=linux-gui
 while (($#)); do
   case "$1" in
     --build) build=true ;;
     -d|--detach) detach=true ;;
     --stop) stop=true ;;
+    --controller) service=linux-gui-teleop ;;
     -h|--help)
       printf '%s\n' \
-        'Usage: linux-gui.sh [--build] [-d|--detach] [-- COMMAND ARG...]' \
+        'Usage: linux-gui.sh [--build] [-d|--detach] [--controller] [-- COMMAND ARG...]' \
         '       linux-gui.sh --stop' \
         'Rebuilds the ROS workspace from live source on launch. Use --build after dependency changes.' \
-        'Detached windows remain open after the terminal closes; --stop removes the container.'
+        'Detached windows remain open after the terminal closes; --stop removes the container.' \
+        '--controller passes the game controllers through and starts teleop.'
       exit 0 ;;
     --) shift; break ;;
     -*) fail "Unknown option: $1 (see --help)." ;;
@@ -50,8 +53,15 @@ display_number=${display_number%%.*}
 docker compose version >/dev/null
 
 compose=(docker compose -f "$repo_root/compose.yaml")
+if [[ $service == linux-gui-teleop ]]; then
+  # Controllers belong to the input group; the container user joins it by number.
+  input_gid=$(getent group input | cut -d: -f3 || true)
+  [[ -n $input_gid ]] || input_gid=$(stat -c %g /dev/input/event0 2>/dev/null || true)
+  [[ -n $input_gid ]] || fail "No input devices found under /dev/input."
+  export WAYBIONIC_INPUT_GID=$input_gid
+fi
 if ! $build; then
-  image_name=$("${compose[@]}" config --images linux-gui)
+  image_name=$("${compose[@]}" config --images "$service")
   docker image inspect "$image_name" >/dev/null 2>&1 || fail "The GUI image is unavailable. Run ./scripts/linux-gui.sh --build first (and check Docker access)."
 fi
 # Keep credentials outside the build context. Once mounted, Linux keeps the file
@@ -72,7 +82,7 @@ chmod 644 "$WAYBIONIC_XAUTHORITY"
 run_options=(--rm --pull never --name "$container_name")
 if $build; then run_options+=(--build); fi
 if $detach; then run_options+=(--detach --interactive=false); fi
-"${compose[@]}" run "${run_options[@]}" linux-gui "$@"
+"${compose[@]}" run "${run_options[@]}" "$service" "$@"
 if $detach; then
   printf 'GUI running in background. Stop with: %s/scripts/linux-gui.sh --stop\n' "$repo_root"
 fi

@@ -94,6 +94,42 @@ class TestTeleop(unittest.TestCase):
             node.destroy_node()
             rclpy.shutdown()
 
+    def test_pushing_into_a_limit_rumbles_the_controller(self):
+        rclpy.init()
+        node = rclpy.create_node('rumble_test')
+        sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sender.setblocking(False)
+        # Ahead of the other test's packets, which the receiver may still remember.
+        sequence, rumbles = 1_000_000, []
+
+        def hold(seconds, *pressed, **axes):
+            nonlocal sequence
+            packet_axes = [axes.get(name, 0.0) for name in gamepad.AXES]
+            buttons = [int(name in pressed) for name in gamepad.BUTTONS]
+            end = time.monotonic() + seconds
+            while time.monotonic() < end:
+                sequence += 1
+                sender.sendto(gamepad.pack(sequence, packet_axes, buttons), ('127.0.0.1', PORT))
+                rclpy.spin_once(node, timeout_sec=0.02)
+                try:
+                    rumbles.append(gamepad.unpack_rumble(sender.recv(64)))
+                except BlockingIOError:
+                    pass
+
+        try:
+            hold(0.5)
+            hold(0.2, 'start')
+            # The upper group's left stick bends the elbow until it stops at its limit.
+            hold(4.0, left_y=1.0)
+            hold(0.5)
+            self.assertTrue(rumbles, 'the controller never rumbled')
+            self.assertGreater(rumbles[0], 0.0)
+            self.assertEqual(rumbles[-1], 0.0)
+        finally:
+            sender.close()
+            node.destroy_node()
+            rclpy.shutdown()
+
 
 @launch_testing.post_shutdown_test()
 class TestProcessOutput(unittest.TestCase):
