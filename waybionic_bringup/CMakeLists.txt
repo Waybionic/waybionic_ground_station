@@ -23,6 +23,7 @@ if(BUILD_TESTING)
   add_launch_test(test/test_ground_station_launch.py ${isolated})
   add_launch_test(test/test_arm_model_launch.py ${isolated})
   add_launch_test(test/test_joint_demo_launch.py ${isolated})
+  add_launch_test(test/test_old_arm_launch.py ${isolated})
 endif()
 
 install(PROGRAMS scripts/joint_demo.py

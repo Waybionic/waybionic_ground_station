@@ -1,0 +1,249 @@
+Panels:
+  - Class: rviz_common/Displays
+    Help Height: 70
+    Name: Displays
+    Property Tree Widget:
+      Expanded: ~
+      Splitter Ratio: 0.5
+    Tree Height: 544
+  - Class: rviz_common/Views
+    Expanded:
+      - /Current View1
+    Name: Views
+    Splitter Ratio: 0.5
+  - Class: waybionic_rviz_plugins/DiagnosticsPanel
+    Diagnostics Topic: /diagnostics
+    Name: Engineering Monitor
+    Use Mock Diagnostics: true
+  - Class: waybionic_rviz_plugins/MotionTestPanel
+    Name: MotionTestPanel
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Alpha: 0.44999998807907104
+      Cell Size: 0.05000000074505806
+      Class: rviz_default_plugins/Grid
+      Color: 155; 155; 155
+      Enabled: true
+      Line Style:
+        Line Width: 0.0010000000474974513
+        Value: Lines
+      Name: Grid (50 mm)
+      Normal Cell Count: 0
+      Offset:
+        X: 0
+        Y: 0
+        Z: -0.06599999964237213
+      Plane: XY
+      Plane Cell Count: 12
+      Reference Frame: <Fixed Frame>
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/RobotModel
+      Collision Enabled: false
+      Description File: ""
+      Description Source: Topic
+      Description Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /old_arm/robot_description
+      Enabled: true
+      Links:
+        All Links Enabled: true
+        Expand Joint Details: false
+        Expand Link Details: false
+        Expand Tree: false
+        Link Tree Style: Links in Alphabetic Order
+        old_arm_base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_base_servo_body:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_base_servo_cover:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_distal_left_cover:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_distal_left_servo:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_distal_right_cover:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_distal_right_servo:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_elbow_cover_screws:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_elbow_horn:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_elbow_servo_body:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_elbow_servo_cover:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_forearm:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_shoulder_horn:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_shoulder_mount:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_shoulder_servo_body:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_shoulder_servo_cover:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_tool_frame:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        old_arm_upper_arm:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_wrist_hub:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_wrist_marker:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_wrist_marker_cross:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_wrist_roll:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_wrist_servo_body:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        old_arm_wrist_servo_cover:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+      Mass Properties:
+        Inertia: false
+        Mass: false
+      Name: Old Arm (Video Reference Model)
+      TF Prefix: ""
+      Update Interval: 0
+      Value: true
+      Visual Enabled: true
+    - Class: rviz_default_plugins/Axes
+      Enabled: true
+      Length: 0.03500000014901161
+      Name: Wrist Target Frame
+      Radius: 0.001500000013038516
+      Reference Frame: old_arm_tool_frame
+      Value: true
+  Enabled: true
+  Global Options:
+    Background Color: 238; 240; 242
+    Fixed Frame: old_arm_base_link
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+      Hide Inactive Objects: true
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+      Line color: 128; 128; 0
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 0.7799999713897705
+      Enable Stereo Rendering:
+        Stereo Eye Separation: 0.05999999865889549
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+        Value: false
+      Focal Point:
+        X: 0.07999999821186066
+        Y: 0
+        Z: 0.12999999523162842
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.05000000074505806
+      Invert Z Axis: false
+      Name: Current View
+      Near Clip Distance: 0.004999999888241291
+      Pitch: 0.44999998807907104
+      Target Frame: <Fixed Frame>
+      Value: Orbit (rviz_default_plugins)
+      Yaw: 0.800000011920929
+    Saved: ~
+Window Geometry:
+  Displays:
+    collapsed: false
+  Engineering Monitor:
+    collapsed: false
+  Height: 1143
+  Hide Left Dock: false
+  Hide Right Dock: false
+  MotionTestPanel:
+    collapsed: false
+  QMainWindow State: 000000ff00000000fd0000000200000000000001a400000421fc0200000001fb000000260045006e00670069006e0065006500720069006e00670020004d006f006e00690074006f0072010000003b000004210000034f00ffffff000000010000016800000421fc0200000003fb0000001e004d006f00740069006f006e005400650073007400500061006e0065006c010000003b000000d4000000cc00fffffffb000000100044006900730070006c0061007900730100000115000002a1000000c700fffffffb0000000a0056006900650077007301000003bc000000a0000000a000ffffff0000045c0000042100000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  Views:
+    collapsed: false
+  Width: 1908
+  X: 0
+  Y: 0
