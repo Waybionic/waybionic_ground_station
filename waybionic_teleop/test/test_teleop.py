@@ -220,10 +220,20 @@ def test_without_arm_kinematics_the_cartesian_group_is_skipped(teleop):
     {'tool_limits': [1.0, 0.0]},
     {'cartesian.axes': ['left_y', 'left_x', 'right_y']},
     {'cartesian.mode': 'polar'},
+    {'keep_in_min_mm': [0.0, 0.0, 900.0]},
+    {'keep_in_max_mm': [500.0, 500.0]},
+    {'keep_in_min_mm': [math.nan, 0.0, 0.0]},
 ])
 def test_invalid_mappings_are_rejected(params, change):
     with pytest.raises(ValueError):
         config_from_parameters({**params, **change})
+
+
+def test_a_keep_in_box_without_the_home_pose_is_rejected(params, arm):
+    # The home tool tip is about 759 mm above the base.
+    params['keep_in_max_mm'] = [500.0, 500.0, 500.0]
+    with pytest.raises(ValueError, match='home'):
+        ArmTeleop(config_from_parameters(params), LIMITS, arm)
 
 
 def test_missing_parameters_are_named(params):

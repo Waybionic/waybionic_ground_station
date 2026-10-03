@@ -181,6 +181,26 @@ def test_a_fast_request_slows_the_whole_step_and_stays_on_the_line(arm):
     assert distance_from_line(arm.forward(joints)[0], start, (0.0, 1.0, 0.0)) < 1e-12
 
 
+def test_a_cut_stops_at_the_keep_in_box(arm):
+    start, _ = arm.forward(DOWN)
+    box = ((-1.0, -1.0, -1.0), (1.0, 1.0, start[2] + 0.01))
+    joints = DOWN
+    for _ in range(round(1.0 / DT)):
+        joints, fraction, blocked = arm.jog(joints, (0.0, 0.0, 0.02), 0.0, 0.0, DT, LIMITS,
+                                            MAX_RATE, box)
+    assert arm.forward(joints)[0][2] == pytest.approx(start[2] + 0.01, abs=1e-6)
+    assert blocked == ['keep_in']
+
+
+def test_outside_the_keep_in_box_the_tip_may_only_move_back_in(arm):
+    start, _ = arm.forward(DOWN)
+    box = ((-1.0, -1.0, -1.0), (1.0, 1.0, start[2] - 0.05))
+    up, _, blocked = arm.jog(DOWN, (0.0, 0.0, 0.02), 0.0, 0.0, DT, LIMITS, MAX_RATE, box)
+    assert up == pytest.approx(DOWN, abs=1e-6) and blocked == ['keep_in']
+    _, fraction, blocked = arm.jog(DOWN, (0.0, 0.0, -0.02), 0.0, 0.0, DT, LIMITS, MAX_RATE, box)
+    assert fraction == 1.0 and blocked == []
+
+
 def test_a_cut_stops_on_the_line_at_the_edge_of_the_workspace(arm):
     path = cut(arm, (0.05, 0.0, 0.0), 20.0)
     start = arm.forward(path[0])[0]

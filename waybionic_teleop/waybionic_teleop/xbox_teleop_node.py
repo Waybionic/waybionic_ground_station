@@ -73,7 +73,12 @@ class XboxTeleop(Node):
         except ValueError as error:
             kinematics = None
             self.get_logger().warning(f'Cartesian group unavailable: {error}')
-        self.teleop, self.problem = ArmTeleop(self.config, limits, kinematics), ''
+        try:
+            self.teleop, self.problem = ArmTeleop(self.config, limits, kinematics), ''
+        except ValueError as error:
+            self.teleop, self.problem = None, str(error)
+            self.get_logger().error(f'Teleop disabled: {error}')
+            return
         self.get_logger().info('Xbox teleop ready (press Start to enable): ' + '; '.join(
             f'{group.name}: {group.describe()}' for group in self.teleop.groups))
 

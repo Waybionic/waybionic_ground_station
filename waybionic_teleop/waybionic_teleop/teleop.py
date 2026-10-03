@@ -49,6 +49,7 @@ class TeleopConfig:
     speed_level: int
     deadzone: float
     home_gain: float
+    keep_in: tuple
 
 
 def config_from_parameters(params):
@@ -74,7 +75,9 @@ def config_from_parameters(params):
             speed_levels=[float(level) for level in params['speed_levels']],
             speed_level=int(params['initial_speed_level']),
             deadzone=float(params['deadzone']),
-            home_gain=float(params['home_gain']))
+            home_gain=float(params['home_gain']),
+            keep_in=(tuple(float(value) / 1000.0 for value in params['keep_in_min_mm']),
+                     tuple(float(value) / 1000.0 for value in params['keep_in_max_mm'])))
     except KeyError as missing:
         raise ValueError(f'missing teleop parameter {missing}') from None
     for group in config.groups:
@@ -94,6 +97,11 @@ def config_from_parameters(params):
         raise ValueError('initial_speed_level or deadzone out of range')
     if not config.tool_limits[0] < config.tool_limits[1]:
         raise ValueError('tool_limits must be [open, closed] with open < closed')
+    low, high = config.keep_in
+    if (len(low) != 3 or len(high) != 3 or not all(map(math.isfinite, low + high))
+            or not all(lower < upper for lower, upper in zip(low, high))):
+        raise ValueError('keep_in box is empty: keep_in_min_mm and keep_in_max_mm need '
+                         'three finite values with min < max on each axis')
     return config
 
 
@@ -121,6 +129,17 @@ class ArmTeleop:
         self.blocked = []
         self.note = 'Press Start (Xbox Menu button) to enable'
         self.warning = False
+        if kinematics is not None:
+            tip, _ = kinematics.forward(self.home())
+            low, high = config.keep_in
+            if not all(lower <= value <= upper for value, lower, upper in zip(tip, low, high)):
+                raise ValueError('keep_in box does not contain the home tool tip at '
+                                 + ', '.join(f'{value * 1000.0:.0f}' for value in tip) + ' mm')
+
+    def home(self):
+        """Return the joints homing drives to: zero, clamped to each joint's limits."""
+        return {joint: clamp(0.0, lower, upper) for joint, (lower, upper) in self.limits.items()
+                if joint != self.config.tool_joint}
 
     @property
     def active_group(self):
@@ -194,10 +213,9 @@ class ArmTeleop:
         self.blocked = []
         if homing:
             self.stop_cartesian()
-            for joint, (lower, upper) in self.limits.items():
-                if joint != config.tool_joint:
-                    error = clamp(0.0, lower, upper) - self.targets[joint]
-                    desired[joint] = clamp(config.home_gain * error, -self.speed, self.speed)
+            for joint, home in self.home().items():
+                error = home - self.targets[joint]
+                desired[joint] = clamp(config.home_gain * error, -self.speed, self.speed)
         elif self.active_group.mode == 'cartesian':
             self.jog(axes, dt)
             desired = {config.tool_joint: 0.0}
@@ -247,7 +265,7 @@ class ArmTeleop:
         roll = self.roll + clamp(roll * self.speed - self.roll, -step, step)
         before = {joint: self.targets[joint] for joint in self.kinematics.joints}
         after, fraction, self.blocked = self.kinematics.jog(
-            before, velocity, tilt, roll, dt, self.limits, config.max_speed)
+            before, velocity, tilt, roll, dt, self.limits, config.max_speed, config.keep_in)
         self.linear = tuple(value * fraction for value in velocity)
         self.tilt, self.roll = tilt * fraction, roll * fraction
         for joint in self.kinematics.joints:

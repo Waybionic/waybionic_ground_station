@@ -28,6 +28,14 @@ def _within(value, bounds):
     return lower - TOLERANCE <= value <= upper + TOLERANCE
 
 
+def _inside(point, box, start):
+    # Inside the box, or no further out than start on each axis, so a tip that starts outside
+    # can still be moved back in.
+    low, high = box
+    return all(min(lower, begin) - TOLERANCE <= value <= max(upper, begin) + TOLERANCE
+               for value, lower, upper, begin in zip(point, low, high, start))
+
+
 def nearest_within(angle, reference, bounds):
     """Return the turn of angle nearest reference that lies within bounds, or None."""
     base = reference + math.remainder(angle - reference, 2 * math.pi)
@@ -139,21 +147,24 @@ class ArmKinematics:
                         best, best_cost = candidate, cost
         return best
 
-    def jog(self, joints, velocity, pitch_rate, roll_rate, dt, limits, max_rate):
+    def jog(self, joints, velocity, pitch_rate, roll_rate, dt, limits, max_rate, keep_in=None):
         """
         Move the tip along a straight line for dt; return (joints, fraction, blocked).
 
         pitch_rate tilts the tool about its tip. The whole step shrinks, never one joint, so
         the tip stays on the line when a joint would pass max_rate or a limit. Roll turns
         against the yaw, so the tool doesn't spin about its own axis as the base turns; with
-        the tool pointing straight down, that keeps a blade's heading.
+        the tool pointing straight down, that keeps a blade's heading. keep_in, ((x, y, z) min,
+        (x, y, z) max) in the base frame, stops the tip at the box walls.
         """
         start, pitch = self.forward(joints)
         yaw, roll = self.joints[0], self.joints[4]
 
-        def solve(fraction, bounds):
+        def solve(fraction, bounds, box=keep_in):
             new_pitch = pitch + pitch_rate * dt * fraction
             target = [p + v * dt * fraction for p, v in zip(start, velocity)]
+            if box is not None and not _inside(target, box, start):
+                return None
             arm = {name: value for name, value in bounds.items() if name != roll}
             result = self.inverse(target, new_pitch, joints[roll], joints, arm)
             if result is None:
@@ -174,7 +185,12 @@ class ArmKinematics:
             if fastest(result) <= max_rate * (1.0 + 1e-6):
                 return result, fraction, []
             fraction *= max_rate / fastest(result)
-        blocked = [] if result is not None else self._blockers(solve(fraction, {}), limits)
+        if result is not None:
+            blocked = []
+        elif keep_in is not None and solve(fraction, limits, None) is not None:
+            blocked = ['keep_in']
+        else:
+            blocked = self._blockers(solve(fraction, {}, None), limits)
         # Go as far along the line as the limits allow; the rate check also rejects any
         # jump to another solution branch.
         low, high, best = 0.0, fraction, None

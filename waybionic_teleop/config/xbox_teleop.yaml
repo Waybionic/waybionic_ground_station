@@ -49,3 +49,6 @@ xbox_teleop:
     tool_open_axis: left_trigger
     tool_frame: tool_link
     base_frame: base_link
+    # Keep-in box for the tool tip in base_frame, in mm: [x, y, z]. Must contain the home pose.
+    keep_in_min_mm: [-400.0, -400.0, 50.0]
+    keep_in_max_mm: [400.0, 400.0, 800.0]
