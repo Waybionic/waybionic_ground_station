@@ -1,3 +1,17 @@
+# Copyright 2026 Waybionic
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """ROS-independent drive health evaluation for a single axis."""
 
 from collections import deque
@@ -38,7 +52,8 @@ class DriveHealthThresholds:
 
 
 class DriveHealthMonitor:
-    """Evaluate health for one axis using target and reply data.
+    """
+    Evaluate health for one axis using target and reply data.
 
     Positions and encoder samples must be in degrees. ``reply_age_seconds`` is
     the age of the latest valid reply. ``now_seconds`` must use a monotonic
@@ -58,7 +73,8 @@ class DriveHealthMonitor:
             enabled: bool,
             reply_age_seconds: float,
             now_seconds: float) -> DriveHealthState:
-        """Return the highest-priority health state for the latest sample.
+        """
+        Return the highest-priority health state for the latest sample.
 
         State precedence is DISABLED, NOT_RESPONDING, FOLLOWING_ERROR,
         STALLED, then OK. A disabled or non-responding drive resets stall
