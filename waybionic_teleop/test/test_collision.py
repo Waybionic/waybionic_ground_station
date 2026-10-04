@@ -2,6 +2,7 @@
 
 import math
 from pathlib import Path
+import re
 
 import pytest
 
@@ -12,6 +13,7 @@ from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
         / 'waybionic_arm.urdf').read_text(encoding='utf-8')
+COLLISION = re.compile(r'<collision .*?</collision>', re.S)
 LIMITS = {'joint_1': (-math.pi, math.pi), 'joint_2': (-1.5708, 1.5708),
           'joint_3': (-1.5708, 1.5708), 'joint_4': (-1.5708, 1.5708),
           'joint_5': (-1.5708, 1.5708)}
@@ -48,6 +50,26 @@ def test_folding_back_into_the_base_is_caught_past_todays_joint_limits(check):
     assert not any('table' in hit for hit in hits)
 
 
+def test_the_elbow_folds_until_the_forearm_almost_touches_the_shoulder(check):
+    # The forearm's boxes would stop this near 134 degrees; the CAD fold table allows 147.
+    assert check.hits(pose(0, 146, 0)) == [] and check.hits(pose(0, -146, 0)) == []
+    assert check.hits(pose(0, 149, 0)) == ['forearm_link: shoulder_link']
+    assert check.hits(pose(0, -149, 0)) == ['forearm_link: shoulder_link']
+
+
+def test_the_fold_limit_follows_the_shoulder_angle():
+    # With the shoulder tilted, the forearm meets the shoulder sooner on that side.
+    away = ArmCollision.from_urdf(URDF, table_z=-10.0)
+    for sign in (1, -1):
+        assert 'forearm_link: shoulder_link' not in away.hits(pose(sign * 90, sign * 128, 0))
+        assert 'forearm_link: shoulder_link' in away.hits(pose(sign * 90, sign * 133, 0))
+
+
+def test_a_fold_table_for_unknown_joints_is_refused():
+    with pytest.raises(ValueError, match='waybionic_fold'):
+        ArmCollision.from_urdf(URDF.replace('across="joint_2"', 'across="joint_9"'))
+
+
 def test_table_height_and_clearance_are_configurable():
     # This pose's tool tip is 175 mm above the bottom of the base.
     joints = pose(28.6, 80.2, 71.1, 0.1)
@@ -58,13 +80,12 @@ def test_table_height_and_clearance_are_configurable():
 
 def test_a_urdf_without_collision_boxes_is_refused():
     with pytest.raises(ValueError, match='no collision box'):
-        ArmCollision.from_urdf(URDF.replace('<collision>', '<!--').replace('</collision>', '-->'))
-    # Every link the checks rely on needs its box, including the upper arm.
-    upper_arm = URDF.index('<link name="upper_arm_link">')
-    start = URDF.index('<collision>', upper_arm)
-    end = URDF.index('</collision>', start) + len('</collision>')
+        ArmCollision.from_urdf(re.sub(COLLISION, '', URDF))
+    # Every link the checks rely on needs its boxes, including the upper arm.
+    start = URDF.index('<link name="upper_arm_link">')
+    end = URDF.index('</link>', start)
     with pytest.raises(ValueError, match='upper_arm_link'):
-        ArmCollision.from_urdf(URDF[:start] + URDF[end:])
+        ArmCollision.from_urdf(URDF[:start] + re.sub(COLLISION, '', URDF[start:end]) + URDF[end:])
 
 
 def test_teleop_backs_out_of_a_collision_but_never_goes_deeper(parameters, check):

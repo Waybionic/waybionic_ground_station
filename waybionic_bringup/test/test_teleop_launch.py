@@ -126,8 +126,9 @@ class TestTeleop(unittest.TestCase):
         try:
             hold(0.5)
             hold(0.2, 'start')
-            # The upper group's left stick bends the elbow until it stops at its limit.
-            hold(4.0, left_y=1.0)
+            # The upper group's left stick bends the elbow until it stops at the table or its
+            # limit, both past 120 degrees at 30 deg/s.
+            hold(6.0, left_y=1.0)
             hold(0.5)
             self.assertTrue(rumbles, 'the controller never rumbled')
             self.assertGreater(rumbles[0], 0.0)

@@ -1,10 +1,12 @@
 """
 Keep the arm's links off the table and out of its own base (pure logic, no ROS).
 
-Each link's collision boxes come from the URDF, and every check happens in the base frame.
-The moving links must stay above the table, and the forearm, wrist and tool must stay out of
-the base and shoulder, the parts they can fold into. Adjacent links overlap at their joints,
-so those pairs are never compared.
+Each link's collision boxes come from the URDF (one per CAD part), and every check happens
+in the base frame. The moving links must stay above the table, and the forearm, wrist and tool
+must stay out of the base and shoulder, the parts they can fold into. Adjacent links overlap
+at their joints, so those pairs are never compared; the joint limits keep them apart. Where
+the URDF has a fold table for a pair (waybionic_fold, measured from the CAD), the table replaces
+the boxes for it: the elbow may fold until the forearm is about to touch the shoulder.
 """
 
 import math
@@ -52,15 +54,52 @@ def _rpy(roll, pitch, yaw):
         _rotation((0.0, 1.0, 0.0), pitch), _rotation((1.0, 0.0, 0.0), roll)))
 
 
+class Fold:
+    """Limits of one joint against another joint's angle, linearly interpolated."""
+
+    def __init__(self, element, boxes, joints):
+        self.link, self.obstacle = element.get('link'), element.get('obstacle')
+        self.joint, self.across = element.get('joint'), element.get('across')
+        try:
+            self.start, self.step = float(element.get('start')), float(element.get('step'))
+            self.upper = [math.radians(float(v)) for v in element.get('upper').split()]
+            self.lower = [math.radians(float(v)) for v in element.get('lower').split()]
+        except (AttributeError, TypeError, ValueError):
+            raise ValueError('waybionic_fold needs numeric start, step, upper and lower') from None
+        if not (self.step > 0.0 and len(self.upper) == len(self.lower) >= 2):
+            raise ValueError('waybionic_fold needs a positive step and matching tables')
+        if self.link not in boxes or not {self.joint, self.across} <= joints:
+            raise ValueError('waybionic_fold refers to an unknown joint or link')
+        # Turns radians past the table into metres, like the box overlaps.
+        self.reach = max(math.sqrt(_dot(center, center)) + math.sqrt(_dot(half, half))
+                         for center, _, half in boxes[self.link])
+
+    def limits(self, across):
+        """Return (lower, upper) in radians at this angle of the other joint."""
+        x = (math.degrees(across) - self.start) / self.step
+        index = min(max(int(math.floor(x)), 0), len(self.upper) - 2)
+        t = min(max(x - index, 0.0), 1.0)
+        return tuple(table[index] + t * (table[index + 1] - table[index])
+                     for table in (self.lower, self.upper))
+
+    def excess(self, positions):
+        """How far past the table the joint is, in radians, or 0."""
+        lower, upper = self.limits(positions.get(self.across, 0.0))
+        angle = positions.get(self.joint, 0.0)
+        return max(angle - upper, lower - angle, 0.0)
+
+
 class ArmCollision:
     """Collision boxes and joint tree read from a URDF."""
 
-    def __init__(self, boxes, joints, root, table_z=0.0, clearance=0.01):
+    def __init__(self, boxes, joints, root, table_z=0.0, clearance=0.01, self_clearance=0.002,
+                 folds=()):
         self.boxes, self.joints, self.root = boxes, joints, root
-        self.table_z, self.clearance = table_z, clearance
+        self.table_z, self.clearance, self.self_clearance = table_z, clearance, self_clearance
+        self.folds = {(fold.link, fold.obstacle): fold for fold in folds}
 
     @classmethod
-    def from_urdf(cls, urdf, table_z=0.0, clearance=0.01):
+    def from_urdf(cls, urdf, table_z=0.0, clearance=0.01, self_clearance=0.002):
         """Read boxes and joints; raise ValueError without boxes for the base and folding links."""
         try:
             robot = ET.fromstring(urdf)
@@ -94,7 +133,9 @@ class ArmCollision:
             children.add(joint.find('child').get('link'))
         roots = [link.get('name') for link in robot.findall('link')
                  if link.get('name') not in children]
-        checker = cls(boxes, joints, roots[0], table_z, clearance)
+        names = {joint['name'] for joint in joints.values()}
+        folds = [Fold(element, boxes, names) for element in robot.findall('waybionic_fold')]
+        checker = cls(boxes, joints, roots[0], table_z, clearance, self_clearance, folds)
         checker.poses({})
         return checker
 
@@ -145,15 +186,31 @@ class ArmCollision:
             if lowest < self.table_z + self.clearance:
                 found.append(f'{link}: table')
                 depth += self.table_z + self.clearance - lowest
+        world = {link: [(box, math.sqrt(_dot(box[2], box[2])))
+                        for box in self.world_boxes(poses, link)] for link in BODY + FOLDING}
         for link in FOLDING:
             for body in BODY:
-                overlaps = [_overlap(box, obstacle, self.clearance)
-                            for box in self.world_boxes(poses, link)
-                            for obstacle in self.world_boxes(poses, body)]
+                fold = self.folds.get((link, body))
+                if fold is not None:
+                    excess = fold.excess(positions)
+                    if excess > 0.0:
+                        found.append(f'{link}: {body}')
+                        depth += excess * fold.reach
+                    continue
+                overlaps = [
+                    _overlap(box, obstacle, self.self_clearance)
+                    for box, radius in world[link] for obstacle, reach in world[body]
+                    # Boxes whose bounding spheres are apart cannot overlap.
+                    if _squared_distance(box[0], obstacle[0])
+                    < (radius + reach + self.self_clearance) ** 2]
                 if any(overlap > 0.0 for overlap in overlaps):
                     found.append(f'{link}: {body}')
                     depth += max(overlaps)
         return found, depth
+
+
+def _squared_distance(a, b):
+    return sum((x - y) ** 2 for x, y in zip(a, b))
 
 
 def _overlap(a, b, margin):

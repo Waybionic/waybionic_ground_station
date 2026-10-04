@@ -19,7 +19,8 @@
 
 Joint axes come from the named mates below. Joint zero is the upright pose used
 by the mechanical team's fk.py (links along +Z, pitch about +Y); the saved CAD
-pose is reported as joint values. Limits are provisional until hardware sets them.
+pose is reported as joint values. Each part gets its own collision box, so the
+teleop collision checks follow the parts rather than one box per link.
 """
 
 import argparse
@@ -27,6 +28,7 @@ import array
 import json
 import math
 from pathlib import Path
+from xml.sax.saxutils import quoteattr
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 URDF_PATH = REPOSITORY / 'waybionic_description' / 'urdf' / 'waybionic_arm.urdf'
@@ -53,17 +55,36 @@ LINKS = {
 }
 
 # name, parent, child, axis mate, origin plane mate, SolidWorks rotor, limits in degrees.
+# The pitch limits stop about 1 degree before two CAD parts touch, found with
+# scripts/cad/joint_clearance.py; base yaw and wrist roll never touch, so cabling sets them.
 JOINTS = (
     ('joint_1', 'base_link', 'shoulder_link', 'Concentric124', 'Coincident70',
      'outer_ring_sweep_loose-1', (-180.0, 180.0)),
     ('joint_2', 'shoulder_link', 'upper_arm_link', 'Concentric112', 'Coincident57',
-     'outer-ring-Nema23-1', (-90.0, 90.0)),
+     'outer-ring-Nema23-1', (-135.0, 135.0)),
     ('joint_3', 'upper_arm_link', 'forearm_link', 'Concentric127', 'Coincident71',
-     'outer_ring_sweep_loose-2', (-90.0, 90.0)),
+     'outer_ring_sweep_loose-2', (-147.0, 147.0)),
     ('joint_4', 'forearm_link', 'wrist_pitch_link', 'Concentric139', None,
-     'DifferentialHousing-1', (-90.0, 90.0)),
+     'DifferentialHousing-1', (-93.0, 93.0)),
     ('joint_5', 'wrist_pitch_link', 'wrist_roll_link', 'Concentric143', None,
-     'straight bevel pinion_iso-3', (-90.0, 90.0)),
+     'straight bevel pinion_iso-3', (-180.0, 180.0)),
+)
+# How far the elbow folds before the forearm meets the shoulder depends on the shoulder angle:
+# shoulder angles from START in steps of STEP degrees, then the elbow's upper and lower limits
+# there, 1 degree short of contact (scripts/cad/joint_clearance.py). The collision boxes are
+# too coarse for this pair, so the teleop collision check reads this table instead.
+ELBOW_FOLD = (
+    -135.0, 5.0,
+    (147.3, 147.4, 147.4, 147.5, 147.6, 147.6, 147.6, 147.6, 147.6, 147.7, 147.7, 147.7, 147.7,
+     147.7, 147.7, 147.7, 147.7, 147.7, 147.7, 147.7, 147.7, 147.7, 147.7, 147.6, 147.6, 147.6,
+     147.6, 147.5, 147.5, 147.4, 147.4, 147.3, 147.2, 147.1, 147.0, 146.3, 144.8, 143.3, 141.6,
+     139.9, 138.1, 136.4, 134.7, 133.1, 131.7, 130.2, 128.9, 127.6, 126.5, 125.6, 124.8, 124.3,
+     121.9, 121.9, 122.6),
+    (-122.7, -121.9, -121.8, -124.3, -124.8, -125.6, -126.5, -127.6, -128.8, -130.1, -131.6,
+     -133.2, -134.7, -136.4, -138.1, -139.8, -141.6, -143.3, -144.8, -146.3, -147.0, -147.1,
+     -147.2, -147.3, -147.4, -147.4, -147.5, -147.5, -147.5, -147.6, -147.6, -147.6, -147.6,
+     -147.6, -147.7, -147.7, -147.7, -147.7, -147.7, -147.7, -147.7, -147.7, -147.7, -147.7,
+     -147.7, -147.6, -147.6, -147.6, -147.6, -147.6, -147.5, -147.5, -147.5, -147.4, -147.3),
 )
 DESCRIPTIONS = {
     'joint_1': 'base yaw', 'joint_2': 'shoulder pitch', 'joint_3': 'elbow pitch',
@@ -470,9 +491,10 @@ class Model:
 
 
 def quantized_link_mesh(model, link, grid):
-    """Triangles per color in link coordinates, snapped to a grid with per-face normals."""
+    """Triangles per color in link coordinates, snapped to a grid, and each part's extent."""
     export = model.export
     groups = {}
+    extents = {}
     to_link = model.frames[link].inverse() * model.to_base
     stats = {'input': 0, 'output': 0, 'bodies': 0, 'flipped': 0, 'conflicts': 0}
     for name in sorted(model.assigned[link]):
@@ -529,9 +551,13 @@ def quantized_link_mesh(model, link, grid):
                     length = norm(normals[old])
                     group['positions'].append(keys[old])
                     group['normals'].append(scale(normals[old], 1.0 / length) if length > 1e-15 else (0.0, 0.0, 1.0))
+                    low, high = extents.setdefault(name, (list(keys[old]), list(keys[old])))
+                    for axis in range(3):
+                        low[axis] = min(low[axis], keys[old][axis])
+                        high[axis] = max(high[axis], keys[old][axis])
                 group['triangles'].extend(tuple(remap[k] for k in triangle) for triangle in triangles)
                 stats['output'] += len(triangles)
-    return groups, stats
+    return groups, stats, extents
 
 
 def write_collada(path, link, groups):
@@ -589,19 +615,25 @@ def write_collada(path, link, groups):
     path.write_text('\n'.join(lines), encoding='utf-8')
 
 
-def collision_box(groups):
-    """Return the centre and size of the box around a link's mesh, in link coordinates."""
-    points = [point for group in groups.values() for point in group['positions']]
-    low = [min(point[axis] for point in points) for axis in range(3)]
-    high = [max(point[axis] for point in points) for axis in range(3)]
-    return [(a + b) / 2 for a, b in zip(low, high)], [b - a for a, b in zip(low, high)]
+def part_boxes(extents):
+    """Return [(part, centre, size)]: one box per part, leaving out boxes inside another."""
+    items = sorted(extents.items())
+
+    def inside(box, other):
+        return all(other[0][a] <= box[0][a] and box[1][a] <= other[1][a] for a in range(3))
+
+    kept = [(name, box) for index, (name, box) in enumerate(items)
+            if not any(inside(box, other) and (not inside(other, box) or position < index)
+                       for position, (_, other) in enumerate(items) if position != index)]
+    return [(name, [(a + b) / 2 for a, b in zip(low, high)], [b - a for a, b in zip(low, high)])
+            for name, (low, high) in kept]
 
 
-def collision_lines(center, size):
+def collision_lines(name, center, size):
     return [
-        '    <collision>',
-        f'      <origin xyz="{vector_text(center, 4)}" rpy="0 0 0"/>',
-        f'      <geometry><box size="{vector_text(size, 4)}"/></geometry>',
+        f'    <collision name={quoteattr(name)}>',
+        f'      <origin xyz="{vector_text(center, 5)}" rpy="0 0 0"/>',
+        f'      <geometry><box size="{vector_text(size, 5)}"/></geometry>',
         '    </collision>']
 
 
@@ -613,7 +645,8 @@ def write_urdf(model, source, boxes):
         '     Do not edit by hand; re-export the SolidWorks assembly and re-run the script.',
         '     Joint zero is the upright pose from the mechanical fk.py (links along +Z,',
         f'     pitch about +Y). Saved CAD pose in degrees {angles}.',
-        '     Limits are provisional; effort and velocity are placeholders for display. -->',
+        '     Each pitch joint stops about 1 degree before two parts touch; one collision box',
+        '     per part. Effort and velocity are placeholders for display. -->',
         '<robot name="waybionic_arm">']
     for link in LINKS:
         lines += [
@@ -621,7 +654,7 @@ def write_urdf(model, source, boxes):
             '    <visual>',
             f'      <geometry><mesh filename="{MESH_URI}{link}.dae"/></geometry>',
             '    </visual>',
-            *collision_lines(*boxes[link]),
+            *[line for box in boxes[link] for line in collision_lines(*box)],
             '  </link>']
     lines += ['  <link name="tool_link"/>']
     for joint in model.joints:
@@ -640,12 +673,24 @@ def write_urdf(model, source, boxes):
         if joint['mimic']:
             lines.append(f'    <mimic joint="{joint["mimic"][0]}" multiplier="{fmt(joint["mimic"][1])}" offset="0"/>')
         lines.append('  </joint>')
+    start, step, upper, lower = ELBOW_FOLD
+    shoulder = next(limits for name, *_, limits in JOINTS if name == 'joint_2')
+    if (len(upper) != len(lower) or start != shoulder[0]
+            or abs(start + step * (len(upper) - 1) - shoulder[1]) > 1e-6):
+        raise ValueError('ELBOW_FOLD must span the shoulder limits; re-run joint_clearance.py')
     lines += [
         '  <joint name="tool_joint" type="fixed">',
         '    <parent link="wrist_roll_link"/>',
         '    <child link="tool_link"/>',
         f'    <origin xyz="0 0 {fmt(model.tool_length)}" rpy="0 0 0"/>',
         '  </joint>',
+        '  <!-- Elbow limits in degrees against the shoulder angle, 1 degree before the forearm',
+        f'       meets the shoulder, for shoulder angles from {start:g} in steps of {step:g}.',
+        '       The teleop collision check reads this; other URDF tools ignore it. -->',
+        f'  <waybionic_fold link="forearm_link" obstacle="shoulder_link" joint="joint_3"'
+        f' across="joint_2" start="{start:g}" step="{step:g}"',
+        f'      upper="{" ".join(f"{value:g}" for value in upper)}"',
+        f'      lower="{" ".join(f"{value:g}" for value in lower)}"/>',
         '</robot>',
         '']
     URDF_PATH.write_text('\n'.join(lines), encoding='utf-8')
@@ -787,10 +832,10 @@ def main():
     total_in = total_out = 0
     boxes = {}
     for link in LINKS:
-        groups, stats = quantized_link_mesh(model, link, arguments.grid)
+        groups, stats, extents = quantized_link_mesh(model, link, arguments.grid)
         path = MESH_DIRECTORY / f'{link}.dae'
         write_collada(path, link, groups)
-        boxes[link] = collision_box(groups)
+        boxes[link] = part_boxes(extents)
         total_in += stats['input']
         total_out += stats['output']
         print(f'  {path.name}: {stats["input"]} -> {stats["output"]} triangles, {len(groups)} colors, '

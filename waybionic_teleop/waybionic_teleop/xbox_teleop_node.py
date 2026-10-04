@@ -55,6 +55,7 @@ class XboxTeleop(Node):
         self.base_frame = params['base_frame']
         self.table_height = float(params.get('table_height', 0.0))
         self.clearance = float(params.get('collision_clearance', 0.01))
+        self.self_clearance = float(params.get('self_collision_clearance', 0.002))
         self.teleop = None
         self.problem = 'Waiting for robot_description'
         self.joy = None
@@ -97,7 +98,8 @@ class XboxTeleop(Node):
             kinematics = None
             self.get_logger().warning(f'Cartesian group unavailable: {error}')
         try:
-            collision = ArmCollision.from_urdf(message.data, self.table_height, self.clearance)
+            collision = ArmCollision.from_urdf(message.data, self.table_height, self.clearance,
+                                               self.self_clearance)
         except ValueError as error:
             collision = None
             self.get_logger().warning(f'No table or base collision checks: {error}')
