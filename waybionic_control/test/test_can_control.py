@@ -321,6 +321,110 @@ class TestCanControlLogic(unittest.TestCase):
         finally:
             degraded.destroy_node()
 
+    def test_mock_drive_health_fault_parameter_applies_and_clears(self):
+        node = MockDrivesNode(parameter_overrides=[
+            Parameter('transport', Parameter.Type.STRING, 'udp_multicast'),
+            Parameter('simulate_faults', Parameter.Type.BOOL, False),
+        ])
+        node.test_health_fault_publisher.publish = MagicMock()
+        try:
+            for fault in MockDrivesNode.TEST_HEALTH_FAULTS:
+                result = node.set_parameters([Parameter(
+                    'test_health_fault', Parameter.Type.STRING, f'3:{fault}')])[0]
+                self.assertTrue(result.successful, result.reason)
+                self.assertEqual(node.test_health_faults[3], fault)
+                self.assertEqual(
+                    node.test_health_fault_publisher.publish.call_args.args[0].message,
+                    fault)
+
+            clear = node.set_parameters([Parameter(
+                'test_health_fault', Parameter.Type.STRING, 'none')])[0]
+            self.assertTrue(clear.successful, clear.reason)
+            self.assertIsNone(node.test_health_faults[3])
+            self.assertIsNone(node.active_test_health_fault)
+            self.assertEqual(
+                node.test_health_fault_publisher.publish.call_args.args[0].message,
+                'none')
+        finally:
+            node.destroy_node()
+
+    def test_mock_drive_health_fault_parameter_rejects_invalid_values(self):
+        node = MockDrivesNode(parameter_overrides=[
+            Parameter('transport', Parameter.Type.STRING, 'udp_multicast')])
+        try:
+            for value in ('7:stalled', '2:unknown', 'not-a-fault'):
+                with self.subTest(value=value):
+                    result = node.set_parameters([Parameter(
+                        'test_health_fault', Parameter.Type.STRING, value)])[0]
+                    self.assertFalse(result.successful)
+            self.assertEqual(node.test_health_faults, {})
+        finally:
+            node.destroy_node()
+
+    def test_runtime_fault_trigger_changes_selected_mock_drive_and_clears(self):
+        node = MockDrivesNode(parameter_overrides=[
+            Parameter('transport', Parameter.Type.STRING, 'udp_multicast'),
+            Parameter('simulate_faults', Parameter.Type.BOOL, False),
+        ])
+        node.bus.recv.return_value = None
+        node.targets[2] = 1.0
+        node.targets[3] = 1.0
+        try:
+            result = node.set_parameters([Parameter(
+                'test_health_fault', Parameter.Type.STRING, '2:stalled')])[0]
+            self.assertTrue(result.successful, result.reason)
+            node.timer_callback()
+            self.assertEqual(node.positions[2], 0.0)
+            self.assertEqual(node.positions[3], 0.5)
+
+            result = node.set_parameters([Parameter(
+                'test_health_fault', Parameter.Type.STRING, '3:not_responding')])[0]
+            self.assertTrue(result.successful, result.reason)
+            self.assertIsNone(node.test_health_faults[2])
+            node.bus.send.reset_mock()
+            node.timer_callback()
+            sent_ids = [call.args[0].arbitration_id
+                        for call in node.bus.send.call_args_list]
+            self.assertNotIn(codec.STATE_BASE_ID + 3, sent_ids)
+
+            result = node.set_parameters([Parameter(
+                'test_health_fault', Parameter.Type.STRING, '3:disabled')])[0]
+            self.assertTrue(result.successful, result.reason)
+            node.timer_callback()
+            self.assertFalse(node.enabled[3])
+            self.assertIn(codec.STATE_BASE_ID + 3, [
+                call.args[0].arbitration_id for call in node.bus.send.call_args_list])
+
+            result = node.set_parameters([Parameter(
+                'test_health_fault', Parameter.Type.STRING, 'none')])[0]
+            self.assertTrue(result.successful, result.reason)
+            position_before_clear = node.positions[3]
+            node.timer_callback()
+            self.assertTrue(node.enabled[3])
+            self.assertGreater(node.positions[3], position_before_clear)
+        finally:
+            node.destroy_node()
+
+    def test_mock_fault_status_controls_enabled_only_in_test_host_mode(self):
+        node = CanHostNode(parameter_overrides=[
+            Parameter('transport', Parameter.Type.STRING, 'udp_multicast'),
+            Parameter('mock_test_mode', Parameter.Type.BOOL, True),
+        ])
+        try:
+            disabled = DiagnosticStatus(
+                name='mock_drives.test_health_fault',
+                hardware_id='joint_4',
+                message='disabled',
+            )
+            node.on_mock_test_health_fault(disabled)
+            self.assertFalse(node.enabled[4])
+
+            disabled.message = 'none'
+            node.on_mock_test_health_fault(disabled)
+            self.assertTrue(node.enabled[4])
+        finally:
+            node.destroy_node()
+
 
 if __name__ == '__main__':
     unittest.main()

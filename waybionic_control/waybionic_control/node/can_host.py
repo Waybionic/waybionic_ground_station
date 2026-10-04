@@ -39,6 +39,13 @@ class CanHostNode(Node):
 
         self.declare_parameter('can_interface', 'vcan0')
         self.declare_parameter('transport', 'socketcan')
+        self.declare_parameter('mock_test_mode', False)
+
+        self.mock_test_mode = self.get_parameter('mock_test_mode').value
+        if self.mock_test_mode:
+            self.mock_test_fault_sub = self.create_subscription(
+                DiagnosticStatus, '/mock_drives/test_health_fault',
+                self.on_mock_test_health_fault, 10)
 
         can_interface = self.get_parameter('can_interface').value
         self.transport = self.get_parameter('transport').value
@@ -86,6 +93,17 @@ class CanHostNode(Node):
         self.create_timer(0.05, self.read_bus)
         self.create_timer(1.0, self.publish_diagnostics)
         self.get_logger().info('Host node started. Ready for bidirectional CAN.')
+
+    def on_mock_test_health_fault(self, status):
+        """Apply only the mock's test-only enabled flag to host diagnostics."""
+        if status.name != 'mock_drives.test_health_fault':
+            return
+        try:
+            joint_id = int(status.hardware_id.removeprefix('joint_'))
+        except ValueError:
+            return
+        if joint_id in self.enabled and status.message in ('none', 'disabled'):
+            self.enabled[joint_id] = status.message != 'disabled'
 
     def command_callback(self, msg):
         if self.bus is None:
