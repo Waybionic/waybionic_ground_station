@@ -21,13 +21,13 @@ This folder holds the Arduino firmware for bringing up the arm's MKS drives on a
   - the target is within one motor turn (0x4000 counts) of that reading;
   - speed is 1-60 rpm and acc is 1-128.
   These are bench limits on top of the `mks_can.py` protocol limits (axis ±0x7FFFFF, 0-3000 rpm, acc 0-255). They are constants in the sketch (`benchPolicy()` / `MotionPolicy`). Change them only with the leads, then re-upload.
-- The CAN bitrate stays at the drive's factory **500 kbit/s** until the leads agree on a change.
-- `F7h` emergency stop, changing a drive's CAN ID and changing its bitrate are **not implemented**, because their frame bytes are not in any source in this repo (see [Protocol status](#protocol-status)).
+- The bench sketches stay at the drive's factory **500 kbit/s**. The ground station runs the bus at **1 Mbit/s**, so switch each drive first (`mks_setup set-bitrate`, see [Bitrate](#bitrate)).
+- The host (`waybionic_teleop/mks_can.py`) builds `F7h` emergency stop, set CAN ID (8Bh) and set bitrate (8Ah) from the MKS CAN manual V1.0.9. The bench console's `estop` still sends nothing.
 
 ## Hardware topology
 
 ```text
-laptop (USB serial, 115200 baud)
+laptop (USB serial: 1000000 baud for carrier_bridge, 115200 for the consoles)
    |
 UNO R4 WiFi -- CAN TX = D10 --> TJA1051T TXD
             <- CAN RX = D13 --- TJA1051T RXD
@@ -50,10 +50,18 @@ UNO R4 WiFi -- CAN TX = D10 --> TJA1051T TXD
 | Where | Bitrate | Status |
 | --- | --- | --- |
 | MKS drives as shipped | 500 kbit/s | Factory default |
-| These sketches (`kCanBitrate`) | 500 kbit/s | Matches the drives |
-| `waybionic_teleop/config/arm_drives.yaml` (PR #24/#27 simulator) | 1 Mbit/s | **The team must reconcile this.** The yaml comment says 1 Mbit/s keeps six drives at 120 Hz near 40 % bus load. |
+| Bench sketches (`kCanBitrate`) | 500 kbit/s | Match the drives as shipped |
+| Ground station (`arm_drives.yaml`) through `carrier_bridge` | 1 Mbit/s | Six drives at 120 Hz load the bus about 30% (about 60% at 500 kbit/s) |
 
-Moving to 1 Mbit/s means changing every drive's bitrate first (its command bytes are unknown, see TODO), then `kCanBitrate` in every sketch. If the Arduino and a drive disagree, nothing gets ACKed. The sketches then report repeated `CAN controller error event` lines, and possibly `TX ... SEND FAILED`.
+Switch each drive before the ground station drives it, one drive on the bus at a time. The carrier keeps the bit rate it first opened with until it resets, so replug it before checking that they all answer at the new rate:
+
+```bash
+./scripts/macos.sh drives set-bitrate 3 1000000     # the drive answers, then switches
+# replug the carrier
+./scripts/macos.sh drives --bitrate 1000000 scan
+```
+
+`CanRate` on the drive's screen does the same. If the Arduino and a drive disagree, nothing gets ACKed. The sketches then report repeated `CAN controller error event` lines, and possibly `TX ... SEND FAILED`.
 
 ## Checksum vs CRC
 
@@ -181,15 +189,18 @@ The stop here is F5h with speed 0. F7h is not implemented (see [Protocol status]
 
 ## Carrier bridge (SLCAN subset)
 
-`carrier_bridge` turns the UNO R4 into a USB-to-CAN adapter for python-can's `slcan` interface:
+`carrier_bridge` turns the UNO R4 into the ground station's USB-to-CAN adapter. The drive node opens it with `drive_interface:=slcan` (`waybionic_teleop/slcan_bus.py`), which writes each control tick's frames in one go. python-can's `slcan` interface works too, at the bridge's serial speed:
 
 ```python
 import can
-bus = can.Bus(interface="slcan", channel="COM5", bitrate=500000)   # tty_baudrate defaults to 115200
+bus = can.Bus(interface="slcan", channel="/dev/cu.usbmodem1101", bitrate=1000000,
+              tty_baudrate=1000000)
 bus.send(can.Message(arbitration_id=0x001, data=bytes.fromhex("3132"), is_extended_id=False))
-print(bus.recv(timeout=1.0))   # expect 001 31 xx xx xx xx xx xx cc
+print(bus.recv(timeout=1.0))   # expect 001 31 xx xx xx xx xx xx cc, or the 7F0 status frame
 bus.shutdown()
 ```
+
+The serial link runs at 1000000 baud: six drives at 120 Hz need about 240 kbit/s each way through the UNO R4 WiFi's ESP32-S3 USB bridge, far more than 115200 baud carries.
 
 Only part of SLCAN is supported:
 
@@ -198,20 +209,22 @@ Only part of SLCAN is supported:
 | `S4` `S5` `S6` `S8` | 125k / 250k / 500k / 1M, only while closed. Other `Sn` codes answer BELL (the UNO R4 API only offers these four). |
 | `O` | Start CAN (500 kbit/s unless `Sn` was sent) and forward frames both ways |
 | `C` | Stop forwarding. The controller itself stays started, so changing bitrate after the first `O` needs a board reset (`Arduino_CAN`'s `begin()` re-registers interrupts and a restart isn't known to be safe). |
-| `tIIILDD..` | Send a standard data frame; replies `z\r` |
+| `tIIILDD..` | Send a standard data frame. No reply (BELL if refused): an acknowledgement line would end the host's non-blocking read early. |
 | `V`, `N` | `V0100`, `NWB01` |
 | empty line | OK (python-can sends one after `Sn`) |
 | received frames | sent to the host as `tIIILDD..\r` while open |
 | `L`, `s`, `T`, `r`, `R`, `F`, `Z`, `d`/`D`/`b`/`B`, anything else | BELL (not supported: no listen-only mode or remote frames in `Arduino_CAN`, no extended IDs or CAN FD, no status flags or timestamps) |
 
-The bridge does **not** check MKS checksums or apply motion limits; the host software is responsible for that. It also prints nothing else on the serial port, since extra text would corrupt the SLCAN stream. It has been tested with python-can 4.6.1's real `slcan` driver against `../sim/slcan_sim` (the same bridge code on a pseudo-terminal in front of a simulated drive; see `../tests/cross_check/slcan_python_can_check.py`). It has **not** been tested on hardware or with `slcand`.
+While open, the bridge also sends the host a **status frame** from ID `7F0` ten times a second. It never goes on the CAN bus. Its bytes are the status count, flags (e-stop sensed, e-stop pressed, supply sensed), supply millivolts, CAN controller error events, failed writes and refused lines (see `SlcanBridge.h`). The ground station shows it as `can.carrier` on the monitor, and a carrier that stops reporting shows there too.
 
-**E-stop and supply telemetry:** `BenchTelemetry.h` has the interface (E-stop state, supply millivolts), but it always reports *unknown*. Electrical hasn't specified the sense circuits or pins, and SLCAN has no standard message for them. Both are hardware-TBD.
+The bridge does **not** check MKS checksums or apply motion limits; the host software is responsible for that. It prints nothing else on the serial port, since extra text would corrupt the SLCAN stream. `waybionic_teleop/test/test_slcan_bus.py` and `../tests/cross_check/slcan_python_can_check.py` test it against `../sim/slcan_sim` (the same bridge code on a pseudo-terminal in front of a simulated drive). It has **not** been tested on hardware or with `slcand`.
+
+**E-stop and supply telemetry:** `BenchTelemetry.h` has the interface (E-stop state, supply millivolts), but it always reports *unknown*, so the status frame says *not wired*. Electrical hasn't specified the sense circuits or pins. Both are hardware-TBD.
 
 ## Adding drives one at a time
 
 1. Bring up each new drive **alone** on the bus first, with its own `read` → `enable` → small `move` → `stop` session and log.
-2. Give it a unique CAN ID. Changing a drive's ID needs a command whose bytes aren't in the repo yet (TODO below), so until then use the drive's own configuration. Record the ID against the joint in `arm_drives.yaml` once confirmed.
+2. Give it its CAN ID from `arm_drives.yaml` (base yaw 1, shoulder 2, elbow 3, wrist left 4, wrist right 5; the tool board is 6). Every drive ships as ID 1, so with only the new drive on the bus run `./scripts/macos.sh drives set-id 1 3` (8Bh), or set `CanID` on its screen.
 3. Add it to the shared bus. Move the termination so the 120 Ω resistors stay at the two physical ends.
 4. Check that `read` on every ID gets exactly one reply. Two replies to one request mean a duplicate ID.
 5. **Record the bus load and errors** after each drive is added. Type `status` in `single_drive_bringup` or the bench gateway. It prints two lines:
@@ -232,9 +245,9 @@ The bridge does **not** check MKS checksums or apply motion limits; the host sof
 | 98h SET_HEARTBEAT | Implemented and verified | same |
 | F3h ENABLE | Implemented and verified | same |
 | F5h ABSOLUTE_AXIS (speed 0 = stop) | Implemented and verified | same, plus `sim_drives.py` for the speed-0 stop |
-| **F7h emergency stop** | **TODO.** Not in `mks_can.py`, its tests or any manual in the repo | Needs the MKS manual section (layout and reply) |
-| **Set CAN ID** | **TODO.** Same | Needs the MKS manual |
-| **Set CAN bitrate** | **TODO.** Same | Needs the MKS manual, plus a team decision |
+| **F7h emergency stop** | Host only: `mks_can.emergency_stop`, `mks_setup stop`. The bench console's `estop` still sends nothing | MKS CAN manual V1.0.9, 9.2.3 |
+| **8Bh set CAN ID** | Host only: `mks_can.set_can_id`, `mks_setup set-id` | Manual 5.2.11 |
+| **8Ah set CAN bitrate** | Host only: `mks_can.set_bitrate`, `mks_setup set-bitrate` | Manual 5.2.10 |
 | Broadcast ID 0, other MKS commands | Not implemented | - |
 
 "Verified" means checked against the repo's reference implementation and its manual vectors. The real-hardware check is the frame log from the bench session.
@@ -253,12 +266,8 @@ The bridge does **not** check MKS checksums or apply motion limits; the host sof
 
 ## TODO
 
-- Final CAN IDs per joint (Electrical/Mechanical). The current IDs 1-6 are placeholders.
-- Agreed bus bitrate: 500 kbit/s (factory) vs 1 Mbit/s (simulator).
-- F7h, set-CAN-ID and set-bitrate frames, from the MKS manual.
-- E-stop circuit sensing and motor supply voltage sensing: pins, divider and isolation (hardware-TBD).
-- Transceiver power, mode pin, ground reference and connector pinout (Yassin).
 - Upload the sketches and run the first powered bench with Yassin or Mujtaba present; save the frame logs, wiring photos and a short demo video.
+- F7h in the bench console's `estop`.
 - SLCAN status flags (`F`) mapped from `Arduino_CAN` error events.
 - A hobby-servo actuator for the bench receivers: signal pin and axis-to-angle mapping (Yassin).
 - Photos of the wiring for this README, and the bench video.

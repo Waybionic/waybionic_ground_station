@@ -416,18 +416,100 @@ Press **Ctrl+C** in its window to stop.
 
 **Linux:** `ros2 launch waybionic_bringup ground_station.launch.py teleop:=true autoplay:=true`.
 
-## Real MKS Drives over CAN
+## Real Arm (MKS Drives over CAN)
 
-`drive_interface` sends the same frames to real MKS SERVO42D/57D drives through a
-[python-can](https://python-can.readthedocs.io/) interface. The drive map in
-`waybionic_teleop/config/arm_drives.yaml` is still a placeholder: check each CAN ID,
-gear ratio and direction before the first powered test, and start with the motors
-unloaded. Set every drive to the bitrate in that file (1 Mbit/s; the MKS default is
-500 kbit/s).
+The controller plugs into the computer, not the Arduino. The computer runs the teleop,
+the Cartesian moves (inverse kinematics), the joint limits and collision checks, the
+RViz twin and the monitor, then sends MKS frames through the carrier: a UNO R4 WiFi with
+a TJA1051T transceiver running `waybionic_can/arduino/carrier_bridge`. The carrier only
+passes frames between USB and the CAN bus, and reports its own status.
 
-The computer running ROS needs the USB CAN adapter. Docker Desktop on Windows and
-macOS cannot reach USB devices, so use native ROS on Linux or macOS (RoboStack), or
-Docker on Linux with `--network host`.
+```text
+controller -> Mac (ROS 2) -> USB, 1 Mbaud -> carrier -> CAN, 1 Mbit/s -> 5 MKS drives + tool board
+```
+
+`waybionic_teleop/config/arm_drives.yaml` maps the joints to the drives: CAN IDs 1-5
+(base yaw, shoulder, elbow, wrist left, wrist right; the tool board is 6), 26:1 cycloidal
+reducers on the first three joints and 3:1 belts on the two wrist motors. Joint limits
+stop about 1 degree before two CAD parts touch (`scripts/cad/joint_clearance.py`).
+Start with the motors unloaded, and keep the physical E-stop within reach.
+
+Docker Desktop on Windows and macOS cannot reach USB devices, so the real arm runs on
+native ROS: RoboStack on macOS (below), or Linux.
+
+### On a Mac
+
+Do the [macOS setup](#macos-apple-silicon) first. Then, from the repository root:
+
+1. Flash the carrier once (and after carrier firmware changes). Plug in only the
+   carrier, so its port is the only `/dev/cu.usbmodem*`; otherwise set
+   `WAYBIONIC_CARRIER=/dev/cu.usbmodem...`.
+
+   ```bash
+   brew install arduino-cli
+   ./scripts/macos.sh flash
+   ```
+
+2. Set up each drive once, alone on the bus: give it its CAN ID (they all ship as 1),
+   then switch it to 1 Mbit/s. The carrier keeps its first bit rate until it resets, so
+   replug it, connect every drive, and check they all answer.
+
+   ```bash
+   ./scripts/macos.sh drives set-id 1 3            # for example the elbow
+   ./scripts/macos.sh drives set-bitrate 3 1000000
+   # after every drive is switched: replug the carrier
+   ./scripts/macos.sh drives --bitrate 1000000 scan
+   ```
+
+3. Put the arm in the zero pose (upright, as RViz shows it before anything moves) and
+   start the ground station. A local controller (Xbox or PS5, USB or Bluetooth) drives
+   the arm and its twin together:
+
+   ```bash
+   ./scripts/macos.sh arm
+   ```
+
+4. In a second Terminal, zero the drives with teleop still disabled, then press Start
+   (Menu or Options) on the controller:
+
+   ```bash
+   ./scripts/macos.sh run ros2 service call /sim_arm_drives/zero std_srvs/srv/Trigger
+   ```
+
+5. Check each joint's direction at the slowest speed in the `upper` group. If a drive
+   turns the wrong way, negate its `factors` in `arm_drives.yaml` and rebuild.
+
+**Remote operator.** The controller can stay with an operator on another computer. On
+the operator's computer, run the bridge (Python with pygame) pointed at the Mac's
+address, and on the Mac listen on the network:
+
+```bash
+python3 -m waybionic_teleop.sdl_bridge --host 192.168.1.20      # operator, from waybionic_teleop/
+./scripts/macos.sh arm joy_source:=udp joy_udp_bind:=0.0.0.0     # arm station
+```
+
+On Windows, `xinput_bridge` works the same way for an Xbox controller.
+
+### The engineering monitor
+
+With `teleop:=true` the monitor shows live rows:
+
+| Row | Shows |
+| --- | --- |
+| `controller.link` | Remote controller only: packet rate, loss, jitter, longest gap and network round trip; warns past 2% loss, a 100 ms gap or a 50 ms round trip |
+| `teleop.input` | Whether controller input is arriving; teleop disables itself after 0.5 s without it |
+| `can.carrier` | The carrier's USB link (reopened every second if unplugged), E-stop and supply (once wired), CAN controller errors |
+| `can.bus` | Frames per second and bus load |
+| `drive.*`, `arm.*` | Each drive's reply state and encoder, each joint against its target, and whether the arm is zeroed |
+
+**Zeroing.** The encoders count from where the drives were powered on, so the host
+publishes no joint states and moves nothing until the arm is zeroed. If a drive stops
+answering, for example because the E-stop cut its power or the carrier was unplugged,
+every drive stops and the arm must be zeroed again. If the joint commands stop for
+0.5 s, the drives hold their last target, and if the host stops, the drives' heartbeat
+stops them.
+
+### On Linux
 
 Linux, SocketCAN adapter (candleLight firmware):
 
@@ -436,25 +518,11 @@ sudo ip link set can0 up type can bitrate 1000000
 ros2 launch waybionic_bringup ground_station.launch.py teleop:=true drive_interface:=socketcan drive_channel:=can0
 ```
 
-macOS or Linux, serial-line (slcan) adapter:
+Linux, the carrier:
 
 ```bash
-ros2 launch waybionic_bringup ground_station.launch.py teleop:=true drive_interface:=slcan drive_channel:=/dev/tty.usbmodem1101
+ros2 launch waybionic_bringup ground_station.launch.py teleop:=true drive_interface:=slcan drive_channel:=/dev/ttyACM0
 ```
-
-**Zeroing.** The encoders count from where the drives were powered on, so the host
-publishes no joint states and moves nothing until the arm is zeroed. Put the arm in
-the zero pose (the pose RViz shows before anything moves), leave teleop disabled, and
-run:
-
-```bash
-ros2 service call /sim_arm_drives/zero std_srvs/srv/Trigger
-```
-
-Then press Start. If a drive stops answering, for example because the E-stop cut its
-power, every drive stops and the arm must be zeroed again. If the joint commands stop
-for 0.5 s, the drives hold their last target, and if the host stops, the drives'
-heartbeat stops them.
 
 **Without hardware.** `mks_drive_sim` answers on a CAN interface the way the drives
 do, so the host can be tested end to end over a virtual CAN interface on Linux:

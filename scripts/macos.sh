@@ -20,7 +20,12 @@ Commands:
   setup    Create/update the RoboStack environment and build the workspace
   build    Build the workspace
   launch   Launch the ground station visualization
+  flash    Compile and upload carrier_bridge to the UNO R4 WiFi (needs arduino-cli)
+  drives   Set up the MKS drives through the carrier, e.g. drives scan (see mks_setup)
+  arm      Drive the real arm: controller on this Mac, carrier on USB
   run      Run any command inside the ROS workspace
+
+The carrier is found as the only /dev/cu.usbmodem* port; set WAYBIONIC_CARRIER to choose.
 EOF
 }
 
@@ -133,6 +138,39 @@ run_workspace() {
   ' _ "$ROOT" "$@"
 }
 
+find_carrier() {
+  local ports
+
+  if [[ -n "${WAYBIONIC_CARRIER:-}" ]]; then
+    [[ -e "$WAYBIONIC_CARRIER" ]] || fail "WAYBIONIC_CARRIER=$WAYBIONIC_CARRIER does not exist"
+    CARRIER="$WAYBIONIC_CARRIER"
+    return
+  fi
+  shopt -s nullglob
+  ports=(/dev/cu.usbmodem*)
+  shopt -u nullglob
+  case "${#ports[@]}" in
+    0) fail "no /dev/cu.usbmodem* port: plug in the carrier (UNO R4 WiFi)" ;;
+    1) CARRIER="${ports[0]}" ;;
+    *) fail "several ports (${ports[*]}); set WAYBIONIC_CARRIER to the carrier's" ;;
+  esac
+}
+
+flash_carrier() {
+  local fqbn="arduino:renesas_uno:unor4wifi"
+  local sketch="$ROOT/waybionic_can/arduino/carrier_bridge"
+  local library="$ROOT/waybionic_can/arduino/libraries/WaybionicCan"
+
+  command -v arduino-cli >/dev/null 2>&1 \
+    || fail "install arduino-cli first: brew install arduino-cli"
+  find_carrier
+  arduino-cli core update-index
+  arduino-cli core install arduino:renesas_uno
+  arduino-cli compile --fqbn "$fqbn" --library "$library" "$sketch"
+  arduino-cli upload --fqbn "$fqbn" --port "$CARRIER" "$sketch"
+  echo "Flashed carrier_bridge to $CARRIER"
+}
+
 command_name="${1:-help}"
 if [[ $# -gt 0 ]]; then
   shift
@@ -157,6 +195,24 @@ case "$command_name" in
     prepare
     run_workspace env RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}" \
       ros2 launch waybionic_bringup ground_station.launch.py "$@"
+    ;;
+  flash)
+    check_host
+    flash_carrier
+    ;;
+  drives)
+    [[ $# -gt 0 ]] || fail "drives needs an mks_setup command, such as scan"
+    prepare
+    find_carrier
+    run_workspace ros2 run waybionic_teleop mks_setup --channel "$CARRIER" "$@"
+    ;;
+  arm)
+    prepare
+    find_carrier
+    echo "Carrier: $CARRIER"
+    run_workspace env RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}" \
+      ros2 launch waybionic_bringup ground_station.launch.py teleop:=true \
+      joy_source:=device drive_interface:=slcan drive_channel:="$CARRIER" "$@"
     ;;
   run)
     [[ $# -gt 0 ]] || fail "run requires a command"

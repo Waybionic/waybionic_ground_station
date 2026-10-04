@@ -12,6 +12,8 @@ dependencies:
   - ros-jazzy-rviz-imu-plugin
   - ros-jazzy-xacro
   - ros-jazzy-joint-state-publisher-gui
+  # A controller plugged into the Mac (joy_source:=device).
+  - ros-jazzy-joy
   - colcon-common-extensions
   - compilers
   - cmake
@@ -20,6 +22,8 @@ dependencies:
   - ninja
   - pytest <9
   - python-can
+  # The carrier's USB serial link to the real arm.
+  - pyserial
   # colcon still relies on the legacy `develop` and `test` commands removed by
   # newer setuptools. Keep Python ROS packages editable and testable on macOS.
   - setuptools <72
