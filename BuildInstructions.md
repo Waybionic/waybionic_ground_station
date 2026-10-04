@@ -268,7 +268,8 @@ can report exit code `-2`, indicating the requested SIGINT interruption.
 ## Xbox Controller (Simulated Arm)
 
 `teleop:=true` drives the arm with an Xbox controller through simulated CAN drives;
-nothing is sent to hardware. The controller mapping is in
+nothing is sent to hardware unless you choose a drive bus, as described in
+[Real MKS drives over CAN](#real-mks-drives-over-can). The controller mapping is in
 `waybionic_teleop/config/xbox_teleop.yaml`, and the placeholder joint-to-drive map
 (MKS SERVO42D/57D CAN IDs, gear ratios and the wrist differential) is in
 `waybionic_teleop/config/arm_drives.yaml`.
@@ -329,6 +330,57 @@ If the arm stops responding and the bridge's axis values stop changing while you
 move the sticks, Windows has stopped updating the controller. Turn the controller
 off and on (or unplug and replug it), then press Start again; the bridge
 reconnects by itself.
+
+## Real MKS Drives over CAN
+
+`drive_interface` sends the same frames to real MKS SERVO42D/57D drives through a
+[python-can](https://python-can.readthedocs.io/) interface. The drive map in
+`waybionic_teleop/config/arm_drives.yaml` is still a placeholder: check each CAN ID,
+gear ratio and direction before the first powered test, and start with the motors
+unloaded. Set every drive to the bitrate in that file (1 Mbit/s; the MKS default is
+500 kbit/s).
+
+The computer running ROS needs the USB CAN adapter. Docker Desktop on Windows and
+macOS cannot reach USB devices, so use native ROS on Linux or macOS (RoboStack), or
+Docker on Linux with `--network host`.
+
+Linux, SocketCAN adapter (candleLight firmware):
+
+```bash
+sudo ip link set can0 up type can bitrate 1000000
+ros2 launch waybionic_bringup ground_station.launch.py teleop:=true drive_interface:=socketcan drive_channel:=can0
+```
+
+macOS or Linux, serial-line (slcan) adapter:
+
+```bash
+ros2 launch waybionic_bringup ground_station.launch.py teleop:=true drive_interface:=slcan drive_channel:=/dev/tty.usbmodem1101
+```
+
+**Zeroing.** The encoders count from where the drives were powered on, so the host
+publishes no joint states and moves nothing until the arm is zeroed. Put the arm in
+the zero pose (the pose RViz shows before anything moves), leave teleop disabled, and
+run:
+
+```bash
+ros2 service call /sim_arm_drives/zero std_srvs/srv/Trigger
+```
+
+Then press Start. If a drive stops answering, for example because the E-stop cut its
+power, every drive stops and the arm must be zeroed again. If the joint commands stop
+for 0.5 s, the drives hold their last target, and if the host stops, the drives'
+heartbeat stops them.
+
+**Without hardware.** `mks_drive_sim` answers on a CAN interface the way the drives
+do, so the host can be tested end to end over a virtual CAN interface on Linux:
+
+```bash
+sudo ip link add dev vcan0 type vcan && sudo ip link set up vcan0
+ros2 run waybionic_teleop mks_drive_sim --interface socketcan --channel vcan0
+```
+
+In a second terminal, launch with `drive_interface:=socketcan drive_channel:=vcan0`
+and zero as above. CI runs `waybionic_teleop/test/test_can_drives.py` over `vcan0`.
 
 ## Native Ubuntu Setup for RViz
 
