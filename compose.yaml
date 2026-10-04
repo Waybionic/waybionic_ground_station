@@ -1,9 +1,14 @@
 x-tested-image: &tested-image
-  image: waybionic-ground-station:jazzy
+  # CI publishes main's tested image here; local builds reuse its layers.
+  image: ghcr.io/waybionic/waybionic_ground_station:jazzy
   build:
     context: .
     dockerfile: docker/Dockerfile
     target: test
+    cache_from:
+      - ghcr.io/waybionic/waybionic_ground_station:jazzy
+    args:
+      BUILDKIT_INLINE_CACHE: "1"
 
 services:
   demo:
@@ -34,6 +39,8 @@ services:
       context: .
       dockerfile: docker/Dockerfile
       target: development
+      cache_from:
+        - ghcr.io/waybionic/waybionic_ground_station:jazzy
     init: true
     command: [sleep, infinity]
     volumes:
