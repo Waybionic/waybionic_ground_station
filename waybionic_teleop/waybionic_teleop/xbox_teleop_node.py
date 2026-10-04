@@ -18,6 +18,7 @@ from sensor_msgs.msg import JointState, Joy
 from std_msgs.msg import String
 from visualization_msgs.msg import Marker, MarkerArray
 
+from waybionic_teleop.collision import ArmCollision
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
@@ -42,6 +43,8 @@ class XboxTeleop(Node):
         self.timeout = float(params['input_timeout_s'])
         self.tool_frame = params['tool_frame']
         self.base_frame = params['base_frame']
+        self.table_height = float(params.get('table_height', 0.0))
+        self.clearance = float(params.get('collision_clearance', 0.01))
         self.teleop = None
         self.problem = 'Waiting for robot_description'
         self.joy = None
@@ -79,7 +82,12 @@ class XboxTeleop(Node):
         except ValueError as error:
             kinematics = None
             self.get_logger().warning(f'Cartesian group unavailable: {error}')
-        self.teleop, self.problem = ArmTeleop(self.config, limits, kinematics), ''
+        try:
+            collision = ArmCollision.from_urdf(message.data, self.table_height, self.clearance)
+        except ValueError as error:
+            collision = None
+            self.get_logger().warning(f'No table or base collision checks: {error}')
+        self.teleop, self.problem = ArmTeleop(self.config, limits, kinematics, collision), ''
         self.get_logger().info('Xbox teleop ready (press Start to enable): ' + '; '.join(
             f'{group.name}: {group.describe()}' for group in self.teleop.groups))
 

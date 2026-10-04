@@ -49,3 +49,7 @@ xbox_teleop:
     tool_open_axis: left_trigger
     tool_frame: tool_link
     base_frame: base_link
+    # Moves stop before any link's collision box comes within collision_clearance (m) of the
+    # table, table_height (m) above the bottom of the base, or of the base and shoulder.
+    table_height: 0.0
+    collision_clearance: 0.01

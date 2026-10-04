@@ -100,10 +100,11 @@ def config_from_parameters(params):
 class ArmTeleop:
     """Hold joint targets and move them with the active group's sticks while enabled."""
 
-    def __init__(self, config, limits, kinematics=None):
-        """Take the config, {joint: (lower, upper)} radians and optional ArmKinematics."""
+    def __init__(self, config, limits, kinematics=None, collision=None):
+        """Take the config, {joint: (lower, upper)} radians, ArmKinematics and ArmCollision."""
         self.config = config
         self.kinematics = kinematics
+        self.collision = collision
         # Without kinematics for this arm, the Cartesian groups are left out.
         self.groups = [group for group in config.groups
                        if group.mode != 'cartesian' or kinematics is not None]
@@ -192,6 +193,7 @@ class ArmTeleop:
         config = self.config
         desired = dict.fromkeys(self.limits, 0.0)
         self.blocked = []
+        before = dict(self.targets)
         if homing:
             self.stop_cartesian()
             for joint, (lower, upper) in self.limits.items():
@@ -224,6 +226,24 @@ class ArmTeleop:
                 target, velocity = min(self.targets[joint], lower), 0.0
                 self.blocked.append(joint)
             self.targets[joint], self.velocities[joint] = target, velocity
+        self.avoid_collisions(before)
+
+    def avoid_collisions(self, before):
+        """Undo this step's arm motion if it would take a link into the table or the base."""
+        if self.collision is None:
+            return
+        hits, depth = self.collision.check(self.targets)
+        if not hits:
+            return
+        # Backing out of a collision is allowed; going deeper or into something new is not.
+        was, was_depth = self.collision.check(before)
+        if was and set(hits) <= set(was) and depth <= was_depth + 1e-9:
+            return
+        for joint, position in before.items():
+            if joint != self.config.tool_joint:
+                self.targets[joint], self.velocities[joint] = position, 0.0
+        self.stop_cartesian()
+        self.blocked += hits
 
     def jog(self, axes, dt):
         """Move the tool tip along a straight line set by the sticks, or tilt the tool about it."""
