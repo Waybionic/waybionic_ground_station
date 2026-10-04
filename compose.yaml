@@ -43,7 +43,7 @@ services:
         bind:
           selinux: z
 
-  linux-gui:
+  linux-gui: &linux-gui
     <<: *tested-image
     profiles: [linux-gui]
     init: true
@@ -81,6 +81,52 @@ services:
         colcon build --symlink-install &&
         source /waybionic_ws/install/setup.bash &&
         exec ros2 launch waybionic_bringup ground_station.launch.py
+
+  # linux-gui with the host's game controllers for teleop; start it with
+  # scripts/linux-gui.sh --controller. SDL reads controllers from /dev/input, and the cgroup
+  # rule (input devices are major 13) also admits controllers plugged in later.
+  linux-gui-teleop:
+    <<: *linux-gui
+    profiles: [linux-gui-teleop]
+    device_cgroup_rules:
+      - "c 13:* rmw"
+    group_add:
+      - "${WAYBIONIC_INPUT_GID:-input}"
+    volumes:
+      - type: bind
+        source: .
+        target: /waybionic_ws/src/waybionic_ground_station
+      - type: bind
+        source: /tmp/.X11-unix
+        target: /tmp/.X11-unix
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${WAYBIONIC_XAUTHORITY:-/tmp/waybionic-missing.xauth}
+        target: /tmp/waybionic.xauth
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /dev/input
+        target: /dev/input
+        bind:
+          create_host_path: false
+      # SDL finds controllers through udev.
+      - type: bind
+        source: /run/udev
+        target: /run/udev
+        read_only: true
+        bind:
+          create_host_path: false
+    command:
+      - bash
+      - -c
+      - |
+        colcon build --symlink-install &&
+        source /waybionic_ws/install/setup.bash &&
+        exec ros2 launch waybionic_bringup ground_station.launch.py teleop:=true
 
   wslg: &wslg
     <<: *tested-image

@@ -14,7 +14,7 @@ import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
-from sensor_msgs.msg import JointState, Joy
+from sensor_msgs.msg import JointState, Joy, JoyFeedback
 from std_msgs.msg import String
 from visualization_msgs.msg import Marker, MarkerArray
 
@@ -24,6 +24,16 @@ from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
 JAW_SIZE = (0.006, 0.014, 0.03)
 JAW_OPEN_GAP = 0.024
+# One short rumble each time a move is stopped at a limit.
+RUMBLE_INTENSITY = 0.6
+RUMBLE_S = 0.25
+
+
+def stop_reason(blocked):
+    """Name what stopped a move, one word per line for the RViz label."""
+    return '\n'.join('OUT-OF-REACH' if item == 'reach'
+                     else 'STOPPED-' + item.replace(': ', '-').replace(' ', '-')
+                     for item in blocked[:2])
 
 
 def status(name, level, value, unit, message):
@@ -57,6 +67,10 @@ class XboxTeleop(Node):
         self.create_subscription(Joy, 'joy', self.on_joy, 10)
         self.create_subscription(JointState, 'joint_states', self.on_joint_states, 10)
         self.command_publisher = self.create_publisher(JointState, 'joint_commands', 10)
+        # game_controller_node rumbles a local controller; joy_udp_receiver passes it on.
+        self.feedback_publisher = self.create_publisher(JoyFeedback, 'joy/set_feedback', 10)
+        self.rumble_until = None
+        self.was_blocked = False
         self.marker_publisher = self.create_publisher(MarkerArray, 'waybionic/teleop/markers', 10)
         self.diagnostics_publisher = self.create_publisher(
             DiagnosticArray, params.get('diagnostics_topic', '/diagnostics'), 10)
@@ -116,8 +130,23 @@ class XboxTeleop(Node):
         axes, buttons = (self.joy.axes, self.joy.buttons) if fresh else ((), ())
         if self.teleop.update(axes, buttons, self.measured, dt):
             self.publish_command()
+        self.feel_limits(now)
         if self.ticks % 3 == 0:
             self.publish_markers(fresh)
+
+    def feel_limits(self, now):
+        blocked = self.teleop.enabled and bool(self.teleop.blocked)
+        if blocked and not self.was_blocked:
+            self.rumble(RUMBLE_INTENSITY)
+            self.rumble_until = now + RUMBLE_S
+        elif self.rumble_until is not None and now >= self.rumble_until:
+            self.rumble(0.0)
+            self.rumble_until = None
+        self.was_blocked = blocked
+
+    def rumble(self, intensity):
+        self.feedback_publisher.publish(
+            JoyFeedback(type=JoyFeedback.TYPE_RUMBLE, id=0, intensity=intensity))
 
     def publish_command(self):
         targets = self.teleop.targets
@@ -133,6 +162,8 @@ class XboxTeleop(Node):
         teleop = self.teleop
         if teleop.enabled:
             state = 'ENABLED'
+            if teleop.blocked:
+                state += '\n' + stop_reason(teleop.blocked)
         else:
             state = 'DISABLED\nPRESS-MENU' if fresh else 'NO-CONTROLLER'
         return f'{teleop.active_group.name.upper()}\n{self.speed_percent():.0f}%\n{state}'
@@ -165,7 +196,8 @@ class XboxTeleop(Node):
         label.scale.z = 0.04
         enabled = self.teleop.enabled and fresh
         label.color.r, label.color.g, label.color.b, label.color.a = (
-            (0.5, 1.0, 0.5, 1.0) if enabled else (1.0, 0.8, 0.3, 1.0))
+            (1.0, 0.35, 0.3, 1.0) if enabled and self.teleop.blocked
+            else (0.5, 1.0, 0.5, 1.0) if enabled else (1.0, 0.8, 0.3, 1.0))
         markers.markers.append(label)
         self.marker_publisher.publish(markers)
 
