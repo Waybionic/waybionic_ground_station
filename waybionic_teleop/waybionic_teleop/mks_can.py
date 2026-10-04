@@ -1,9 +1,9 @@
 """
-Placeholder CAN frames for MKS SERVO42D/57D drives (CAN user manual V1.0.9 subset).
+CAN frames for the arm's MKS SERVO42D/57D drives (CAN user manual V1.0.9 subset).
 
-Electrical has not confirmed the joint drives, so the protocol stays in this module and can
-be swapped without touching the teleop or ROS code. Each frame is a standard 11-bit frame
-whose ID is the motor ID; the data is a function code, big-endian arguments and a checksum.
+The shoulder runs a SERVO57D and the other joints SERVO42D drives. The protocol stays in this
+module, so the teleop and ROS code never see it. Each frame is a standard 11-bit frame whose ID
+is the motor ID; the data is a function code, big-endian arguments and a checksum.
 """
 
 COUNTS_PER_REV = 0x4000
@@ -12,14 +12,18 @@ MIN_AXIS, MAX_AXIS = -0x800000, 0x7FFFFF
 
 READ_ENCODER = 0x31
 SET_MODE = 0x82
+SET_BITRATE = 0x8A
+SET_CAN_ID = 0x8B
 SET_RESPONSE = 0x8C
 SET_ZERO = 0x92
 SET_HEARTBEAT = 0x98
 ENABLE = 0xF3
 ABSOLUTE_AXIS = 0xF5
+EMERGENCY_STOP = 0xF7
 
 MODE_SR_VFOC = 0x05
 RUN_STATUS = {0: 'run failed', 1: 'running', 2: 'run complete', 3: 'stopped at end limit'}
+BITRATES = {125000: 0, 250000: 1, 500000: 2, 1000000: 3}
 
 
 def checksum(can_id, body):
@@ -103,3 +107,22 @@ def set_heartbeat(can_id, milliseconds):
 def enable(can_id, on=True):
     """Lock (on) or release the motor shaft (F3h)."""
     return frame(can_id, ENABLE, [int(on)])
+
+
+def emergency_stop(can_id):
+    """Stop at once, without a ramp (F7h); not advised above 1000 rpm. ID 0 reaches all."""
+    return frame(can_id, EMERGENCY_STOP)
+
+
+def set_bitrate(can_id, bitrate):
+    """Change the drive's CAN bit rate (8Ah). It replies at the old rate, then switches."""
+    if bitrate not in BITRATES:
+        raise ValueError(f'MKS drives run at {sorted(BITRATES)} bit/s, not {bitrate}')
+    return frame(can_id, SET_BITRATE, [BITRATES[bitrate]])
+
+
+def set_can_id(can_id, new_id):
+    """Give the drive a new CAN ID (8Bh); 0 is the broadcast address, so 1-2047."""
+    if not 1 <= new_id <= 0x7FF:
+        raise ValueError(f'CAN ID {new_id} is outside 1-2047')
+    return frame(can_id, SET_CAN_ID, new_id.to_bytes(2, 'big'))

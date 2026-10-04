@@ -11,12 +11,26 @@ simulated MKS drive with CAN ID 1. Needs python-can and pyserial.
 import argparse
 import subprocess
 import sys
+import time
 
 import can
 
 
+CARRIER_STATUS_ID = 0x7F0
+
+
+def receive(bus, timeout):
+    """Return the next frame that is not the carrier's own status report, or None."""
+    deadline = time.monotonic() + timeout
+    while (left := deadline - time.monotonic()) > 0:
+        message = bus.recv(timeout=left)
+        if message is None or message.arbitration_id != CARRIER_STATUS_ID:
+            return message
+    return None
+
+
 def expect(bus, can_id, data_hex, what):
-    message = bus.recv(timeout=2.0)
+    message = receive(bus, 2.0)
     if message is None:
         sys.exit(f'FAIL {what}: no reply')
     got = f'{message.arbitration_id:03X}#{bytes(message.data).hex().upper()}'
@@ -57,7 +71,7 @@ def main():
         send(bus, 1, '3132')
         expect(bus, 1, '3100000000400072', '31h encoder = 0x4000')
         send(bus, 1, '3133')  # bad MKS checksum: the drive must stay silent
-        if bus.recv(timeout=0.5) is not None:
+        if receive(bus, 0.5) is not None:
             sys.exit('FAIL bad checksum got a reply')
         print('bad checksum: no reply (correct)')
         bus.shutdown()

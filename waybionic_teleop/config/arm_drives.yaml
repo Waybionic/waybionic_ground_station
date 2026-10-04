@@ -1,43 +1,55 @@
-# Placeholder joint-to-drive map for the MKS SERVO42D/57D CAN bus, simulated or real. The CAN
-# IDs, gear ratios and factors are not hardware values; replace them once Electrical and
-# Mechanical confirm the drives. factors give each motor's output angle per joint angle, so the
-# wrist differential turns both side-gear motors together for pitch and oppositely for roll.
+# Joint-to-drive map for the arm's MKS drives on CAN, simulated or real. gear_ratio is motor
+# turns per output turn, from the CAD: 26:1 cycloidal reducers (26-pin output ring, 25-lobe
+# disc) on the base, shoulder and elbow, and 20T-to-60T belts (3:1) on the two wrist motors.
+# factors give each motor's output angle per joint angle: the 25T bevel differential turns both
+# wrist motors together for pitch and oppositely for roll. If a drive turns the wrong way on
+# the bench, negate its factors. The tool board (firmware/tool_board) answers as CAN ID 6.
 sim_arm_drives:
   ros__parameters:
     rate_hz: 120.0
-    # MKS default is 500 kbit/s; 1 Mbit/s keeps six drives at 120 Hz near 40% bus load.
+    # Set every drive to 1 Mbit/s first (mks_setup, or CanRate on its screen; MKS ships 500k):
+    # six drives at 120 Hz load the bus about 30% at 1 Mbit/s and 60% at 500 kbit/s.
     bitrate: 1000000
+    # The carrier's USB serial speed (carrier_bridge.ino); only used with interface slcan.
+    tty_baudrate: 1000000
     # Teleop ramps the speed. A steep drive ramp keeps the drives in step with each other: a
     # gentle one gives every drive the same rpm/s, so the one that must change most falls behind.
     acc: 255
-    max_rpm: 300
+    # The fastest teleop speed (60 deg/s) needs 260 rpm on a 26:1 joint; this leaves room for a
+    # drive that fell behind to catch up.
+    max_rpm: 600
     heartbeat_ms: 500
     # Without a new joint command for this long, hold the last target.
     command_timeout_s: 0.5
     drives: [base_yaw, shoulder, elbow, wrist_left, wrist_right, tool]
+    # SERVO42D (NEMA17)
     base_yaw:
       can_id: 1
-      gear_ratio: 1.0
+      gear_ratio: 26.0
       joints: [joint_1]
       factors: [1.0]
+    # SERVO57D (NEMA23)
     shoulder:
       can_id: 2
-      gear_ratio: 1.0
+      gear_ratio: 26.0
       joints: [joint_2]
       factors: [1.0]
+    # SERVO42D
     elbow:
       can_id: 3
-      gear_ratio: 1.0
+      gear_ratio: 26.0
       joints: [joint_3]
       factors: [1.0]
+    # SERVO42D, left side gear: pitch minus roll
     wrist_left:
       can_id: 4
-      gear_ratio: 1.0
+      gear_ratio: 3.0
       joints: [joint_4, joint_5]
       factors: [1.0, -1.0]
+    # SERVO42D, right side gear: pitch plus roll
     wrist_right:
       can_id: 5
-      gear_ratio: 1.0
+      gear_ratio: 3.0
       joints: [joint_4, joint_5]
       factors: [1.0, 1.0]
     tool:

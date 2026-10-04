@@ -16,8 +16,9 @@ def ramp_rpm_per_s(acc):
 class SimulatedServo:
     """Answer bus commands and move like an MKS SERVO42D/57D in SR_vFOC mode."""
 
-    def __init__(self, can_id):
+    def __init__(self, can_id, bitrate=500000):
         self.can_id = can_id
+        self.bitrate = bitrate
         self.mode = None
         self.enabled = False
         self.respond = True
@@ -52,6 +53,22 @@ class SimulatedServo:
                 self.target, self.rpm = None, 0.0
         elif code == mks_can.ABSOLUTE_AXIS and len(arguments) == 6:
             status = self.start_move(arguments)
+        elif code == mks_can.EMERGENCY_STOP and not arguments:
+            self.target, self.rpm, status = None, 0.0, 1
+        elif code == mks_can.SET_BITRATE and len(arguments) == 1:
+            rates = {value: rate for rate, value in mks_can.BITRATES.items()}
+            status = int(arguments[0] in rates)
+            # The reply still goes out at the old rate.
+            reply = [mks_can.frame(self.can_id, code, [status])]
+            self.bitrate = rates.get(arguments[0], self.bitrate)
+            return reply if self.respond else []
+        elif code == mks_can.SET_CAN_ID and len(arguments) == 2:
+            new_id = int.from_bytes(arguments, 'big')
+            status = int(1 <= new_id <= 0x7FF)
+            reply = [mks_can.frame(self.can_id, code, [status])]
+            if status:
+                self.can_id = new_id
+            return reply if self.respond else []
         else:
             return []
         return [mks_can.frame(self.can_id, code, [status])] if self.respond else []
@@ -134,6 +151,9 @@ class SimulatedBus:
             self.errors += 1
             return False
         self._queue(can_id, replies)
+        if drive.can_id != can_id:
+            # It took a new CAN ID.
+            self.drives = {drive.can_id: drive for drive in self.drives.values()}
         return True
 
     def receive(self):

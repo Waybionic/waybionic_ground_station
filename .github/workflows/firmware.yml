@@ -1,11 +1,11 @@
-name: Tool Board Firmware
+name: Arduino Firmware
 
 on:
   push:
     branches: [ "main" ]
-    paths: [ "firmware/**", ".github/workflows/firmware.yml" ]
+    paths: [ "firmware/**", "waybionic_can/arduino/**", ".github/workflows/firmware.yml" ]
   pull_request:
-    paths: [ "firmware/**", ".github/workflows/firmware.yml" ]
+    paths: [ "firmware/**", "waybionic_can/arduino/**", ".github/workflows/firmware.yml" ]
 
 permissions:
   contents: read
@@ -24,5 +24,7 @@ jobs:
           fqbn: arduino:renesas_uno:unor4wifi
           sketch-paths: |
             - firmware/tool_board
+            - waybionic_can/arduino/carrier_bridge
           libraries: |
             - name: AccelStepper
+            - source-path: waybionic_can/arduino/libraries/WaybionicCan

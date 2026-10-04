@@ -154,9 +154,7 @@ void SlcanBridge::handleLine(const char * line, const size_t length)
       }
       return;
     case 't':
-      if (open_ && parseTransmit(line, length, frame) && can_.send(frame)) {
-        out_.write("z\r");
-      } else {
+      if (!(open_ && parseTransmit(line, length, frame) && can_.send(frame))) {
         error();
       }
       return;
@@ -190,6 +188,30 @@ void SlcanBridge::pollCan()
       out_.write(text);
     }
   }
+}
+
+void SlcanBridge::reportStatus(const CarrierStatus & status)
+{
+  if (!open_) {
+    return;
+  }
+  const uint32_t errors = status.can_errors > 0xFFFF ? 0xFFFF : status.can_errors;
+  Frame frame;
+  frame.id = kCarrierStatusId;
+  frame.dlc = 8;
+  frame.data[0] = status_sequence_++;
+  frame.data[1] = static_cast<uint8_t>(
+    (status.estop_wired ? 0x01 : 0) | (status.estop_pressed ? 0x02 : 0) |
+    (status.supply_wired ? 0x04 : 0));
+  frame.data[2] = static_cast<uint8_t>(status.supply_millivolts >> 8);
+  frame.data[3] = static_cast<uint8_t>(status.supply_millivolts & 0xFF);
+  frame.data[4] = static_cast<uint8_t>(errors >> 8);
+  frame.data[5] = static_cast<uint8_t>(errors & 0xFF);
+  frame.data[6] = static_cast<uint8_t>(status.failed_writes > 0xFF ? 0xFF : status.failed_writes);
+  frame.data[7] = static_cast<uint8_t>(refused_ > 0xFF ? 0xFF : refused_);
+  char text[24];
+  formatFrame(frame, text, sizeof(text));
+  out_.write(text);
 }
 
 }  // namespace waybionic

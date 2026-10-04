@@ -18,9 +18,22 @@ from waybionic_teleop import mks_can
     (mks_can.set_heartbeat(1, 500), '98000001F48E'),
     (mks_can.set_zero(1), '9293'),
     (mks_can.stop(1, 4), 'F5000004000000FA'),
+    (mks_can.set_bitrate(1, 1000000), '8A038E'),
+    (mks_can.set_bitrate(1, 500000), '8A028D'),
+    (mks_can.set_can_id(1, 3), '8B00038F'),
+    (mks_can.emergency_stop(1), 'F7F8'),
+    (mks_can.emergency_stop(0), 'F7F7'),
 ])
 def test_frames_match_the_manual(data, expected):
     assert data.hex().upper() == expected
+
+
+@pytest.mark.parametrize('build', [
+    lambda: mks_can.set_bitrate(1, 800000), lambda: mks_can.set_can_id(1, 0),
+    lambda: mks_can.set_can_id(1, 0x800)])
+def test_configuration_frames_reject_values_the_drive_does_not_take(build):
+    with pytest.raises(ValueError):
+        build()
 
 
 def test_encoder_reply_decodes_negative_values():

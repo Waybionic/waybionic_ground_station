@@ -11,6 +11,7 @@ import threading
 import time
 import uuid
 
+from diagnostic_msgs.msg import DiagnosticStatus
 import pytest
 import rclpy
 from rclpy.executors import SingleThreadedExecutor
@@ -18,7 +19,7 @@ from rclpy.parameter import Parameter
 from sensor_msgs.msg import JointState
 from std_srvs.srv import Trigger
 
-from waybionic_teleop import mks_can
+from waybionic_teleop import carrier, mks_can
 from waybionic_teleop.can_bus import CanBus
 from waybionic_teleop.mks_drive_sim import serve
 from waybionic_teleop.sim_arm_drives_node import SimArmDrives
@@ -120,10 +121,11 @@ def test_the_host_drives_mks_servos_over_can(make_node):
         command(node, joint_1=0.3, joint_4=0.2)
         assert spin_until(executor, lambda: abs(positions(node)['joint_1'] - 0.3) < 1e-3
                           and abs(positions(node)['joint_4'] - 0.2) < 1e-3)
-        # Wrist pitch turns both differential motors the same way.
+        # Wrist pitch turns both differential motors the same way, through 3:1 belts.
         assert servos[4].axis == pytest.approx(servos[5].axis)
-        assert servos[4].axis == pytest.approx(0.2 / (2 * math.pi) * mks_can.COUNTS_PER_REV,
-                                               abs=1.0)
+        assert servos[4].axis == pytest.approx(
+            0.2 * node.map.drives[3].gear_ratio / (2 * math.pi) * mks_can.COUNTS_PER_REV,
+            abs=1.0)
         assert node.bus.errors == 0 and node.bus_errors == 0
     finally:
         stop.set()
@@ -174,7 +176,7 @@ def test_commands_that_stop_mid_move_stop_the_drives(make_node):
     assert spin_until(executor, lambda: node.commanded is not None)
     held = node.commanded['joint_1']
     spin_for(executor, 0.5)
-    assert 1.0 < held < 50.0
+    assert 0.5 < held < 50.0
     assert node.map.to_positions(node.counts)['joint_1'] == pytest.approx(held, abs=0.05)
 
 
@@ -215,3 +217,24 @@ def test_a_target_the_interface_refused_is_sent_again(make_node, monkeypatch):
     command(node, joint_1=0.3)
     assert spin_until(executor, lambda: abs(positions(node)['joint_1'] - 0.3) < 1e-3)
     assert refused == [1]
+
+
+def test_the_monitor_shows_the_carrier_link_and_its_e_stop(make_node):
+    node, executor = make_node()
+    assert spin_until(executor, lambda: node.commanded is not None)
+    # Stand in for the carrier's serial link.
+    node.bus.connected, node.bus.reopens, node.bus.problem = True, 0, ''
+    now = time.monotonic()
+    assert node.carrier_status(now).level == DiagnosticStatus.WARN
+    node.on_reply(carrier.STATUS_ID, bytes([1, carrier.ESTOP_WIRED, 0, 0, 0, 2, 0, 0]), now)
+    row = node.carrier_status(now)
+    assert row.level == DiagnosticStatus.OK and row.message.startswith('E-stop released')
+    assert '2 CAN errors' in row.message
+    node.on_reply(carrier.STATUS_ID,
+                  bytes([2, carrier.ESTOP_WIRED | carrier.ESTOP_PRESSED, 0, 0, 0, 0, 0, 0]), now)
+    assert node.carrier_status(now).level == DiagnosticStatus.ERROR
+    # Pressing the e-stop stops every drive where it is.
+    assert all(servo.target is None for servo in node.bus.drives.values())
+    node.bus.connected, node.bus.problem = False, '/dev/cu.usbmodem1101: unplugged'
+    row = node.carrier_status(now)
+    assert row.level == DiagnosticStatus.ERROR and 'USB link lost' in row.message

@@ -1,9 +1,10 @@
 """
 Run the arm's joint drives: /joint_commands in, MKS CAN frames, /joint_states out.
 
-The drives are simulated on an in-process bus unless ``interface`` names a python-can interface
-(socketcan, slcan, udp_multicast, ...) and ``channel`` the adapter, in which case the same
-frames go to real MKS SERVO drives. The command, feedback and diagnostics path is identical.
+The drives are simulated on an in-process bus unless ``interface`` names a bus: ``slcan`` for
+the WayBionic carrier on a USB serial port, or another python-can interface (socketcan,
+udp_multicast, ...) with ``channel`` naming the adapter. The same frames then go to the real MKS
+SERVO drives, and the command, feedback and diagnostics path is identical.
 
 The encoders count from where the drives were powered on, so nothing moves until every drive
 has been zeroed with the arm in the zero pose: at start-up in simulation, and through the
@@ -23,12 +24,14 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
-from waybionic_teleop import mks_can
+from waybionic_teleop import carrier, mks_can
 from waybionic_teleop.drive_map import drive_map_from_parameters
 from waybionic_teleop.kinematics import joint_limits
 from waybionic_teleop.sim_drives import SimulatedBus, SimulatedServo
 
 REPLY_TIMEOUT_S = 0.5
+# The carrier reports ten times a second.
+CARRIER_TIMEOUT_S = 0.5
 # Zeroing waits for the joint commands to stop, so teleop must be disabled first.
 QUIET_BEFORE_ZERO_S = 1.0
 # Every drive must confirm these before it moves, so none runs without its heartbeat stop.
@@ -67,11 +70,17 @@ class SimArmDrives(Node):
         elif not channel:
             raise ValueError(f'the {self.interface} interface needs a channel, '
                              'such as can0, /dev/ttyACM0 or 239.74.163.2')
+        elif self.interface == 'slcan':
+            # pyserial is only needed for the carrier.
+            from waybionic_teleop.slcan_bus import SlcanBus
+            self.bus = SlcanBus(channel, self.bitrate, int(params.get('tty_baudrate', 1000000)))
+            self.bus_label = f'carrier on {channel}'
         else:
-            # python-can is only needed for a real bus.
+            # python-can is only needed for other adapters.
             from waybionic_teleop.can_bus import CanBus
             self.bus = CanBus(self.interface, channel, self.bitrate)
             self.bus_label = f'{self.interface} {channel}'
+        self.carrier, self.carrier_time = None, None
         self.counts = [None] * len(drives)
         self.heard = [None] * len(drives)
         self.unanswered = [0] * len(drives)
@@ -110,7 +119,7 @@ class SimArmDrives(Node):
         drive_list = ', '.join(f'{drive.name}=CAN {drive.can_id}' for drive in drives)
         if self.interface == 'sim':
             self.get_logger().info(
-                f'Simulated drives: {drive_list} (placeholder MKS SERVO map, no hardware)')
+                f'Simulated drives: {drive_list} (no hardware)')
         else:
             self.get_logger().info(f'MKS drives on {self.bus_label}: {drive_list}')
         if not zero_on_start:
@@ -181,6 +190,15 @@ class SimArmDrives(Node):
                 self.rejected += 1
                 continue
             self.commanded[joint], self.velocities[joint] = position, velocity
+        # Pass the new targets on now rather than at the next tick.
+        if all(self.zeroed) and None not in self.counts and not self.estop_pressed:
+            self.send_targets()
+            self.drain(time.monotonic())
+
+    @property
+    def estop_pressed(self):
+        # The last report counts even if the carrier has since gone quiet.
+        return self.carrier is not None and self.carrier['estop'] == 'pressed'
 
     def tick(self):
         now = time.monotonic()
@@ -192,7 +210,7 @@ class SimArmDrives(Node):
             self.get_logger().warning('Joint commands stopped mid-move; every drive is stopped')
         self.check_replies()
         # Speeds follow the encoders, so the targets are refreshed every tick.
-        if self.commanded is not None:
+        if self.commanded is not None and not self.estop_pressed:
             self.send_targets()
         self.bus.step(dt)
         for index, drive in enumerate(self.map.drives):
@@ -243,6 +261,19 @@ class SimArmDrives(Node):
             self.on_reply(*reply, now)
 
     def on_reply(self, can_id, data, now):
+        if can_id == carrier.STATUS_ID:
+            pressed = self.estop_pressed
+            try:
+                self.carrier, self.carrier_time = carrier.parse_status(data), now
+            except ValueError as error:
+                self.bus_errors += 1
+                self.get_logger().warning(str(error), throttle_duration_sec=2.0)
+                return
+            if self.estop_pressed and not pressed:
+                # The e-stop cuts the drives' power; no targets go out until it is released.
+                self.stop_all()
+                self.get_logger().error('E-stop pressed; every drive is stopped')
+            return
         index = self.index.get(can_id)
         try:
             code, arguments = mks_can.parse(can_id, data)
@@ -293,6 +324,8 @@ class SimArmDrives(Node):
             'can.bus', level, f'{frames:.0f}', 'frames/s',
             f'{load:.0f}% worst-case load at {self.bitrate // 1000} kbit/s ({self.bus_label})',
             load_percent=f'{load:.1f}', errors=errors, rejected_commands=self.rejected)]
+        if hasattr(self.bus, 'connected'):
+            statuses.append(self.carrier_status(now))
         if not all(self.zeroed):
             statuses.append(status('arm.zero', DiagnosticStatus.WARN, 'no', '',
                                    f'Not zeroed. {self.zero_hint()}'))
@@ -322,6 +355,27 @@ class SimArmDrives(Node):
         message = DiagnosticArray(status=statuses)
         message.header.stamp = self.get_clock().now().to_msg()
         self.diagnostics_publisher.publish(message)
+
+    def carrier_status(self, now):
+        """Report the USB link to the carrier and what the carrier says about the bus."""
+        reopens = self.bus.reopens
+        if not self.bus.connected:
+            return status('can.carrier', DiagnosticStatus.ERROR, 'unplugged', '',
+                          f'USB link lost ({self.bus.problem}); retrying every second',
+                          reopens=reopens)
+        if self.carrier_time is None or now - self.carrier_time > CARRIER_TIMEOUT_S:
+            return status('can.carrier', DiagnosticStatus.WARN, 'silent', '',
+                          'No status from the carrier: is carrier_bridge flashed?',
+                          reopens=reopens)
+        report = self.carrier
+        estop = report['estop'] or 'not wired'
+        supply = 'not wired' if report['supply_v'] is None else f'{report["supply_v"]:.1f} V'
+        level = DiagnosticStatus.ERROR if report['estop'] == 'pressed' else DiagnosticStatus.OK
+        return status('can.carrier', level, estop, 'e-stop',
+                      f'E-stop {estop}, supply {supply}, {report["can_errors"]} CAN errors',
+                      supply=supply, can_errors=report['can_errors'],
+                      failed_writes=report['failed_writes'],
+                      refused_lines=report['refused_lines'], reopens=reopens)
 
     def close(self):
         """Stop the drives and release the bus; the drives' heartbeat would also stop them."""

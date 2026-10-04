@@ -1,4 +1,4 @@
-"""Joint positions to drive encoder counts with the placeholder drive map."""
+"""Joint positions to drive encoder counts with the arm's drive map."""
 
 import math
 
@@ -15,9 +15,11 @@ def arm_map(parameters):
         parameters('arm_drives.yaml', 'sim_arm_drives'), COUNTS)
 
 
-def test_placeholder_map_covers_every_arm_joint(arm_map):
+def test_the_map_covers_every_arm_joint_with_the_cad_gear_ratios(arm_map):
     assert arm_map.joints == ['joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5', 'tool_grip']
     assert [drive.can_id for drive in arm_map.drives] == [1, 2, 3, 4, 5, 6]
+    # 26:1 cycloidal reducers on the base, shoulder and elbow; 3:1 belts on the wrist motors.
+    assert [drive.gear_ratio for drive in arm_map.drives] == [26.0, 26.0, 26.0, 3.0, 3.0, 1.0]
 
 
 def test_positions_round_trip_through_counts(arm_map):
@@ -29,9 +31,10 @@ def test_positions_round_trip_through_counts(arm_map):
 
 def test_wrist_differential_mixes_pitch_and_roll(arm_map):
     zero = dict.fromkeys(arm_map.joints, 0.0)
-    quarter = COUNTS // 4
-    assert arm_map.to_counts({**zero, 'joint_4': math.pi / 2})[3:5] == [quarter, quarter]
-    assert arm_map.to_counts({**zero, 'joint_5': math.pi / 2})[3:5] == [-quarter, quarter]
+    # A quarter turn of the wrist is three quarters of a turn of each motor through the belts.
+    turn = 3 * COUNTS // 4
+    assert arm_map.to_counts({**zero, 'joint_4': math.pi / 2})[3:5] == [turn, turn]
+    assert arm_map.to_counts({**zero, 'joint_5': math.pi / 2})[3:5] == [-turn, turn]
 
 
 def test_gear_ratio_scales_counts_and_speed():

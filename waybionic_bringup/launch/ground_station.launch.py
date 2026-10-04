@@ -167,12 +167,13 @@ def generate_launch_description():
 
     drive_interface_arg = DeclareLaunchArgument(
         'drive_interface', default_value='sim',
-        description='Drive bus: sim for simulated drives, or a python-can interface such as '
-                    'socketcan or slcan for the real MKS drives')
+        description='Drive bus: sim for simulated drives, slcan for the WayBionic carrier on '
+                    'a USB serial port, or a python-can interface such as socketcan')
 
     drive_channel_arg = DeclareLaunchArgument(
         'drive_channel', default_value='',
-        description='CAN channel for a real drive bus, such as can0 or /dev/ttyACM0')
+        description='The carrier serial port or CAN channel, such as /dev/cu.usbmodem1101, '
+                    '/dev/ttyACM0 or can0')
 
     joy_source_arg = DeclareLaunchArgument(
         'joy_source', default_value='device',
