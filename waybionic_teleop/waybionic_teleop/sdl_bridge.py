@@ -11,7 +11,7 @@ import os
 import socket
 import time
 
-from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS, pack
+from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS, pack, pong
 
 
 BUTTON_NAMES = {
@@ -114,6 +114,21 @@ class SDLBridge:
         return axes, buttons, True, message
 
 
+def answer_pings(sender):
+    """Send the ground station's pings straight back so it can time the link."""
+    while True:
+        try:
+            data, station = sender.recvfrom(64)
+        except OSError:
+            return
+        answer = pong(data)
+        if answer is not None:
+            try:
+                sender.sendto(answer, station)
+            except OSError:
+                pass
+
+
 def main():
     """Run the Windows SDL controller bridge until Ctrl+C."""
     parser = argparse.ArgumentParser(
@@ -122,7 +137,7 @@ def main():
                         help='ground station address')
     parser.add_argument('--port', type=int, default=47300,
                         help='ground station joy_udp_port')
-    parser.add_argument('--rate', type=float, default=120.0,
+    parser.add_argument('--rate', type=float, default=250.0,
                         help='packets per second')
     parser.add_argument('--index', type=int,
                         help='SDL controller index (default: first)')
@@ -147,6 +162,7 @@ def main():
     sdl.init()
     bridge = SDLBridge(pygame, sdl, args.index)
     sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sender.setblocking(False)
     sequence, period, last_message, shown = 0, 1.0 / args.rate, None, ''
     print(f'Sending controller state to {args.host}:{args.port} '
           '(Ctrl+C to stop)')
@@ -158,8 +174,12 @@ def main():
                 print('\n' + message)
                 last_message = message
             sequence += 1
-            sender.sendto(pack(sequence, axes, buttons, connected),
-                          (args.host, args.port))
+            try:
+                sender.sendto(pack(sequence, axes, buttons, connected),
+                              (args.host, args.port))
+            except BlockingIOError:
+                pass
+            answer_pings(sender)
             if connected and sequence % 30 == 0:
                 held = ' '.join(name for name, pressed in zip(BUTTONS, buttons)
                                 if pressed)

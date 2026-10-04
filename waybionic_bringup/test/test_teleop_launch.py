@@ -104,6 +104,11 @@ class TestTeleop(unittest.TestCase):
     def test_pushing_into_a_limit_rumbles_the_controller(self):
         rclpy.init()
         node = rclpy.create_node('rumble_test')
+        diagnostics = {}
+        node.create_subscription(
+            DiagnosticArray, '/diagnostics',
+            lambda message: diagnostics.update(
+                (status.name, status) for status in message.status), 10)
         sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sender.setblocking(False)
         # Ahead of the other test's packets, which the receiver may still remember.
@@ -118,10 +123,17 @@ class TestTeleop(unittest.TestCase):
                 sequence += 1
                 sender.sendto(gamepad.pack(sequence, packet_axes, buttons), ('127.0.0.1', PORT))
                 rclpy.spin_once(node, timeout_sec=0.02)
-                try:
-                    rumbles.append(gamepad.unpack_rumble(sender.recv(64)))
-                except BlockingIOError:
-                    pass
+                while True:
+                    try:
+                        data, station = sender.recvfrom(64)
+                    except BlockingIOError:
+                        break
+                    # Answer the station's pings as the bridges do.
+                    answer = gamepad.pong(data)
+                    if answer is not None:
+                        sender.sendto(answer, station)
+                    else:
+                        rumbles.append(gamepad.unpack_rumble(data))
 
         try:
             hold(0.5)
@@ -133,6 +145,8 @@ class TestTeleop(unittest.TestCase):
             self.assertTrue(rumbles, 'the controller never rumbled')
             self.assertGreater(rumbles[0], 0.0)
             self.assertEqual(rumbles[-1], 0.0)
+            link = {value.key: value.value for value in diagnostics['controller.link'].values}
+            self.assertNotEqual(link['round_trip_ms'], '', 'the link was never timed')
         finally:
             sender.close()
             node.destroy_node()

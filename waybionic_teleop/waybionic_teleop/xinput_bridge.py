@@ -13,7 +13,7 @@ import ctypes
 import socket
 import time
 
-from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS, pack, unpack_rumble
+from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS, pack, pong, unpack_rumble
 
 ERROR_SUCCESS = 0
 # game_controller_node rumbles for a second per request unless told to stop; so does this.
@@ -91,7 +91,7 @@ def main():
     parser = argparse.ArgumentParser(description='Send an Xbox controller to the arm.')
     parser.add_argument('--host', default='127.0.0.1', help='ground station address')
     parser.add_argument('--port', type=int, default=47300, help='ground station joy_udp_port')
-    parser.add_argument('--rate', type=float, default=120.0, help='packets per second')
+    parser.add_argument('--rate', type=float, default=250.0, help='packets per second')
     parser.add_argument('--slot', type=int, choices=range(4),
                         help='XInput controller slot (default: first connected)')
     args = parser.parse_args()
@@ -126,14 +126,24 @@ def main():
                               (args.host, args.port))
             except BlockingIOError:
                 pass
-            # The ground station answers on the same socket when the arm stops at a limit.
+            # The ground station answers on the same socket: pings to time the link, and a
+            # rumble when the arm stops at a limit.
             while True:
                 try:
-                    intensity = unpack_rumble(sender.recvfrom(64)[0])
-                except ValueError:
-                    continue
+                    data, station = sender.recvfrom(64)
                 except OSError:
                     break
+                answer = pong(data)
+                if answer is not None:
+                    try:
+                        sender.sendto(answer, station)
+                    except OSError:
+                        pass
+                    continue
+                try:
+                    intensity = unpack_rumble(data)
+                except ValueError:
+                    continue
                 if active is not None:
                     set_state(active, ctypes.byref(vibration(intensity)))
                     rumble_until = started + RUMBLE_S if intensity > 0 else None
