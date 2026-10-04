@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>waybionic_can</name>
+  <version>0.1.0</version>
+  <description>
+    Transport-independent MKS SERVO CAN protocol core with gateway and receiver node logic,
+    a four-node Linux SocketCAN (vcan) simulation, and UNO R4 Arduino firmware for the real
+    CAN bus (single-drive bring-up, four-node bench, SLCAN carrier bridge). The C++ code does
+    not use ROS.
+  </description>
+  <maintainer email="khuzaymahbinharis@gmail.com">Khuzaymah Bin Haris</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
