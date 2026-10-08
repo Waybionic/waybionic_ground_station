@@ -333,10 +333,13 @@ margin. If the arm is already touching something, the only moves still allowed a
 the ones that back out of it: a move that presses any contact further in is
 refused, even if it would ease another contact at the same time.
 
-The boxes are what makes any of this work, so a `robot_description` without a
+The boxes are what makes any of this work. A `robot_description` without a
 collision box for the base, shoulder, upper arm, forearm, wrist or wrist roll
-leaves teleop disabled. The diagnostics panel then names the links whose boxes are
-missing, and the arm does not move until the description is fixed.
+leaves teleop disabled, and the diagnostics panel names the missing links.
+A description reload while teleop is enabled sends an explicit stop to every
+drive before the new model is accepted or rejected. The drive node holds that
+stop until it receives a new joint command. This stop path has only been
+exercised with simulated drives, not on powered hardware.
 
 The RViz camera follows the tool as the arm moves; drag to orbit and scroll to zoom
 as usual, or add `follow_camera:=false` to the launch command for a fixed view.

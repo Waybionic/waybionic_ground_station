@@ -57,6 +57,11 @@ def absolute_axis(can_id, axis, speed_rpm, acc):
                  + axis.to_bytes(3, 'big', signed=True))
 
 
+def stop(can_id, acc):
+    """Slow down with acc and hold (F5h with speed 0); acc 0 stops at once."""
+    return absolute_axis(can_id, 0, 0, acc)
+
+
 def read_encoder(can_id):
     """Request the cumulative multi-turn encoder value (31h), 0x4000 counts per turn."""
     return frame(can_id, READ_ENCODER)

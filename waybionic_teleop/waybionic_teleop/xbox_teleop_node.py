@@ -65,6 +65,10 @@ class XboxTeleop(Node):
         self.create_timer(0.5, self.report)
 
     def load(self, message):
+        if self.teleop is not None and self.teleop.enabled:
+            # A live description change invalidates the collision model. Stop
+            # before inspecting the replacement, including when it is malformed.
+            self.command_publisher.publish(JointState())
         joints = {joint for group in self.config.groups for joint in group.joints}
         try:
             limits = joint_limits(message.data, joints)

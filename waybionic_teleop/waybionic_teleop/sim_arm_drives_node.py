@@ -4,6 +4,8 @@ Run the arm's joint drives in simulation: /joint_commands in, CAN frames, /joint
 The node talks to the drives only through CAN frames from :mod:`waybionic_teleop.mks_can`, so
 replacing :class:`~waybionic_teleop.sim_drives.SimulatedBus` with a real CAN interface keeps
 the command, feedback and diagnostics path unchanged. Nothing here reaches hardware.
+An empty /joint_commands JointState stops all drives and latches the stop until a new target.
+
 """
 
 import math
@@ -34,8 +36,9 @@ def status(name, level, value, unit, message, **extra):
 class SimArmDrives(Node):
     """Stream joint targets to simulated MKS drives and publish their encoder feedback."""
 
-    def __init__(self):
-        super().__init__('sim_arm_drives', automatically_declare_parameters_from_overrides=True)
+    def __init__(self, **kwargs):
+        super().__init__('sim_arm_drives', automatically_declare_parameters_from_overrides=True,
+                         **kwargs)
         params = {name: self.get_parameter(name).value
                   for name in self.list_parameters([], 0).names}
         self.map = drive_map_from_parameters(params, mks_can.COUNTS_PER_REV)
@@ -53,6 +56,7 @@ class SimArmDrives(Node):
         self.last_command = [''] * len(drives)
         self.commanded = None
         self.velocities = {}
+        self.safety_stop = False
         self.limits = {}
         self.rejected = 0
         self.bus_errors = 0
@@ -85,17 +89,36 @@ class SimArmDrives(Node):
         except ValueError as error:
             self.get_logger().error(f'Joint limits unavailable: {error}')
 
+    def stop_all(self):
+        """Stop every drive and discard the previous absolute target."""
+        for drive in self.map.drives:
+            self.bus.send(drive.can_id, mks_can.stop(drive.can_id, self.acc))
+        self.commanded, self.velocities = None, {}
+        self.sent = [None] * len(self.map.drives)
+        self.safety_stop = True
+
     def on_command(self, message):
-        if self.commanded is None:
+        # The empty joint command is a stop, not a missing update. Do not resume
+        # merely because encoder polling still delivers fresh joint states.
+        if not (message.name or message.position or message.velocity or message.effort):
+            self.stop_all()
             return
+        updates = {}
         for index, joint in enumerate(message.name):
-            if joint not in self.commanded or index >= len(message.position):
+            if joint not in self.map.joints or index >= len(message.position):
                 continue
             position = message.position[index]
             velocity = message.velocity[index] if index < len(message.velocity) else 0.0
             if not (math.isfinite(position) and math.isfinite(velocity)):
                 self.rejected += 1
                 continue
+            updates[joint] = (position, velocity)
+        if not updates or None in self.counts:
+            return
+        if self.commanded is None:
+            self.commanded = self.map.to_positions(self.counts)
+        self.safety_stop = False
+        for joint, (position, velocity) in updates.items():
             self.commanded[joint], self.velocities[joint] = position, velocity
 
     def tick(self):
@@ -112,7 +135,7 @@ class SimArmDrives(Node):
         if None in self.counts:
             return
         positions = self.map.to_positions(self.counts)
-        if self.commanded is None:
+        if self.commanded is None and not self.safety_stop:
             # Hold wherever the drives already are until the first command arrives.
             self.commanded = dict(positions)
         message = JointState(name=list(positions), position=list(positions.values()))
