@@ -34,8 +34,9 @@ def status(name, level, value, unit, message, **extra):
 class SimArmDrives(Node):
     """Stream joint targets to simulated MKS drives and publish their encoder feedback."""
 
-    def __init__(self):
-        super().__init__('sim_arm_drives', automatically_declare_parameters_from_overrides=True)
+    def __init__(self, **kwargs):
+        super().__init__('sim_arm_drives', automatically_declare_parameters_from_overrides=True,
+                         **kwargs)
         params = {name: self.get_parameter(name).value
                   for name in self.list_parameters([], 0).names}
         self.map = drive_map_from_parameters(params, mks_can.COUNTS_PER_REV)
@@ -100,7 +101,7 @@ class SimArmDrives(Node):
 
     def tick(self):
         now = time.monotonic()
-        dt, self.last_tick = min(now - self.last_tick, 0.1), now
+        dt, self.last_tick = now - self.last_tick, now
         # Speeds follow the encoders, so the targets are refreshed every tick.
         if self.commanded is not None:
             self.send_targets()
