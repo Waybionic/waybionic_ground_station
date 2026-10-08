@@ -7,6 +7,7 @@ WAYBIONIC_CAN_TEST=socketcan:vcan0 to run it over a kernel CAN interface instead
 
 import math
 import os
+from pathlib import Path
 import threading
 import time
 import uuid
@@ -16,6 +17,7 @@ import rclpy
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.parameter import Parameter
 from sensor_msgs.msg import JointState
+from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
 from waybionic_teleop import mks_can
@@ -25,6 +27,8 @@ from waybionic_teleop.sim_arm_drives_node import SimArmDrives
 from waybionic_teleop.sim_drives import SimulatedServo
 
 BITRATE = 1000000
+URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
+        / 'waybionic_arm.urdf').read_text(encoding='utf-8')
 
 
 @pytest.fixture
@@ -215,3 +219,54 @@ def test_a_target_the_interface_refused_is_sent_again(make_node, monkeypatch):
     command(node, joint_1=0.3)
     assert spin_until(executor, lambda: abs(positions(node)['joint_1'] - 0.3) < 1e-3)
     assert refused == [1]
+
+
+def test_commands_without_a_speed_that_stop_also_stop_the_drives(make_node):
+    # A gearbox that lets the joint turn at 6 rpm, the slowest documented MKS SERVO42D
+    # setting, so a move well inside the joint limits outlasts the 0.5 s command timeout.
+    node, executor = make_node(max_rpm=6)
+    node.on_description(String(data=URDF))
+    assert spin_until(executor, lambda: node.commanded is not None and node.limits)
+    upper = node.limits['joint_1'][1]
+    # One position-only command, as a publisher that fills in no velocity sends, then silence.
+    node.on_command(JointState(name=['joint_1'], position=[upper]))
+    assert spin_until(executor, lambda: node.stale)
+    # Let the drives finish slowing down, then check that the arm holds where it stopped.
+    spin_for(executor, 0.1)
+    stopped = positions(node)['joint_1']
+    spin_for(executor, 1.0)
+    assert positions(node)['joint_1'] == pytest.approx(stopped, abs=0.03)
+    # Without the stop it would have kept turning towards the limit at 36 deg/s.
+    assert stopped < upper - 1.0
+
+
+def test_the_stale_stop_happens_once_and_clears_when_commands_return(make_node):
+    node, executor = make_node(max_rpm=6)
+    assert spin_until(executor, lambda: node.commanded is not None)
+    stop_all, stops = node.stop_all, []
+
+    def counted():
+        stops.append(time.monotonic())
+        stop_all()
+    node.stop_all = counted
+    command(node, joint_1=0.5)
+    assert spin_until(executor, lambda: node.stale)
+    spin_for(executor, 1.0)
+    assert len(stops) == 1
+    command(node, joint_1=0.5)
+    assert not node.stale
+
+
+def test_silence_before_the_first_command_leaves_the_drives_holding(make_node):
+    node, executor = make_node()
+    assert spin_until(executor, lambda: node.commanded is not None)
+    held, stops, stop_all = dict(node.commanded), [], node.stop_all
+
+    def counted():
+        stops.append(time.monotonic())
+        stop_all()
+    node.stop_all = counted
+    # Longer than command_timeout_s: an arm nobody has commanded yet keeps its hold target,
+    # and start-up never logs a stale-command warning.
+    spin_for(executor, 1.0)
+    assert stops == [] and node.commanded == held

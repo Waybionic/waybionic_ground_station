@@ -9,6 +9,11 @@ The encoders count from where the drives were powered on, so nothing moves until
 has been zeroed with the arm in the zero pose: at start-up in simulation, and through the
 ``~/zero`` service on real drives. A drive that stops answering is treated as power-cycled:
 every drive stops and the arm must be zeroed again.
+
+Whoever publishes ``/joint_commands`` must keep publishing while the arm is meant to move.
+Once ``command_timeout_s`` passes with no command, every drive stops where it is and holds
+there, whatever speed it was last given, so a publisher that dies cannot leave the arm
+running on to its last target.
 """
 
 import math
@@ -87,6 +92,9 @@ class SimArmDrives(Node):
         self.commanded = None
         self.velocities = {}
         self.command_time = -math.inf
+        # True while no fresh command is outstanding: before the first one, and after a stale
+        # one has already stopped the drives. It keeps the stop and its warning to one shot.
+        self.stale = True
         self.limits = {}
         self.rejected = 0
         self.bus_errors = 0
@@ -169,7 +177,7 @@ class SimArmDrives(Node):
             self.get_logger().error(f'Joint limits unavailable: {error}')
 
     def on_command(self, message):
-        self.command_time = time.monotonic()
+        self.command_time, self.stale = time.monotonic(), False
         if self.commanded is None:
             return
         for index, joint in enumerate(message.name):
@@ -185,11 +193,14 @@ class SimArmDrives(Node):
     def tick(self):
         now = time.monotonic()
         dt, self.last_tick = now - self.last_tick, now
-        if any(self.velocities.values()) and now - self.command_time > self.command_timeout:
-            # The commands stopped mid-move, say because teleop exited: stop where the arm is
-            # rather than run on to the last target.
+        if not self.stale and now - self.command_time > self.command_timeout:
+            # The commands stopped, say because teleop exited or its host died: stop where the
+            # arm is rather than run on to the last target. A position-only command carries no
+            # velocity, so the speed the drives were last given must not decide this.
+            self.stale = True
             self.stop_all()
-            self.get_logger().warning('Joint commands stopped mid-move; every drive is stopped')
+            self.get_logger().warning(
+                f'No joint command for {self.command_timeout:.1f} s; every drive is stopped')
         self.check_replies()
         # Speeds follow the encoders, so the targets are refreshed every tick.
         if self.commanded is not None:

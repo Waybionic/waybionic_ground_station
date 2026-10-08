@@ -12,7 +12,8 @@ sim_arm_drives:
     acc: 255
     max_rpm: 300
     heartbeat_ms: 500
-    # Without a new joint command for this long, hold the last target.
+    # Without a new joint command for this long, every drive stops where it is and holds
+    # there, whether or not the last command carried a speed.
     command_timeout_s: 0.5
     drives: [base_yaw, shoulder, elbow, wrist_left, wrist_right, tool]
     base_yaw:
