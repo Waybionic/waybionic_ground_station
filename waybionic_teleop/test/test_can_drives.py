@@ -240,6 +240,28 @@ def test_commands_without_a_speed_that_stop_also_stop_the_drives(make_node):
     assert stopped < upper - 1.0
 
 
+def test_a_paused_host_tick_respects_joint_limit_and_drive_heartbeat(make_node):
+    node, executor = make_node(max_rpm=6, command_timeout_s=10.0)
+    node.on_description(String(data=URDF))
+    assert spin_until(executor, lambda: node.commanded is not None and node.limits)
+    upper = node.limits['joint_1'][1]
+    node.on_command(JointState(name=['joint_1'], position=[upper - 0.01], velocity=[6.0]))
+    node.tick()
+    motor = node.bus.drives[1]
+    expected = node.map.to_counts({**node.commanded, 'joint_1': upper})[0]
+    assert motor.target == expected
+
+    # No wall-clock pause: a scheduler gap reaches the drive before encoder polling
+    # can reset the heartbeat. The unrelated publisher timeout remains unarmed.
+    node.last_tick -= 2.0
+    node.tick()
+    assert not node.stale
+    assert (motor.heartbeat_stops, motor.rpm, motor.target) == (1, 0.0, None)
+    assert 0.0 < motor.axis < expected
+    node.tick()
+    assert motor.target is None
+
+
 def test_the_stale_stop_happens_once_and_clears_when_commands_return(make_node):
     node, executor = make_node(max_rpm=6)
     assert spin_until(executor, lambda: node.commanded is not None)

@@ -33,8 +33,9 @@ def status(name, level, value, unit, message):
 class XboxTeleop(Node):
     """Turn controller input into streamed joint targets while the operator has it enabled."""
 
-    def __init__(self):
-        super().__init__('xbox_teleop', automatically_declare_parameters_from_overrides=True)
+    def __init__(self, **kwargs):
+        super().__init__('xbox_teleop', automatically_declare_parameters_from_overrides=True,
+                         **kwargs)
         params = {name: self.get_parameter(name).value
                   for name in self.list_parameters([], 0).names}
         self.config = config_from_parameters(params)
@@ -61,6 +62,11 @@ class XboxTeleop(Node):
         self.create_timer(0.5, self.report)
 
     def load(self, message):
+        if self.teleop is not None and self.teleop.enabled:
+            # The new description replaces the teleop state, so hold the arm where it is first.
+            self.teleop.disable(self.measured, 'Robot description changed')
+            self.publish_command()
+            self.get_logger().warning('Robot description changed: teleop disabled, arm held')
         joints = {joint for group in self.config.groups for joint in group.joints}
         try:
             limits = joint_limits(message.data, joints)
