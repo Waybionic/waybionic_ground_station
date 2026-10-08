@@ -309,15 +309,25 @@ TEST_F(DiagnosticsTrafficFixture, ChurnLeavesNoLingeringSubscription)
   for (int iteration = 0; iteration < kIterations; ++iteration) {
     auto live_source = makeSource();
     if (iteration == kIterations - 1) {
-      // Once a message reaches this source, the executor has collected its subscription. The
-      // pause lets the remaining messages drain, so the executor is back waiting and holds the
-      // subscription when stop() retires it: the ordering that used to flake.
-      ASSERT_TRUE(waitFor([&]() {
-        publisher_->publish(makeArray(diagnostic_msgs::msg::DiagnosticStatus::OK, "0"));
-        const auto messages = live_source->messages(now());
-        return !messages.empty() && messages.front().signal_name == "board.temperature";
-      }, 5s)) << "the last source never received a message";
-      std::this_thread::sleep_for(100ms);
+      // Hand the last source a value only it could have just received. Reading that exact
+      // value back proves three things at once: the executor collected this subscription,
+      // it ran the callback, and nothing newer is queued for it. The executor is therefore
+      // back in rcl_wait holding the subscription when stop() retires it, which is the
+      // ordering that used to flake. Nothing here waits for a fixed amount of time.
+      constexpr int kMarkerAttempts = 200;
+      bool synchronized = false;
+      for (int attempt = 0; attempt < kMarkerAttempts && !synchronized; ++attempt) {
+        // Publishes made before the subscription is matched are dropped, so every attempt
+        // sends a fresh marker and accepts only that marker back.
+        const std::string marker = "sync-" + std::to_string(attempt);
+        publisher_->publish(makeArray(diagnostic_msgs::msg::DiagnosticStatus::OK, marker));
+        synchronized = waitFor([&]() {
+          const auto messages = live_source->messages(now());
+          return !messages.empty() && messages.front().signal_name == "board.temperature" &&
+                 messages.front().value == marker;
+        }, 50ms);
+      }
+      ASSERT_TRUE(synchronized) << "the last source never reported a synchronization marker";
     }
     live_source->stop();
   }
