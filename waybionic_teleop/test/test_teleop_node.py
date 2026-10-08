@@ -7,6 +7,7 @@ import rclpy
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.parameter import Parameter
 from std_msgs.msg import String
+from std_srvs.srv import Trigger
 
 from waybionic_teleop.sim_arm_drives_node import SimArmDrives
 from waybionic_teleop.xbox_teleop_node import XboxTeleop
@@ -60,7 +61,10 @@ def test_a_later_description_without_its_boxes_turns_teleop_off_again(node):
     assert node.teleop is None and 'forearm_link' in node.problem
 
 
-def test_invalid_live_description_stops_a_moving_drive(node, context, parameters):
+@pytest.mark.parametrize(
+    'valid_replacement', [False, True], ids=['missing_collision_box', 'valid_reload'])
+def test_description_reload_stops_a_moving_drive(
+        node, context, parameters, valid_replacement):
     values = parameters('arm_drives.yaml', 'sim_arm_drives')
     drives = SimArmDrives(context=context, parameter_overrides=[
         Parameter(name, value=value) for name, value in values.items()])
@@ -89,15 +93,20 @@ def test_invalid_live_description_stops_a_moving_drive(node, context, parameters
         motor = drives.bus.drives[1]
         assert motor.target is not None and motor.axis > 0.0
 
-        node.load(String(data=without_box('forearm_link')))
+        node.load(String(data=URDF if valid_replacement else without_box('forearm_link')))
         for _ in range(100):
             executor.spin_once(timeout_sec=0.01)
             if drives.safety_stop:
                 break
         else:
             pytest.fail('the drive never received the explicit stop')
-        assert node.teleop is None and 'forearm_link' in node.problem
+        if valid_replacement:
+            assert node.teleop is not None and not node.teleop.enabled and node.problem == ''
+        else:
+            assert node.teleop is None and 'forearm_link' in node.problem
         assert drives.commanded is None
+        response = drives.on_zero(Trigger.Request(), Trigger.Response())
+        assert not response.success and 'still arriving' in response.message
         drives.last_tick -= 0.05
         drives.tick()
         stopped_at = motor.axis
@@ -107,7 +116,20 @@ def test_invalid_live_description_stops_a_moving_drive(node, context, parameters
             drives.tick()
         assert motor.axis == stopped_at
         assert drives.safety_stop and drives.commanded is None
+        if valid_replacement:
+            node.measured.update(drives.map.to_positions(drives.counts))
+            node.teleop.enable(node.measured, [0.0] * 8)
+            assert node.teleop.enabled
+            node.publish_command()
+            for _ in range(100):
+                executor.spin_once(timeout_sec=0.01)
+                if not drives.safety_stop:
+                    break
+            else:
+                pytest.fail('valid replacement never released the drive stop')
+            assert drives.commanded is not None and not drives.stale
     finally:
         executor.remove_node(drives)
         executor.shutdown()
+        drives.close()
         drives.destroy_node()

@@ -6,7 +6,7 @@ import time
 import unittest
 
 from ament_index_python.packages import get_package_share_directory
-from diagnostic_msgs.msg import DiagnosticArray
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 import launch
 from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -67,9 +67,16 @@ class TestTeleop(unittest.TestCase):
 
         try:
             deadline = time.monotonic() + 30.0
-            while 'tool_grip' not in joints and time.monotonic() < deadline:
-                rclpy.spin_once(node, timeout_sec=0.1)
+            # Press Start only once teleop has loaded the robot description (the group row
+            # appears) and receives the controller, or the press is lost on a slow machine.
+            while time.monotonic() < deadline and not (
+                    'tool_grip' in joints and 'teleop.group' in diagnostics
+                    and diagnostics['teleop.input'].level == DiagnosticStatus.OK):
+                hold(0.1)
             self.assertIn('tool_grip', joints, 'the simulated drives never reported positions')
+            self.assertIn('teleop.group', diagnostics, 'teleop never loaded the robot description')
+            self.assertEqual(diagnostics['teleop.input'].level, DiagnosticStatus.OK,
+                             'teleop never received the controller packets')
             hold(1.0, left_x=1.0)
             self.assertAlmostEqual(joints['joint_1'], 0.0, places=3, msg='moved while disabled')
             hold(0.2, 'start')

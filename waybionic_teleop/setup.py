@@ -19,7 +19,8 @@ setup(
     maintainer='Yassin Soliman',
     maintainer_email='solimanyassin@gmail.com',
     description=(
-        'Xbox controller teleoperation and simulated CAN joint drives for the WayBionic arm.'
+        'Xbox controller teleoperation and MKS CAN joint drives, simulated or real, for the '
+        'WayBionic arm.'
     ),
     license='Apache-2.0',
     tests_require=['pytest'],
@@ -27,6 +28,7 @@ setup(
         'console_scripts': [
             'xbox_teleop = waybionic_teleop.xbox_teleop_node:main',
             'sim_arm_drives = waybionic_teleop.sim_arm_drives_node:main',
+            'mks_drive_sim = waybionic_teleop.mks_drive_sim:main',
             'joy_udp_receiver = waybionic_teleop.joy_udp_receiver:main',
         ],
     },

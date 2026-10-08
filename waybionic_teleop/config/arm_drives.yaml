@@ -1,7 +1,7 @@
-# Placeholder joint-to-drive map for the simulated MKS SERVO42D/57D CAN bus. The CAN IDs, gear
-# ratios and factors are not hardware values; replace them once Electrical and Mechanical
-# confirm the drives. factors give each motor's output angle per joint angle, so the wrist
-# differential turns both side-gear motors together for pitch and oppositely for roll.
+# Placeholder joint-to-drive map for the MKS SERVO42D/57D CAN bus, simulated or real. The CAN
+# IDs, gear ratios and factors are not hardware values; replace them once Electrical and
+# Mechanical confirm the drives. factors give each motor's output angle per joint angle, so the
+# wrist differential turns both side-gear motors together for pitch and oppositely for roll.
 sim_arm_drives:
   ros__parameters:
     rate_hz: 120.0
@@ -12,6 +12,9 @@ sim_arm_drives:
     acc: 255
     max_rpm: 300
     heartbeat_ms: 500
+    # Without a new joint command for this long, every drive stops where it is and holds
+    # there, whether or not the last command carried a speed.
+    command_timeout_s: 0.5
     drives: [base_yaw, shoulder, elbow, wrist_left, wrist_right, tool]
     base_yaw:
       can_id: 1

@@ -66,9 +66,10 @@ class XboxTeleop(Node):
 
     def load(self, message):
         if self.teleop is not None and self.teleop.enabled:
-            # A live description change invalidates the collision model. Stop
-            # before inspecting the replacement, including when it is malformed.
+            # A live description change invalidates the old collision model.
+            self.teleop.disable(self.measured, 'Robot description changed')
             self.command_publisher.publish(JointState())
+            self.get_logger().warning('Robot description changed: teleop disabled; stop requested')
         joints = {joint for group in self.config.groups for joint in group.joints}
         try:
             limits = joint_limits(message.data, joints)

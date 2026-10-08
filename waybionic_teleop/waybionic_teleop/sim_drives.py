@@ -5,6 +5,8 @@ import math
 
 from waybionic_teleop import mks_can
 
+MAX_STEP_S = 0.01
+
 
 def ramp_rpm_per_s(acc):
     """Return the manual's acceleration: 1 rpm every (256 - acc) * 50 us; None when acc is 0."""
@@ -42,6 +44,8 @@ class SimulatedServo:
             self.respond, self.active, status = bool(arguments[0]), bool(arguments[1]), 1
         elif code == mks_can.SET_HEARTBEAT and len(arguments) == 4:
             self.heartbeat_ms, status = int.from_bytes(arguments, 'big'), 1
+        elif code == mks_can.SET_ZERO and not arguments:
+            self.axis, self.rpm, self.target, status = 0.0, 0.0, None, 1
         elif code == mks_can.ENABLE and len(arguments) == 1:
             self.enabled, status = bool(arguments[0]), 1
             if not self.enabled:
@@ -63,6 +67,18 @@ class SimulatedServo:
 
     def step(self, dt):
         """Advance the motor by dt seconds and return any frames it sends unprompted."""
+        frames = []
+        # Short steps keep a long pause exact, and the heartbeat still sees all of it.
+        while dt > 0.0:
+            if self.target is None and not self.rpm:
+                self.quiet_ms += dt * 1000.0
+                break
+            part = min(dt, MAX_STEP_S)
+            frames += self._advance(part)
+            dt -= part
+        return frames
+
+    def _advance(self, dt):
         self.quiet_ms += dt * 1000.0
         if self.heartbeat_ms and self.quiet_ms > self.heartbeat_ms and (
                 self.target is not None or self.rpm):
@@ -106,17 +122,19 @@ class SimulatedBus:
         self.errors = 0
 
     def send(self, can_id, data):
+        """Deliver a frame; return False if no drive could take it."""
         self._count(data)
         drive = self.drives.get(can_id)
         if drive is None:
             self.errors += 1
-            return
+            return False
         try:
             replies = drive.receive(data)
         except ValueError:
             self.errors += 1
-            return
+            return False
         self._queue(can_id, replies)
+        return True
 
     def receive(self):
         """Return the next (can_id, data) reply, or None when the buffer is empty."""
@@ -126,12 +144,14 @@ class SimulatedBus:
         for can_id, drive in self.drives.items():
             self._queue(can_id, drive.step(dt))
 
+    def shutdown(self):
+        """Nothing to release; matches the real bus."""
+
     def _queue(self, can_id, replies):
         for reply in replies:
             self._count(reply)
             self.replies.append((can_id, reply))
 
     def _count(self, data):
-        # Worst-case length of a standard data frame including stuff bits and interframe space.
         self.frames += 1
-        self.bits += 47 + 8 * len(data) + (34 + 8 * len(data) - 1) // 4
+        self.bits += mks_can.frame_bits(data)
