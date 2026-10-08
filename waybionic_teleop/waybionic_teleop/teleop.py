@@ -289,7 +289,12 @@ class ArmTeleop:
         before = {joint: self.targets[joint] for joint in kinematics.joints}
         tip, pitch = kinematics.forward(before)
         if self.incision is None:
+            # Selecting the group again is the documented way out of INCISION_LOST, and it
+            # takes the tool's own tip as the new incision point. Clear that warning, and
+            # only that one, so a later warning is never hidden by this.
             self.incision = tip
+            if self.note == INCISION_LOST:
+                self.note, self.warning = '', False
         offset = [a - b for a, b in zip(tip, self.incision)]
         depth = sum(a * b for a, b in zip(offset, kinematics.axis(before)))
         if math.sqrt(max(sum(a * a for a in offset) - depth * depth, 0.0)) > INCISION_TOLERANCE:

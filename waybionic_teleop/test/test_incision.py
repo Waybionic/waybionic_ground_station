@@ -131,3 +131,34 @@ def test_selecting_the_group_again_sets_a_new_incision_point(teleop, arm):
     assert teleop.active_group.name == 'incision'
     assert math.dist(teleop.incision, first) > 0.02
     assert teleop.incision == pytest.approx(arm.forward(teleop.targets)[0])
+
+
+def test_choosing_the_group_again_clears_the_incision_warning(teleop, arm):
+    run(teleop, 1.0, left_y=1.0)
+    run(teleop, 0.3)
+    teleop.update(*sample('b'), dict(teleop.targets), DT)
+    teleop.update(*sample(), dict(teleop.targets), DT)
+    moved = {**teleop.targets, 'joint_2': teleop.targets['joint_2'] + 0.1}
+    teleop.update(*sample('start'), moved, DT)
+    teleop.update(*sample(), moved, DT)
+    run(teleop, 0.1, left_y=1.0)
+    assert teleop.warning and 'press Y' in teleop.note
+    # The documented way out: select the incision group again to set a new incision point.
+    for _ in range(len(teleop.groups)):
+        teleop.update(*sample('y'), dict(teleop.targets), DT)
+        teleop.update(*sample(), dict(teleop.targets), DT)
+    assert teleop.active_group.name == 'incision'
+    run(teleop, 1.0, left_y=1.0)
+    run(teleop, 0.3)
+    assert not teleop.warning and teleop.note == '' and 'incision' not in teleop.blocked
+    distance, depth = through(arm, teleop.targets, teleop.incision)
+    assert distance < 1e-5 and depth > 0.005
+
+
+def test_a_new_incision_point_clears_only_the_incision_warning(teleop):
+    # Any other warning belongs to whatever raised it, so reseeding must leave it standing.
+    teleop.incision = None
+    teleop.note, teleop.warning = 'Controller lost; press Start (Menu) to enable', True
+    run(teleop, 0.1)
+    assert teleop.incision is not None
+    assert teleop.warning and teleop.note == 'Controller lost; press Start (Menu) to enable'
