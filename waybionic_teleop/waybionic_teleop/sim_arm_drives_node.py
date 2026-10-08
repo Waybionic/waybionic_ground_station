@@ -89,7 +89,7 @@ class SimArmDrives(Node):
 
     def tick(self):
         now = time.monotonic()
-        dt, self.last_tick = min(now - self.last_tick, 0.1), now
+        dt, self.last_tick = now - self.last_tick, now
         if self.pending:
             self.pending = False
             self.send_targets()
