@@ -309,11 +309,9 @@ TEST_F(DiagnosticsTrafficFixture, ChurnLeavesNoLingeringSubscription)
   for (int iteration = 0; iteration < kIterations; ++iteration) {
     auto live_source = makeSource();
     if (iteration == kIterations - 1) {
-      // Hand the last source a value only it could have just received. Reading that exact
-      // value back proves three things at once: the executor collected this subscription,
-      // it ran the callback, and nothing newer is queued for it. The executor is therefore
-      // back in rcl_wait holding the subscription when stop() retires it, which is the
-      // ordering that used to flake. Nothing here waits for a fixed amount of time.
+      // Echoing a unique marker proves this subscription was collected and its callback ran.
+      // rclcpp has no public hook to observe the next rcl_wait entry. Synchronize with the
+      // callback instead of assuming an arbitrary delay means the executor has reached it.
       constexpr int kMarkerAttempts = 200;
       bool synchronized = false;
       for (int attempt = 0; attempt < kMarkerAttempts && !synchronized; ++attempt) {
