@@ -329,7 +329,14 @@ When a move stops, the diagnostics panel names the part, for example
 `At limit: forearm_link: table`. If the arm stands on a raised mount, set
 `table_height` in `waybionic_teleop/config/xbox_teleop.yaml` to the table's height
 above the bottom of the base. `collision_clearance` in the same file sets the 10 mm
-margin.
+margin. If the arm is already touching something, the only moves still allowed are
+the ones that back out of it: a move that presses any contact further in is
+refused, even if it would ease another contact at the same time.
+
+The boxes are what makes any of this work, so a `robot_description` without a
+collision box for the base, shoulder, upper arm, forearm, wrist or wrist roll
+leaves teleop disabled. The diagnostics panel then names the links whose boxes are
+missing, and the arm does not move until the description is fixed.
 
 The RViz camera follows the tool as the arm moves; drag to orbit and scroll to zoom
 as usual, or add `follow_camera:=false` to the launch command for a fixed view.

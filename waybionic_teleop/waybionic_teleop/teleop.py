@@ -232,18 +232,21 @@ class ArmTeleop:
         """Undo this step's arm motion if it would take a link into the table or the base."""
         if self.collision is None:
             return
-        hits, depth = self.collision.check(self.targets)
-        if not hits:
+        depths = self.collision.check(self.targets)
+        if not depths:
             return
-        # Backing out of a collision is allowed; going deeper or into something new is not.
-        was, was_depth = self.collision.check(before)
-        if was and set(hits) <= set(was) and depth <= was_depth + 1e-9:
+        # Backing out of a collision is allowed, but every contact has to be measured on its
+        # own: a total would let one link press further in while another one pulls clear.
+        # The 1 nm slack is rounding noise in the box arithmetic, not a usable margin.
+        was = self.collision.check(before)
+        worse = [hit for hit, depth in depths.items() if depth > was.get(hit, 0.0) + 1e-9]
+        if not worse:
             return
         for joint, position in before.items():
             if joint != self.config.tool_joint:
                 self.targets[joint], self.velocities[joint] = position, 0.0
         self.stop_cartesian()
-        self.blocked += hits
+        self.blocked += worse
 
     def jog(self, axes, dt):
         """Move the tool tip along a straight line set by the sticks, or tilt the tool about it."""

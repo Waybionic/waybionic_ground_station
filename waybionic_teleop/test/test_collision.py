@@ -106,5 +106,32 @@ def test_teleop_stops_before_the_forearm_reaches_the_table(parameters, check):
     assert teleop.targets['joint_3'] < elbow - 0.05
 
 
+def test_teleop_refuses_a_step_that_presses_one_contact_deeper(parameters, check):
+    teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
+                       LIMITS, ArmKinematics.from_urdf(URDF), check)
+    # Folded flat onto the table. Lifting the elbow from here eases four of the five contacts
+    # by more than it costs, so a total would call it an escape, but the forearm itself is
+    # pressed about 3 mm further into the table.
+    start = pose(90, 90, 15)
+    before, after = check.check(start), check.check(pose(90, 85, 15))
+    assert set(after) == set(before) and sum(after.values()) < sum(before.values())
+    assert after['forearm_link: table'] > before['forearm_link: table'] + 0.002
+    for button in ('start', 'y'):
+        teleop.update(*sample(button), start, DT)
+        teleop.update(*sample(), start, DT)
+    for _ in range(round(0.5 / DT)):
+        teleop.update(*sample(left_y=-1.0), dict(teleop.targets), DT)
+    assert teleop.targets['joint_3'] == start['joint_3']
+    assert teleop.blocked == ['forearm_link: table']
+
+
+def test_the_check_reports_a_depth_for_every_collision_it_names(check):
+    depths = check.check(pose(-135, -165, 0))
+    assert list(depths) == check.hits(pose(-135, -165, 0))
+    assert set(depths) == {'forearm_link: base_link', 'forearm_link: shoulder_link'}
+    assert all(depth > 0.0 for depth in depths.values())
+    assert check.check(pose(0, 0, 0)) == {}
+
+
 def sample(*pressed, **axes):
     return [axes.get(name, 0.0) for name in AXES], [int(name in pressed) for name in BUTTONS]

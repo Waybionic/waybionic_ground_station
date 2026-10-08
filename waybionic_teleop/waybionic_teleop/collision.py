@@ -131,29 +131,27 @@ class ArmCollision:
 
     def hits(self, positions):
         """Return what would collide at these joint positions, such as 'forearm_link: table'."""
-        return self.check(positions)[0]
+        return list(self.check(positions))
 
     def check(self, positions):
-        """Return (hits, depth): the collisions, and how far into them the arm reaches in m."""
+        """Return {collision: depth}: each contact, and how far into it the arm reaches in m."""
         poses = self.poses(positions)
-        found, depth = [], 0.0
+        found = {}
         for link in self.boxes:
             if link in BODY:
                 continue
             lowest = min(center[2] - sum(h * abs(axis[2]) for h, axis in zip(half, axes))
                          for center, axes, half in self.world_boxes(poses, link))
             if lowest < self.table_z + self.clearance:
-                found.append(f'{link}: table')
-                depth += self.table_z + self.clearance - lowest
+                found[f'{link}: table'] = self.table_z + self.clearance - lowest
         for link in FOLDING:
             for body in BODY:
-                overlaps = [_overlap(box, obstacle, self.clearance)
-                            for box in self.world_boxes(poses, link)
-                            for obstacle in self.world_boxes(poses, body)]
-                if any(overlap > 0.0 for overlap in overlaps):
-                    found.append(f'{link}: {body}')
-                    depth += max(overlaps)
-        return found, depth
+                deepest = max((_overlap(box, obstacle, self.clearance)
+                               for box in self.world_boxes(poses, link)
+                               for obstacle in self.world_boxes(poses, body)), default=0.0)
+                if deepest > 0.0:
+                    found[f'{link}: {body}'] = deepest
+        return found
 
 
 def _overlap(a, b, margin):

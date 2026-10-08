@@ -34,8 +34,9 @@ def status(name, level, value, unit, message):
 class XboxTeleop(Node):
     """Turn controller input into streamed joint targets while the operator has it enabled."""
 
-    def __init__(self):
-        super().__init__('xbox_teleop', automatically_declare_parameters_from_overrides=True)
+    def __init__(self, **kwargs):
+        super().__init__('xbox_teleop', automatically_declare_parameters_from_overrides=True,
+                         **kwargs)
         params = {name: self.get_parameter(name).value
                   for name in self.list_parameters([], 0).names}
         self.config = config_from_parameters(params)
@@ -67,6 +68,10 @@ class XboxTeleop(Node):
         joints = {joint for group in self.config.groups for joint in group.joints}
         try:
             limits = joint_limits(message.data, joints)
+            # The collision boxes are the only thing keeping the arm off the table and out of
+            # its own base, so a description without them leaves teleop off rather than
+            # running it unprotected.
+            collision = ArmCollision.from_urdf(message.data, self.table_height, self.clearance)
         except ValueError as error:
             self.teleop, self.problem = None, str(error)
             self.get_logger().error(f'Teleop disabled: {error}')
@@ -76,11 +81,6 @@ class XboxTeleop(Node):
         except ValueError as error:
             kinematics = None
             self.get_logger().warning(f'Cartesian group unavailable: {error}')
-        try:
-            collision = ArmCollision.from_urdf(message.data, self.table_height, self.clearance)
-        except ValueError as error:
-            collision = None
-            self.get_logger().warning(f'No table or base collision checks: {error}')
         self.teleop, self.problem = ArmTeleop(self.config, limits, kinematics, collision), ''
         self.get_logger().info('Xbox teleop ready (press Start to enable): ' + '; '.join(
             f'{group.name}: {group.describe()}' for group in self.teleop.groups))
