@@ -44,3 +44,17 @@ def test_unknown_button_bits_and_flags_are_rejected():
     packet[5] = 0x02
     with pytest.raises(ValueError):
         gamepad.unpack(bytes(packet))
+
+
+@pytest.mark.parametrize('intensity, expected', [(0.6, 0.6), (0.0, 0.0), (3.0, 1.0), (-1, 0.0)])
+def test_rumble_requests_round_trip_within_zero_to_one(intensity, expected):
+    assert gamepad.unpack_rumble(gamepad.pack_rumble(intensity)) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize('packet', [
+    b'', gamepad.pack(1, NEUTRAL, []), b'XXXX' + gamepad.pack_rumble(0.5)[4:],
+    gamepad.pack_rumble(0.5)[:-4] + struct.pack('<f', float('nan')),
+])
+def test_anything_else_is_not_a_rumble_request(packet):
+    with pytest.raises(ValueError):
+        gamepad.unpack_rumble(packet)

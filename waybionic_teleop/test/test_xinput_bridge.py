@@ -33,3 +33,9 @@ def test_bridge_output_fits_the_packet():
     _, _, decoded_axes, decoded_buttons = gamepad.unpack(gamepad.pack(1, axes, buttons))
     assert decoded_axes == pytest.approx(axes)
     assert decoded_buttons == buttons
+
+
+@pytest.mark.parametrize('intensity, speed', [(0.0, 0), (0.5, 32768), (1.0, 65535), (2.0, 65535)])
+def test_rumble_drives_both_motors(intensity, speed):
+    motors = xinput_bridge.vibration(intensity)
+    assert (motors.left_motor, motors.right_motor) == (speed, speed)
