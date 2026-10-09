@@ -101,16 +101,24 @@ class TestArmModel(unittest.TestCase):
         self.assertGreater(tool.translation.z, 0.7)
 
     def test_camera_focus_follows_the_tool(self):
-        # Hold one pose long enough for the smoothed focus to settle on it.
-        end = time.monotonic() + 2.5
-        while time.monotonic() < end:
+        # Wait for the actual focus to converge while publishing the pose. A fixed sleep can
+        # expire before the follower has received its first TF under a busy test executor.
+        deadline, observed = time.monotonic() + 10.0, None
+        while time.monotonic() < deadline:
             tool = self.transform(CAD_POSE, 'tool_link').translation
-        shoulder = self.transform(CAD_POSE, 'shoulder_link').translation
-        focus = self.buffer.lookup_transform('base_link', 'view_focus', Time())
-        expected = [0.7 * t + 0.3 * s for t, s in zip((tool.x, tool.y, tool.z),
-                                                      (shoulder.x, shoulder.y, shoulder.z))]
-        offset = focus.transform.translation
-        self.assert_close((offset.x, offset.y, offset.z), expected, 0.005)
+            shoulder = self.transform(CAD_POSE, 'shoulder_link').translation
+            expected = [0.7 * t + 0.3 * s for t, s in zip((tool.x, tool.y, tool.z),
+                                                          (shoulder.x, shoulder.y, shoulder.z))]
+            if self.buffer.can_transform('base_link', 'view_focus', Time()):
+                offset = self.buffer.lookup_transform(
+                    'base_link', 'view_focus', Time()).transform.translation
+                observed = (offset.x, offset.y, offset.z)
+                if all(abs(a - e) <= 0.005 for a, e in zip(observed, expected)):
+                    break
+        else:
+            self.fail(f'camera focus did not converge: last {observed}, expected {expected}')
+        self.assertGreater(abs(expected[0]), 0.05)  # Do not pass on the default x=0 focus.
+        self.assert_close(observed, expected, 0.005)
 
     def test_wrist_roll_turns_side_gears_in_opposite_directions(self):
         roll = dict(ZERO_POSE, joint_5=0.5)

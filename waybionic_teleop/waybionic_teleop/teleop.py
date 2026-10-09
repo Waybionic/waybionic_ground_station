@@ -40,6 +40,7 @@ class TeleopConfig:
     tool_speed: float
     tool_close_axis: str
     tool_open_axis: str
+    period: float
     max_speed: float
     max_accel: float
     linear_speed: float
@@ -54,6 +55,9 @@ class TeleopConfig:
 def config_from_parameters(params):
     """Build a TeleopConfig from flat ROS parameter names such as 'base.joints'."""
     try:
+        rate_hz = float(params['rate_hz'])
+        if not math.isfinite(rate_hz) or rate_hz <= 0:
+            raise ValueError('rate_hz must be positive')
         groups = [Group(name, list(params[f'{name}.joints']), list(params[f'{name}.axes']),
                         [float(scale) for scale in params[f'{name}.scales']],
                         params.get(f'{name}.mode', 'joint'))
@@ -66,10 +70,11 @@ def config_from_parameters(params):
             tool_speed=float(params['tool_speed']),
             tool_close_axis=params['tool_close_axis'],
             tool_open_axis=params['tool_open_axis'],
+            period=1.0 / rate_hz,
             max_speed=math.radians(params['max_speed_deg_s']),
             max_accel=math.radians(params['max_accel_deg_s2']),
-            linear_speed=params['max_linear_speed_mm_s'] / 1000.0,
-            linear_accel=params['max_linear_accel_mm_s2'] / 1000.0,
+            linear_speed=float(params['max_linear_speed_mm_s']) / 1000.0,
+            linear_accel=float(params['max_linear_accel_mm_s2']) / 1000.0,
             tilt_speed=math.radians(params['max_tilt_speed_deg_s']),
             speed_levels=[float(level) for level in params['speed_levels']],
             speed_level=int(params['initial_speed_level']),
@@ -77,7 +82,19 @@ def config_from_parameters(params):
             home_gain=float(params['home_gain']))
     except KeyError as missing:
         raise ValueError(f'missing teleop parameter {missing}') from None
+    if not math.isfinite(config.period):
+        raise ValueError('rate_hz is too small for a finite control period')
+    if not config.groups:
+        raise ValueError('at least one teleop group is required')
+    speeds = (config.tool_speed, config.max_speed, config.max_accel, config.linear_speed,
+              config.linear_accel, config.tilt_speed, config.home_gain)
+    if any(not math.isfinite(value) or value <= 0 for value in speeds):
+        raise ValueError('teleop speeds and accelerations must be positive and finite')
+    if any(not math.isfinite(value) or not 0 < value <= 1 for value in config.speed_levels):
+        raise ValueError('speed_levels must be in (0, 1]')
     for group in config.groups:
+        if any(not math.isfinite(scale) for scale in group.scales):
+            raise ValueError(f'group {group.name} scales must be finite')
         if group.mode == 'cartesian':
             if not len(group.axes) == len(group.scales) == len(CARTESIAN_AXES):
                 raise ValueError(f'group {group.name} needs x, y, z and roll axes and scales')
@@ -92,7 +109,7 @@ def config_from_parameters(params):
         raise ValueError('unknown controller inputs: ' + ', '.join(map(str, unknown)))
     if not 0 <= config.speed_level < len(config.speed_levels) or not 0 <= config.deadzone < 1:
         raise ValueError('initial_speed_level or deadzone out of range')
-    if not config.tool_limits[0] < config.tool_limits[1]:
+    if len(config.tool_limits) != 2 or not config.tool_limits[0] < config.tool_limits[1]:
         raise ValueError('tool_limits must be [open, closed] with open < closed')
     return config
 
@@ -107,17 +124,28 @@ class ArmTeleop:
         # Without kinematics for this arm, the Cartesian groups are left out.
         self.groups = [group for group in config.groups
                        if group.mode != 'cartesian' or kinematics is not None]
+        if not self.groups:
+            raise ValueError('no joint-space group or compatible Cartesian kinematics')
+        for group in self.groups:
+            if group.mode == 'cartesian' and (
+                    tuple(group.joints) != kinematics.joints
+                    or any(joint not in limits for joint in kinematics.joints)):
+                raise ValueError(f'Cartesian group {group.name} does not match the URDF chain')
         self.limits = dict(limits)
         self.limits[config.tool_joint] = config.tool_limits
         self.enabled = False
         self.group = 0
         self.level = config.speed_level
         self.targets = {}
+        # Published positions are the next-period setpoints, not joint-wise extrapolations
+        # of a Cartesian solve that could leave the straight line at a limit.
+        self.command_targets = {}
         self.velocities = dict.fromkeys(self.limits, 0.0)
         self.linear = (0.0, 0.0, 0.0)
         self.tilt = 0.0
         self.roll = 0.0
         self.held = set()
+        self.wait_for_center = False
         self.blocked = []
         self.note = 'Press Start (Xbox Menu button) to enable'
         self.warning = False
@@ -148,48 +176,68 @@ class ArmTeleop:
         if 'group' in pressed:
             self.group = (self.group + 1) % len(self.groups)
             self.stop_cartesian()
+            self.velocities = dict.fromkeys(self.limits, 0.0)
+            self.command_targets = dict(self.targets)
+            self.wait_for_center = True
         if 'faster' in pressed:
             self.level = min(self.level + 1, len(self.config.speed_levels) - 1)
         if 'slower' in pressed:
             self.level = max(self.level - 1, 0)
         if not self.enabled:
             return False
+        if self.wait_for_center:
+            if self.motion_input_held(axes):
+                self.note = 'Center motion controls before moving in the new group'
+                self.warning = True
+                return True
+            self.wait_for_center = False
+            self.note, self.warning = '', False
         self.move(axes, self.config.buttons['home'] in held, dt)
         return True
 
-    def enable(self, measured, axes):
-        missing = [joint for joint in self.limits if joint not in measured]
-        if missing:
-            self.note, self.warning = 'Waiting for joint states: ' + ', '.join(missing), True
-            return
+    def motion_input_held(self, axes):
         config = self.config
         sticks = {axis for group in config.groups for axis in group.axes}
         buttons = {config.buttons[action] for action in ('home', 'tilt_up', 'tilt_down')}
-        if (any(self.stick(axes, axis) for axis in sticks)
+        return (any(self.stick(axes, axis) for axis in sticks)
                 or any(self.trigger(axes, axis) > config.deadzone
                        for axis in (config.tool_close_axis, config.tool_open_axis))
-                or buttons & self.held):
+                or bool(buttons & self.held))
+
+    def enable(self, measured, axes):
+        missing = [joint for joint in self.limits
+                   if joint not in measured or not math.isfinite(measured[joint])]
+        if missing:
+            self.note, self.warning = 'Waiting for joint states: ' + ', '.join(missing), True
+            return
+        if self.motion_input_held(axes):
             # A stuck or held input must never start moving the arm the moment it is enabled.
             self.note = 'Center the sticks and release the triggers and buttons, then press Start'
             self.warning = True
             return
         # Start from the measured pose so enabling never makes the arm jump.
         self.targets = {joint: measured[joint] for joint in self.limits}
+        self.command_targets = dict(self.targets)
         self.velocities = dict.fromkeys(self.limits, 0.0)
         self.stop_cartesian()
+        self.wait_for_center = False
         self.enabled, self.note, self.warning = True, '', False
 
     def disable(self, measured, note, warning=False):
         self.enabled, self.note, self.warning = False, note, warning
         self.velocities = dict.fromkeys(self.limits, 0.0)
         self.stop_cartesian()
-        self.targets.update({joint: measured[joint] for joint in self.limits if joint in measured})
+        self.wait_for_center = False
+        self.targets.update({joint: measured[joint] for joint in self.limits
+                             if joint in measured and math.isfinite(measured[joint])})
+        self.command_targets = dict(self.targets)
 
     def stop_cartesian(self):
         self.linear, self.tilt, self.roll = (0.0, 0.0, 0.0), 0.0, 0.0
 
     def move(self, axes, homing, dt):
         config = self.config
+        self.command_targets = dict(self.targets)
         desired = dict.fromkeys(self.limits, 0.0)
         self.blocked = []
         if homing:
@@ -224,6 +272,8 @@ class ArmTeleop:
                 target, velocity = min(self.targets[joint], lower), 0.0
                 self.blocked.append(joint)
             self.targets[joint], self.velocities[joint] = target, velocity
+            self.command_targets[joint] = clamp(
+                target + velocity * config.period, min(lower, target), max(upper, target))
 
     def jog(self, axes, dt):
         """Move the tool tip along a straight line set by the sticks, or tilt the tool about it."""
@@ -253,6 +303,13 @@ class ArmTeleop:
         for joint in self.kinematics.joints:
             self.velocities[joint] = (after[joint] - before[joint]) / dt
             self.targets[joint] = after[joint]
+        if any(self.linear) or self.tilt or self.roll:
+            future, _, _ = self.kinematics.jog(
+                after, self.linear, self.tilt, self.roll, config.period, self.limits,
+                config.max_speed)
+        else:
+            future = after
+        self.command_targets.update(future)
 
     def stick(self, axes, name):
         value = self.axis(axes, name)

@@ -311,16 +311,25 @@ Press **Ctrl+C** in each window to stop.
 | D-pad up/down | Speed: 10, 25, 50 or 100% of 60 deg/s, or of 50 mm/s and 30 deg/s of tilt in the Cartesian group |
 | A (hold) | Return to the zero pose |
 
-Start is refused until the sticks are centred and the triggers released. The
-diagnostics panel shows the teleop state, each joint, each drive's last CAN frame
-and the simulated bus load.
+Start is refused until the sticks are centred and the triggers and motion buttons released;
+after Y changes groups with motion held, the new group waits until the controls are neutral.
+The simulated drives accept complete finite joint commands only after receiving a valid
+URDF and a fresh teleop enable. A host pause past the 500 ms drive heartbeat stops the
+simulated servos; teleop must be disabled and Start released and pressed again before
+motion resumes. The diagnostics panel shows the command gate, teleop state, each joint,
+each drive's last CAN frame and the simulated bus load.
 
-The Cartesian group moves the tool tip along straight lines in the base frame and
-keeps the tool's tilt: every joint moves together, and the tip stops at the edge
-of the workspace instead of leaving the line. The roll also stops the tool spinning
-about its own axis as the base turns, so a tool pointing straight down keeps its
-heading. Tilting with the D-pad moves the shoulder, elbow and wrist around the tip,
-which stays in place.
+The Cartesian group computes its next setpoint with the same limit-aware solver used for
+the current tool-tip pose. The simulated drives are assigned speeds for a common nominal
+arrival time, with tracking error from encoder quantization and acceleration. Tilt moves
+the shoulder, elbow and wrist around the tool tip. Roll counters spin about the tool axis;
+a downward-pointing blade retains its heading in this model.
+
+The current arm URDF has provisional joint limits and no collision boxes. Cartesian moves
+have no table, base or self-collision protection or verified escape path. The simulated
+CAN map is not a powered-arm safety case. Do not change a wrist bound or operate powered
+motors until Mechanical identifies the URDF joint and measures signed travel from upright
+zero, including any cable or gear stop.
 
 The RViz camera follows the tool as the arm moves; drag to orbit and scroll to zoom
 as usual, or add `follow_camera:=false` to the launch command for a fixed view.

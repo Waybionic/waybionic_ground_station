@@ -15,9 +15,10 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState, Joy
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 from visualization_msgs.msg import Marker, MarkerArray
 
+from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
@@ -48,12 +49,14 @@ class XboxTeleop(Node):
         self.joy_time = None
         self.joy_count = 0
         self.measured = {}
+        self.measured_at = {}
         self.ticks = 0
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(String, 'robot_description', self.load, latched)
         self.create_subscription(Joy, 'joy', self.on_joy, 10)
         self.create_subscription(JointState, 'joint_states', self.on_joint_states, 10)
         self.command_publisher = self.create_publisher(JointState, 'joint_commands', 10)
+        self.enable_publisher = self.create_publisher(Bool, 'teleop_enabled', latched)
         self.marker_publisher = self.create_publisher(MarkerArray, 'waybionic/teleop/markers', 10)
         self.diagnostics_publisher = self.create_publisher(
             DiagnosticArray, params.get('diagnostics_topic', '/diagnostics'), 10)
@@ -62,11 +65,15 @@ class XboxTeleop(Node):
         self.create_timer(0.5, self.report)
 
     def load(self, message):
+        # Disable before accepting a replacement description. A hold from stale joint feedback
+        # must not be forwarded to a drive after the model changes.
+        self.publish_enabled(False)
         if self.teleop is not None and self.teleop.enabled:
-            # The new description replaces the teleop state, so hold the arm where it is first.
             self.teleop.disable(self.measured, 'Robot description changed')
             self.publish_command()
             self.get_logger().warning('Robot description changed: teleop disabled, arm held')
+        self.measured.clear()
+        self.measured_at.clear()
         joints = {joint for group in self.config.groups for joint in group.joints}
         try:
             limits = joint_limits(message.data, joints)
@@ -79,40 +86,83 @@ class XboxTeleop(Node):
         except ValueError as error:
             kinematics = None
             self.get_logger().warning(f'Cartesian group unavailable: {error}')
-        self.teleop, self.problem = ArmTeleop(self.config, limits, kinematics), ''
+        try:
+            self.teleop = ArmTeleop(self.config, limits, kinematics)
+        except ValueError as error:
+            self.teleop, self.problem = None, str(error)
+            self.get_logger().error(f'Teleop disabled: {error}')
+            return
+        self.problem = ''
         self.get_logger().info('Xbox teleop ready (press Start to enable): ' + '; '.join(
             f'{group.name}: {group.describe()}' for group in self.teleop.groups))
 
     def on_joy(self, message):
+        if (len(message.axes) != len(AXES) or len(message.buttons) != len(BUTTONS)
+                or any(not math.isfinite(value) or abs(value) > 1 for value in message.axes)
+                or any(button not in (0, 1) for button in message.buttons)):
+            self.joy, self.joy_time = None, None
+            if self.teleop is not None and self.teleop.enabled:
+                self.teleop.disable(self.recent_measurement(time.monotonic()),
+                                    'Malformed controller input; press Start to enable',
+                                    warning=True)
+                self.publish_enabled(False)
+                self.publish_command()
+            return
         self.joy, self.joy_time = message, time.monotonic()
         self.joy_count += 1
 
     def on_joint_states(self, message):
-        self.measured.update((name, position) for name, position
-                             in zip(message.name, message.position) if math.isfinite(position))
+        now = time.monotonic()
+        for name, position in zip(message.name, message.position):
+            if math.isfinite(position):
+                self.measured[name] = position
+                self.measured_at[name] = now
+
+    def recent_measurement(self, now):
+        return {joint: position for joint, position in self.measured.items()
+                if now - self.measured_at[joint] <= self.timeout}
 
     def fresh(self, now):
         return self.joy_time is not None and now - self.joy_time <= self.timeout
 
     def tick(self):
         now = time.monotonic()
-        dt, self.last_tick = min(now - self.last_tick, 0.1), now
+        elapsed, self.last_tick = now - self.last_tick, now
+        dt = min(max(elapsed, 0.0), 0.1)
         self.ticks += 1
         if self.teleop is None:
+            self.publish_enabled(False)
             return
         fresh = self.fresh(now)
+        if elapsed >= self.timeout and self.teleop.enabled:
+            self.teleop.disable(self.recent_measurement(now),
+                                'Host paused; release Start and press it again', warning=True)
+            # A Start held through the pause must not count as a new press on the next tick.
+            self.teleop.held = {
+                name for name, index in BUTTON.items()
+                if fresh and self.joy.buttons[index]
+            }
+            self.publish_enabled(False)
+            self.publish_command()
+            return
         if not fresh and self.teleop.enabled:
-            self.teleop.disable(self.measured, 'Controller lost; press Start (Menu) to enable',
-                                warning=True)
+            self.teleop.disable(self.recent_measurement(now),
+                                'Controller lost; press Start (Menu) to enable', warning=True)
+            self.publish_enabled(False)
             self.publish_command()
         axes, buttons = (self.joy.axes, self.joy.buttons) if fresh else ((), ())
-        if self.teleop.update(axes, buttons, self.measured, dt):
+        updated = self.teleop.update(axes, buttons, self.recent_measurement(now), dt)
+        self.publish_enabled(self.teleop.enabled and fresh)
+        if updated:
             self.publish_command()
         if self.ticks % 3 == 0:
             self.publish_markers(fresh)
 
+    def publish_enabled(self, enabled):
+        self.enable_publisher.publish(Bool(data=enabled))
+
     def publish_command(self):
-        targets = self.teleop.targets
+        targets = self.teleop.command_targets
         if not targets:
             return
         message = JointState(name=list(targets), position=list(targets.values()),

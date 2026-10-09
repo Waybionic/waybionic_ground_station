@@ -46,7 +46,22 @@ def test_gear_ratio_scales_counts_and_speed():
      drive_map.Drive('b', 2, 1.0, {'j1': 2.0, 'j2': 2.0})],
     [drive_map.Drive('a', 1, 0.0, {'j1': 1.0})],
     [drive_map.Drive('a', 1, 1.0, {'j1': 1.0, 'j2': 1.0})],
+    [drive_map.Drive('a', 1, math.nan, {'j1': 1.0})],
+    [drive_map.Drive('a', 1, 1.0, {'j1': math.inf})],
 ])
 def test_duplicate_ids_singular_mixes_and_bad_ratios_are_rejected(drives):
     with pytest.raises(ValueError):
         drive_map.DriveMap(drives, COUNTS)
+
+
+@pytest.mark.parametrize('positions,counts,period,max_rpm', [
+    ({'joint_1': math.nan}, [0], 0.01, 300),
+    ({}, [0], 0.01, 300),
+    ({'joint_1': 0.0}, [None], 0.01, 300),
+    ({'joint_1': 0.0}, [0], 0.0, 300),
+    ({'joint_1': 0.0}, [0], 0.01, 0),
+])
+def test_synchronized_move_rejects_invalid_setpoints(positions, counts, period, max_rpm):
+    mapping = drive_map.DriveMap([drive_map.Drive('base', 1, 1.0, {'joint_1': 1.0})], COUNTS)
+    with pytest.raises(ValueError):
+        mapping.synchronized(positions, counts, period, max_rpm)

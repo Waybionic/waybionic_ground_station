@@ -12,6 +12,8 @@ sim_arm_drives:
     acc: 255
     max_rpm: 300
     heartbeat_ms: 500
+    # The placeholder grip has no URDF joint yet; every modeled arm joint must have a limit.
+    unmodeled_joints: [tool_grip]
     drives: [base_yaw, shoulder, elbow, wrist_left, wrist_right, tool]
     base_yaw:
       can_id: 1

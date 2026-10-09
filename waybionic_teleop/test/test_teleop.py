@@ -230,3 +230,50 @@ def test_missing_parameters_are_named(params):
     del params['deadzone']
     with pytest.raises(ValueError, match='deadzone'):
         config_from_parameters(params)
+
+
+def test_group_change_discards_cartesian_motion_and_lookahead(cartesian):
+    for _ in range(10):
+        cartesian.update(*sample(left_x=1.0, right_x=1.0), DOWN, DT)
+    assert cartesian.linear[1] > 0 and cartesian.roll > 0
+    cartesian.update(*sample('y'), DOWN, DT)
+    assert cartesian.active_group.name == 'base'
+    assert cartesian.linear == (0.0, 0.0, 0.0) and cartesian.roll == 0.0
+    assert not any(cartesian.velocities.values())
+    assert cartesian.command_targets == cartesian.targets
+
+
+def test_switching_groups_with_a_held_stick_waits_for_neutral(cartesian):
+    cartesian.update(*sample('y', left_y=1.0), DOWN, DT)
+    held = dict(cartesian.targets)
+    assert cartesian.active_group.name == 'base' and cartesian.warning
+    for _ in range(10):
+        cartesian.update(*sample(left_y=1.0), DOWN, DT)
+        assert cartesian.targets == held and cartesian.command_targets == held
+    cartesian.update(*sample(), DOWN, DT)
+    assert cartesian.targets == held and not cartesian.warning
+    cartesian.update(*sample(left_y=1.0), DOWN, DT)
+    assert cartesian.targets['joint_2'] > held['joint_2']
+
+
+def test_cartesian_group_must_name_the_actual_urdf_chain(params, arm):
+    params['cartesian.joints'] = list(reversed(params['cartesian.joints']))
+    with pytest.raises(ValueError, match='does not match the URDF'):
+        ArmTeleop(config_from_parameters(params), LIMITS, arm)
+
+
+def test_nonfinite_feedback_cannot_enable_teleop(teleop):
+    pose = {**HOME, 'joint_2': math.nan}
+    teleop.update(*sample('start'), pose, DT)
+    assert not teleop.enabled and teleop.warning and 'joint_2' in teleop.note
+
+
+@pytest.mark.parametrize('change', [
+    {'rate_hz': 0.0},
+    {'max_linear_speed_mm_s': math.nan},
+    {'speed_levels': [math.inf]},
+    {'tool_limits': [0.0]},
+])
+def test_invalid_motion_config_cannot_start(params, change):
+    with pytest.raises(ValueError):
+        config_from_parameters({**params, **change})

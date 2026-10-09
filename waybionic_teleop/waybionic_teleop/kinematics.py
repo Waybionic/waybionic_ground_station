@@ -16,7 +16,15 @@ LAYOUT = 'Cartesian moves need a yaw joint, three parallel pitch joints and a to
 
 def _vector(element, name):
     text = element.get(name) if element is not None else None
-    return tuple(float(value) for value in text.split()) if text else (0.0, 0.0, 0.0)
+    if text is None:
+        return (0.0, 0.0, 0.0)
+    try:
+        vector = tuple(float(value) for value in text.split())
+    except ValueError:
+        raise ValueError(f'robot_description has an invalid {name} vector: {text}') from None
+    if len(vector) != 3 or not all(math.isfinite(value) for value in vector):
+        raise ValueError(f'robot_description has an invalid {name} vector: {text}')
+    return vector
 
 
 def _is(vector, expected):
@@ -37,20 +45,34 @@ def nearest_within(angle, reference, bounds):
 
 
 def joint_limits(urdf, joints, required=True):
-    """Return {joint: (lower, upper)} for the named joints of a URDF string."""
+    """Return validated {joint: (lower, upper)} for the named joints of a URDF string."""
     try:
-        elements = ET.fromstring(urdf).findall('joint')
+        robot = ET.fromstring(urdf)
     except ET.ParseError as error:
         raise ValueError(f'robot_description is not valid XML: {error}') from None
-    limits = {}
-    for element in elements:
-        name, limit = element.get('name'), element.find('limit')
-        if name not in joints:
+    if robot.tag != 'robot':
+        raise ValueError('robot_description is not a robot URDF')
+    limits, seen, requested = {}, set(), set(joints)
+    for element in robot.findall('joint'):
+        name = element.get('name')
+        if name not in requested:
             continue
+        if name in seen:
+            raise ValueError(f'robot_description has duplicate joint {name}')
+        seen.add(name)
         if element.get('type') == 'continuous':
             limits[name] = (-math.inf, math.inf)
-        elif limit is not None and element.get('type') in ('revolute', 'prismatic'):
-            limits[name] = (float(limit.get('lower', 0.0)), float(limit.get('upper', 0.0)))
+        elif element.get('type') in ('revolute', 'prismatic'):
+            limit = element.find('limit')
+            try:
+                lower = float(limit.get('lower'))
+                upper = float(limit.get('upper'))
+            except (AttributeError, TypeError, ValueError):
+                raise ValueError(
+                    f'robot_description has missing or invalid limits for {name}') from None
+            if not (math.isfinite(lower) and math.isfinite(upper) and lower < upper):
+                raise ValueError(f'robot_description has missing or invalid limits for {name}')
+            limits[name] = (lower, upper)
     missing = [joint for joint in joints if joint not in limits]
     if missing and required:
         raise ValueError('robot_description has no movable joint ' + ', '.join(missing))
@@ -68,10 +90,24 @@ class ArmKinematics:
     @classmethod
     def from_urdf(cls, urdf, base_frame='base_link', tool_frame='tool_link'):
         """Read the geometry from a URDF string; raise ValueError for any other layout."""
-        by_child = {joint.find('child').get('link'): joint
-                    for joint in ET.fromstring(urdf).findall('joint')}
-        chain, link = [], tool_frame
+        try:
+            robot = ET.fromstring(urdf)
+        except ET.ParseError as error:
+            raise ValueError(f'robot_description is not valid XML: {error}') from None
+        if robot.tag != 'robot' or base_frame == tool_frame:
+            raise ValueError(LAYOUT)
+        by_child = {}
+        for joint in robot.findall('joint'):
+            parent, child = joint.find('parent'), joint.find('child')
+            if (parent is None or child is None or not parent.get('link')
+                    or not child.get('link') or child.get('link') in by_child):
+                raise ValueError(f'{LAYOUT}: missing or duplicate link')
+            by_child[child.get('link')] = joint
+        chain, link, visited = [], tool_frame, set()
         while link != base_frame:
+            if link in visited:
+                raise ValueError(f'{LAYOUT}: joint chain contains a cycle')
+            visited.add(link)
             if link not in by_child:
                 raise ValueError(f'no joint chain from {base_frame} to {tool_frame}')
             chain.insert(0, by_child[link])
@@ -90,11 +126,14 @@ class ArmKinematics:
                 or abs(origins[0][1]) > TOLERANCE
                 or not all(abs(origin[1]) <= TOLERANCE for origin in origins[4:])):
             raise ValueError(LAYOUT)
+        height = origins[0][2] + origins[1][2]
+        offset = origins[1][1] + origins[2][1] + origins[3][1]
+        upper, fore = origins[2][2], origins[3][2]
+        tool = sum(origin[2] for origin in origins[4:])
+        if min(upper, fore, tool) <= TOLERANCE:
+            raise ValueError(f'{LAYOUT}: link lengths must be positive')
         return cls([joint.get('name') for joint in chain[:5]],
-                   height=origins[0][2] + origins[1][2],
-                   offset=origins[1][1] + origins[2][1] + origins[3][1],
-                   upper=origins[2][2], fore=origins[3][2],
-                   tool=sum(origin[2] for origin in origins[4:]))
+                   height=height, offset=offset, upper=upper, fore=fore, tool=tool)
 
     def forward(self, joints):
         """Return the tool-tip position (x, y, z) in the base frame and the tool pitch."""
@@ -148,6 +187,16 @@ class ArmKinematics:
         against the yaw, so the tool doesn't spin about its own axis as the base turns; with
         the tool pointing straight down, that keeps a blade's heading.
         """
+        if not (math.isfinite(dt) and dt > 0 and math.isfinite(max_rate) and max_rate > 0):
+            raise ValueError('Cartesian step duration and joint speed must be positive')
+        # Permit recovery from an already-outside joint, without moving farther beyond its limit.
+        bounds = {}
+        for name, (lower, upper) in limits.items():
+            if name in joints:
+                current = joints[name]
+                # Normal solver tolerance must not widen the limit a little on every tick.
+                bounds[name] = (current if current < lower - 10 * TOLERANCE else lower,
+                                current if current > upper + 10 * TOLERANCE else upper)
         start, pitch = self.forward(joints)
         yaw, roll = self.joints[0], self.joints[4]
 
@@ -161,14 +210,25 @@ class ArmKinematics:
             # Turning the yaw also turns the tool about its own axis by cos(pitch) of that turn.
             result[roll] = (joints[roll] + roll_rate * dt * fraction
                             - math.cos((pitch + new_pitch) / 2.0) * (result[yaw] - joints[yaw]))
-            return result if _within(result[roll], bounds.get(roll)) else None
+            if not _within(result[roll], bounds.get(roll)):
+                return None
+            if bounds:
+                for name, (lower, upper) in limits.items():
+                    if name not in joints:
+                        continue
+                    current = joints[name]
+                    if ((current < lower - 10 * TOLERANCE and result[name] < current)
+                            or (current > upper + 10 * TOLERANCE
+                                and result[name] > current)):
+                        return None
+            return result
 
         def fastest(result):
             return max(abs(result[name] - joints[name]) for name in self.joints) / dt
 
         fraction, result = 1.0, None
         for _ in range(4):
-            result = solve(fraction, limits)
+            result = solve(fraction, bounds)
             if result is None:
                 break
             if fastest(result) <= max_rate * (1.0 + 1e-6):
@@ -180,7 +240,7 @@ class ArmKinematics:
         low, high, best = 0.0, fraction, None
         for _ in range(40):
             middle = (low + high) / 2.0
-            found = solve(middle, limits)
+            found = solve(middle, bounds)
             if found is not None and fastest(found) <= max_rate * (1.0 + 1e-6):
                 low, best = middle, found
             else:
