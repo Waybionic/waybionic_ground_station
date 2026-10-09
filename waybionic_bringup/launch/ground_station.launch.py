@@ -70,6 +70,10 @@ def generate_launch_description():
         'teleop', default_value='false',
         description='Drive the arm with an Xbox controller through simulated CAN drives')
 
+    simulated_safety_arg = DeclareLaunchArgument(
+        'simulated_safety_source', default_value='true',
+        description='Publish simulated E-stop and motor supply status during teleop')
+
     joy_source_arg = DeclareLaunchArgument(
         'joy_source', default_value='device',
         description='Controller input: device (local joystick), udp (host bridge) or none')
@@ -158,6 +162,14 @@ def generate_launch_description():
                     sim_time]
     )
 
+    safety_node = Node(
+        package='waybionic_teleop', executable='sim_safety_status', name='sim_safety_status',
+        output='screen',
+        condition=IfCondition(AndSubstitution(
+            teleop, LaunchConfiguration('simulated_safety_source'))),
+        parameters=[diagnostics_topic, sim_time]
+    )
+
     # RViz orbits view_focus, so the follower also runs for the fixed view.
     camera_follower_node = Node(
         package='waybionic_bringup', executable='camera_follower.py', name='camera_follower',
@@ -205,9 +217,10 @@ def generate_launch_description():
 
     return LaunchDescription([
         model_arg, use_mock_diag_arg, diag_topic_arg, start_temp_pub_arg,
-        use_jsp_gui_arg, demo_mode_arg, demo_speed_arg, teleop_arg, joy_source_arg,
+        use_jsp_gui_arg, demo_mode_arg, demo_speed_arg, teleop_arg, simulated_safety_arg,
+        joy_source_arg,
         joy_udp_bind_arg, joy_udp_port_arg, follow_camera_arg, use_sim_time_arg,
         launch_rviz_arg, rviz_config_arg, file_check, rsp_node, jsp_gui_node, joint_demo_node,
-        joy_node, joy_udp_node, teleop_node, drives_node, camera_follower_node,
+        joy_node, joy_udp_node, teleop_node, drives_node, safety_node, camera_follower_node,
         temp_diag_pub_node, rviz_node
     ])

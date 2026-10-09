@@ -52,6 +52,23 @@ imu.heartbeat     | STALE | -    | - | 5.2s ago | Sensor timeout
 
 Other rows can remain `OK` while these fault rows generate visible alerts.
 
+## Safety and Power Interface
+
+The simulated safety source and the future carrier-board publisher share these interfaces:
+
+| Signal | ROS topic | Type | Diagnostics row | Unit |
+| --- | --- | --- | --- | --- |
+| Emergency stop pressed/released | `/waybionic/safety/emergency_stop` | `std_msgs/msg/Bool` | `safety.emergency_stop` | none |
+| Motor supply voltage | `/waybionic/power/motor_supply_voltage` | `std_msgs/msg/Float32` | `power.motor_supply_voltage` | `V` |
+| Age since last report | `/waybionic/safety/last_report_age` | `std_msgs/msg/Float32` | `safety.last_report_age` | `s` |
+
+The E-stop row uses `OK` with value `released` and `ERROR` with value `pressed`. The simulator
+can be toggled with `std_srvs/srv/SetBool` at `/waybionic/safety/emergency_stop/set`. Its
+default 24 V supply reading is only placeholder data; no hardware threshold is defined here.
+The report-age value is elapsed seconds since the previous report. The carrier-board node
+should publish the same topic names, types, and diagnostics row names so it can replace the
+simulator without changing consumers.
+
 ## ROS 2 Diagnostics Mapping
 
 Live mode subscribes to `/diagnostics` by default. The topic can be overridden at launch:

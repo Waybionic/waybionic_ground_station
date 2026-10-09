@@ -27,6 +27,7 @@ setup(
         'console_scripts': [
             'xbox_teleop = waybionic_teleop.xbox_teleop_node:main',
             'sim_arm_drives = waybionic_teleop.sim_arm_drives_node:main',
+            'sim_safety_status = waybionic_teleop.sim_safety_status_node:main',
             'joy_udp_receiver = waybionic_teleop.joy_udp_receiver:main',
         ],
     },
