@@ -12,6 +12,7 @@ import xml.etree.ElementTree as ET
 
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 import rclpy
+from rclpy._rclpy_pybind11 import RCLError
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
@@ -207,6 +208,10 @@ def main():
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
+    except RCLError as error:
+        # SIGINT can shut down the context before spin recreates its wait set.
+        if rclpy.ok() or 'the given context is not valid' not in str(error):
+            raise
     finally:
         node.destroy_node()
         rclpy.try_shutdown()

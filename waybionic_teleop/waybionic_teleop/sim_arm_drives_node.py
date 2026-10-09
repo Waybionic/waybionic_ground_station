@@ -11,6 +11,7 @@ import time
 
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 import rclpy
+from rclpy._rclpy_pybind11 import RCLError
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
@@ -31,8 +32,9 @@ def status(name, level, value, unit, message, **extra):
 class SimArmDrives(Node):
     """Stream joint targets to simulated MKS drives and publish their encoder feedback."""
 
-    def __init__(self):
-        super().__init__('sim_arm_drives', automatically_declare_parameters_from_overrides=True)
+    def __init__(self, **kwargs):
+        super().__init__(
+            'sim_arm_drives', automatically_declare_parameters_from_overrides=True, **kwargs)
         params = {name: self.get_parameter(name).value
                   for name in self.list_parameters([], 0).names}
         self.map = drive_map_from_parameters(params, mks_can.COUNTS_PER_REV)
@@ -46,6 +48,7 @@ class SimArmDrives(Node):
         self.heard = [None] * len(drives)
         self.state = ['starting'] * len(drives)
         self.sent = [None] * len(drives)
+        self.heartbeat_stops = [0] * len(drives)
         self.last_command = [''] * len(drives)
         self.commanded = None
         self.velocities = {}
@@ -76,6 +79,7 @@ class SimArmDrives(Node):
     def on_command(self, message):
         if self.commanded is None:
             return
+        updates = {}
         for index, joint in enumerate(message.name):
             if joint not in self.commanded or index >= len(message.position):
                 continue
@@ -83,17 +87,29 @@ class SimArmDrives(Node):
             velocity = message.velocity[index] if index < len(message.velocity) else 0.0
             if not (math.isfinite(position) and math.isfinite(velocity)):
                 self.rejected += 1
-                continue
+                self.pending = False
+                self.stop_drives()
+                return
+            updates[joint] = (position, velocity)
+        for joint, (position, velocity) in updates.items():
             self.commanded[joint], self.velocities[joint] = position, velocity
+        if updates:
             self.pending = True
 
     def tick(self):
         now = time.monotonic()
         dt, self.last_tick = now - self.last_tick, now
+        # Advance the old motion before accepting new targets. A delayed host tick
+        # must not apply its elapsed time to a command that has just been sent.
+        self.bus.step(dt)
+        for index, drive in enumerate(self.map.drives):
+            stops = self.bus.drives[drive.can_id].heartbeat_stops
+            if stops != self.heartbeat_stops[index]:
+                self.heartbeat_stops[index] = stops
+                self.sent[index] = None
         if self.pending:
             self.pending = False
             self.send_targets()
-        self.bus.step(dt)
         for drive in self.map.drives:
             self.bus.send(drive.can_id, mks_can.read_encoder(drive.can_id))
         while (reply := self.bus.receive()) is not None:
@@ -108,21 +124,46 @@ class SimArmDrives(Node):
         message.header.stamp = self.get_clock().now().to_msg()
         self.state_publisher.publish(message)
 
-    def send_targets(self):
-        counts = self.map.to_counts(self.commanded)
-        speeds = self.map.to_rpm(self.velocities)
-        for index, (drive, axis, rpm) in enumerate(zip(self.map.drives, counts, speeds)):
-            # Allow some speed margin so each streamed target is reached before the next one.
-            speed = min(self.max_rpm, math.ceil(rpm * 1.5) + 1)
-            if self.sent[index] == (axis, speed):
+    def stop_drives(self):
+        """Stop every drive with the manual's F5 zero-speed, zero-acceleration frame."""
+        self.velocities.clear()
+        for index, drive in enumerate(self.map.drives):
+            if self.sent[index] == (None, 0):
                 continue
-            try:
-                data = mks_can.absolute_axis(drive.can_id, axis, speed, self.acc)
-            except ValueError as error:
-                self.get_logger().warning(f'{drive.name}: {error}', throttle_duration_sec=2.0)
+            data = mks_can.absolute_axis(drive.can_id, 0, 0, 0)
+            self.bus.send(drive.can_id, data)
+            self.sent[index] = (None, 0)
+            self.last_command[index] = mks_can.hex_frame(drive.can_id, data)
+
+    def send_targets(self):
+        # Build every frame before sending any. An overflow in one coupled drive
+        # must not leave its peers executing a partial update.
+        try:
+            counts = self.map.to_counts(self.commanded)
+            speeds = self.map.to_rpm(self.velocities)
+            commands = []
+            for drive, axis, rpm in zip(self.map.drives, counts, speeds):
+                if not mks_can.MIN_AXIS <= axis <= mks_can.MAX_AXIS:
+                    raise ValueError(f'{drive.name}: axis {axis} is outside int24')
+                if rpm == 0.0:
+                    key = (None, 0)
+                    data = mks_can.absolute_axis(drive.can_id, 0, 0, 0)
+                else:
+                    speed = min(self.max_rpm, math.ceil(rpm * 1.5) + 1)
+                    key = (axis, speed)
+                    data = mks_can.absolute_axis(drive.can_id, axis, speed, self.acc)
+                commands.append((key, data))
+        except (ValueError, OverflowError) as error:
+            self.rejected += 1
+            self.get_logger().warning(
+                f'Joint target rejected: {error}; stopping all drives', throttle_duration_sec=2.0)
+            self.stop_drives()
+            return
+        for index, (drive, (key, data)) in enumerate(zip(self.map.drives, commands)):
+            if self.sent[index] == key:
                 continue
             self.bus.send(drive.can_id, data)
-            self.sent[index] = (axis, speed)
+            self.sent[index] = key
             self.last_command[index] = mks_can.hex_frame(drive.can_id, data)
 
     def on_reply(self, can_id, data, now):
@@ -189,6 +230,10 @@ def main():
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
+    except RCLError as error:
+        # SIGINT can shut down the context before spin recreates its wait set.
+        if rclpy.ok() or 'the given context is not valid' not in str(error):
+            raise
     finally:
         node.destroy_node()
         rclpy.try_shutdown()

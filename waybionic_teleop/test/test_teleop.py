@@ -90,6 +90,23 @@ def test_b_holds_the_measured_pose_and_disables(teleop):
     assert not teleop.update(*sample(left_x=1.0), pose, DT)
 
 
+def test_b_stop_needs_a_fresh_start_with_centered_sticks_to_rearm(teleop):
+    press(teleop, 'start')
+    run(teleop, 0.4, left_x=1.0)
+    pose = {**HOME, 'joint_1': 0.2}
+    press(teleop, 'b', pose)
+    run(teleop, 0.4, left_x=1.0)
+    assert not teleop.enabled and teleop.targets['joint_1'] == 0.2
+
+    teleop.update(*sample('start', left_x=1.0), pose, DT)
+    assert not teleop.enabled and teleop.warning
+    teleop.update(*sample(), pose, DT)
+    press(teleop, 'start', pose)
+    assert teleop.enabled and teleop.targets == pose
+    run(teleop, 0.4, left_x=-1.0)
+    assert teleop.targets['joint_1'] < pose['joint_1']
+
+
 def test_joint_limits_stop_motion_and_are_reported(teleop):
     press(teleop, 'start')
     run(teleop, 6.0, left_y=1.0)

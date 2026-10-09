@@ -59,8 +59,14 @@ class SimulatedServo:
             return 0
         self.speed = min(int.from_bytes(arguments[:2], 'big'), mks_can.MAX_SPEED_RPM)
         self.acc = arguments[2]
-        # Speed 0 is the manual's stop command: slow down with acc, or stop at once if acc is 0.
-        self.target = int.from_bytes(arguments[3:], 'big', signed=True) if self.speed else None
+        # F5 with speed 0 stops; acc 0 makes the stop immediate without releasing the shaft.
+        if not self.speed:
+            self.target = None
+            if not self.acc:
+                self.rpm = 0.0
+                return 2
+            return 1
+        self.target = int.from_bytes(arguments[3:], 'big', signed=True)
         return 1
 
     def step(self, dt):
