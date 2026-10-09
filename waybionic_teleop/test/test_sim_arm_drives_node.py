@@ -1,20 +1,40 @@
 """Exercise the ROS command gate and MKS frames without a hardware CAN interface."""
 
+import importlib.util
 import math
 from pathlib import Path
 import time
+from unittest.mock import MagicMock
 
 import pytest
 import rclpy
+from rclpy._rclpy_pybind11 import RCLError
 from rclpy.parameter import Parameter
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, String
 
-from waybionic_teleop import mks_can
+from waybionic_teleop import joy_udp_receiver, mks_can, sim_arm_drives_node, xbox_teleop_node
 from waybionic_teleop.sim_arm_drives_node import REPLY_TIMEOUT_S, SimArmDrives
 
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
         / 'waybionic_arm.urdf').read_text(encoding='utf-8')
+CAMERA_PATH = (Path(__file__).resolve().parents[2] / 'waybionic_bringup'
+               / 'scripts' / 'camera_follower.py')
+_camera_spec = importlib.util.spec_from_file_location('waybionic_camera_shutdown', CAMERA_PATH)
+camera_module = importlib.util.module_from_spec(_camera_spec)
+_camera_spec.loader.exec_module(camera_module)
+
+POSE = {'joint_1': 0.8, 'joint_2': -0.8, 'joint_3': 0.8,
+        'joint_4': 0.8, 'joint_5': 0.25, 'tool_grip': 0.8}
+RATES = {'joint_1': 0.2, 'joint_2': -0.2, 'joint_3': 0.2,
+         'joint_4': 0.2, 'joint_5': 0.05, 'tool_grip': 0.2}
+
+SHUTDOWN_NODES = [
+    (xbox_teleop_node, 'XboxTeleop'),
+    (sim_arm_drives_node, 'SimArmDrives'),
+    (joy_udp_receiver, 'JoyUdpReceiver'),
+    (camera_module, 'CameraFollower'),
+]
 
 
 @pytest.fixture
@@ -44,24 +64,36 @@ def ready(node):
     assert node.description_valid and node.authorized
 
 
-def command(node, **changes):
+def command(node, velocities=None, **changes):
     targets = dict.fromkeys(node.map.joints, 0.0)
     targets.update(changes)
+    if velocities is None:
+        velocities = {name: math.copysign(0.2, value) if value else 0.0
+                      for name, value in targets.items()}
     return JointState(name=list(targets), position=list(targets.values()),
-                      velocity=[0.0] * len(targets))
+                      velocity=[velocities.get(name, 0.0) for name in targets])
+
+
+def sent_frame(node, index):
+    drive = node.map.drives[index]
+    can_id, hex_data = node.last_command[index].split('#')
+    assert int(can_id, 16) == drive.can_id
+    return mks_can.parse(drive.can_id, bytes.fromhex(hex_data))
 
 
 def assert_stopped(node):
-    assert not node.authorized and all(servo.target is None for servo in node.bus.drives.values())
-    for drive, frame in zip(node.map.drives, node.last_command):
-        code, args = mks_can.parse(drive.can_id, bytes.fromhex(frame.split('#')[1]))
-        assert code == mks_can.ABSOLUTE_AXIS and int.from_bytes(args[:2], 'big') == 0
+    assert not node.authorized
+    assert all(servo.enabled and servo.target is None and servo.rpm == 0.0
+               for servo in node.bus.drives.values())
+    assert all(sent_frame(node, index) == (mks_can.ABSOLUTE_AXIS, bytes(6))
+               for index in range(len(node.map.drives)))
 
 
 def test_a_valid_setpoint_reaches_the_simulated_bus_and_feedback(node):
     ready(node)
     requested = command(node, joint_1=0.5, joint_2=0.1)
     node.on_command(requested)
+    advance(node)
     advance(node)
     assert node.bus.drives[1].target is not None
     assert node.bus.drives[1].axis > 0
@@ -145,6 +177,17 @@ def test_int24_overflow_rejects_the_entire_coordinated_move(node):
     advance(node)
     assert node.rejected == 1
     assert_stopped(node)
+    node.map.drives[0].gear_ratio = 1.0
+    valid = command(node, joint_1=0.5)
+    node.on_enabled(Bool(data=True))
+    node.on_command(valid)
+    advance(node)
+    assert_stopped(node)
+    node.on_enabled(Bool(data=False))
+    node.on_enabled(Bool(data=True))
+    node.on_command(valid)
+    advance(node)
+    assert node.authorized and node.bus.drives[1].target is not None
 
 
 def test_encoder_outside_a_provisional_limit_may_move_only_toward_it(node):
@@ -177,3 +220,111 @@ def test_stale_encoder_feedback_stops_before_sending_another_position(node):
     node.on_command(command(node, joint_1=1.0))
     advance(node)
     assert node.authorized and node.bus.drives[1].target is not None
+
+
+def test_zero_speed_f5_stops_six_drives_and_negative_targets_rearm(node):
+    ready(node)
+    node.max_rpm = 5
+    node.on_command(command(node, velocities=RATES, **POSE))
+    advance(node)
+    assert all(drive.target is not None for drive in node.bus.drives.values())
+    advance(node, 0.1)
+    assert all(drive.rpm != 0.0 for drive in node.bus.drives.values())
+
+    measured = node.map.to_positions(node.counts)
+    node.on_command(command(node, velocities=dict.fromkeys(POSE, 0.0), **measured))
+    advance(node)
+    assert node.authorized
+    assert all(drive.enabled and drive.target is None and drive.rpm == 0.0
+               for drive in node.bus.drives.values())
+    assert all(sent_frame(node, index) == (mks_can.ABSOLUTE_AXIS, bytes(6))
+               for index in range(len(node.map.drives)))
+    held = [drive.axis for drive in node.bus.drives.values()]
+    advance(node, 0.6)
+    assert [drive.axis for drive in node.bus.drives.values()] == held
+    assert_stopped(node)
+
+    node.on_enabled(Bool(data=False))
+    node.on_enabled(Bool(data=True))
+    reverse = dict.fromkeys(POSE, -0.4)
+    reverse.update(joint_5=0.1, tool_grip=0.2)
+    rates = dict.fromkeys(POSE, -0.2)
+    rates.update(joint_5=0.05, tool_grip=0.2)
+    node.on_command(command(node, velocities=rates, **reverse))
+    advance(node)
+    assert node.authorized
+    assert [drive.target for drive in node.bus.drives.values()] == node.map.to_counts(reverse)
+    assert all(drive.speed > 0 for drive in node.bus.drives.values())
+    assert int.from_bytes(sent_frame(node, 0)[1][3:], 'big', signed=True) < 0
+
+
+def test_six_drive_host_pause_drops_pending_targets_until_fresh_start(node):
+    ready(node)
+    node.max_rpm = 5
+    node.on_command(command(node, velocities=RATES, **POSE))
+    advance(node)
+    assert all(drive.target is not None for drive in node.bus.drives.values())
+    next_pose = {joint: value * 1.1 for joint, value in POSE.items()}
+    node.on_command(command(node, velocities=RATES, **next_pose))
+    advance(node, 2.0)
+    assert all(drive.heartbeat_stops == 1 for drive in node.bus.drives.values())
+    assert_stopped(node)
+    assert node.commanded != next_pose
+
+    node.on_enabled(Bool(data=True))
+    node.on_command(command(node, velocities=RATES, **next_pose))
+    advance(node)
+    assert_stopped(node)
+    node.on_enabled(Bool(data=False))
+    node.on_enabled(Bool(data=True))
+    node.on_command(command(node, velocities=RATES, **next_pose))
+    advance(node)
+    assert [drive.target for drive in node.bus.drives.values()] == node.map.to_counts(next_pose)
+    advance(node, 2.0)
+    assert all(drive.heartbeat_stops == 2 for drive in node.bus.drives.values())
+    assert_stopped(node)
+
+
+@pytest.mark.parametrize('module, class_name', SHUTDOWN_NODES)
+def test_shutdown_only_ignores_an_invalid_shutdown_context(module, class_name, monkeypatch):
+    factory = MagicMock()
+    spin = MagicMock(side_effect=RCLError('the given context is not valid'))
+    monkeypatch.setattr(module, class_name, factory)
+    monkeypatch.setattr(module.rclpy, 'init', MagicMock())
+    monkeypatch.setattr(module.rclpy, 'try_shutdown', MagicMock())
+    monkeypatch.setattr(module.rclpy, 'spin', spin)
+    monkeypatch.setattr(module.rclpy, 'ok', lambda: False)
+    module.main()
+
+    spin.side_effect = RCLError('unrelated ROS failure')
+    with pytest.raises(RCLError, match='unrelated ROS failure'):
+        module.main()
+    monkeypatch.setattr(module.rclpy, 'ok', lambda: True)
+    spin.side_effect = RCLError('the given context is not valid')
+    with pytest.raises(RCLError, match='context is not valid'):
+        module.main()
+    assert spin.call_count == 3
+    assert factory.return_value.destroy_node.call_count == 3
+
+
+@pytest.mark.parametrize('module, class_name', SHUTDOWN_NODES)
+def test_binding_error_only_ignored_after_context_shutdown(module, class_name, monkeypatch):
+    factory = MagicMock()
+    error = RuntimeError("Unable to convert call argument '0' to Python object")
+    spin = MagicMock(side_effect=error)
+    monkeypatch.setattr(module, class_name, factory)
+    monkeypatch.setattr(module.rclpy, 'init', MagicMock())
+    monkeypatch.setattr(module.rclpy, 'try_shutdown', MagicMock())
+    monkeypatch.setattr(module.rclpy, 'spin', spin)
+    monkeypatch.setattr(module.rclpy, 'ok', lambda: False)
+    module.main()
+
+    spin.side_effect = RuntimeError('unrelated subscription failure')
+    with pytest.raises(RuntimeError, match='unrelated subscription failure'):
+        module.main()
+    monkeypatch.setattr(module.rclpy, 'ok', lambda: True)
+    spin.side_effect = error
+    with pytest.raises(RuntimeError, match='Unable to convert call argument'):
+        module.main()
+    assert spin.call_count == 3
+    assert factory.return_value.destroy_node.call_count == 3

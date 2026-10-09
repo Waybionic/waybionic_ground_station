@@ -11,6 +11,7 @@ import time
 
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 import rclpy
+from rclpy._rclpy_pybind11 import RCLError
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
@@ -64,8 +65,10 @@ class SimArmDrives(Node):
         self.heard = [None] * len(drives)
         self.state = ['starting'] * len(drives)
         self.sent = [None] * len(drives)
+        self.heartbeat_stops = [0] * len(drives)
         self.last_command = [''] * len(drives)
         self.commanded = None
+        self.velocities = {}
         self.limits = {}
         self.description_valid = False
         self.authorized = False
@@ -125,14 +128,11 @@ class SimArmDrives(Node):
 
     def disarm(self, reason, require_release=False):
         if self.authorized:
-            # F5h with speed zero stops a moving servo without steering it back to a stale pose.
-            for index, drive in enumerate(self.map.drives):
-                data = mks_can.absolute_axis(drive.can_id, 0, 0, self.acc)
-                self.bus.send(drive.can_id, data)
-                self.last_command[index] = mks_can.hex_frame(drive.can_id, data)
+            self.stop_drives()
         self.authorized = False
         self.awaiting_release = self.awaiting_release or require_release
         self.commanded = None
+        self.velocities.clear()
         self.sent = [None] * len(self.map.drives)
         self.stop_reason = reason
 
@@ -156,6 +156,7 @@ class SimArmDrives(Node):
                 self.reject_command(f'{joint} target outside its URDF range')
                 return
         self.commanded = positions
+        self.velocities = dict(zip(names, message.velocity))
 
     def reject_command(self, reason):
         self.rejected += 1
@@ -166,17 +167,21 @@ class SimArmDrives(Node):
     def tick(self):
         now = time.monotonic()
         dt, self.last_tick = now - self.last_tick, now
+        # The old motion must consume the entire elapsed host time before any new frame
+        # can reset its heartbeat. A pause requires a released and newly pressed Start.
+        self.bus.step(dt)
+        for index, drive in enumerate(self.map.drives):
+            stops = self.bus.drives[drive.can_id].heartbeat_stops
+            if stops != self.heartbeat_stops[index]:
+                self.heartbeat_stops[index] = stops
+                self.sent[index] = None
         if dt >= self.heartbeat_s:
-            # Advance elapsed time before any new frame. Otherwise a stale target or encoder
-            # request resets the simulated heartbeat and masks a real host pause.
-            self.bus.step(dt)
             self.disarm('Host paused past the drive heartbeat', require_release=True)
         else:
             if self.authorized and not self.feedback_fresh(now):
                 self.disarm('Drive encoder feedback stale', require_release=True)
             if self.authorized and self.commanded is not None:
                 self.send_targets()
-            self.bus.step(dt)
         for drive in self.map.drives:
             self.bus.send(drive.can_id, mks_can.read_encoder(drive.can_id))
         while (reply := self.bus.receive()) is not None:
@@ -191,20 +196,41 @@ class SimArmDrives(Node):
         message.header.stamp = self.get_clock().now().to_msg()
         self.state_publisher.publish(message)
 
+    def stop_drives(self):
+        """Stop every drive with the manual's F5 zero-speed, zero-acceleration frame."""
+        self.velocities.clear()
+        for index, drive in enumerate(self.map.drives):
+            if self.sent[index] == (None, 0):
+                continue
+            data = mks_can.absolute_axis(drive.can_id, 0, 0, 0)
+            self.bus.send(drive.can_id, data)
+            self.sent[index] = (None, 0)
+            self.last_command[index] = mks_can.hex_frame(drive.can_id, data)
+
     def send_targets(self):
         try:
             moves = self.map.synchronized(self.commanded, self.counts, self.period, self.max_rpm)
-            # Preflight every int24 axis and speed before sending any drive a new target.
-            frames = [mks_can.absolute_axis(drive.can_id, axis, speed, self.acc)
-                      for drive, (axis, speed) in zip(self.map.drives, moves)]
+            motor_rates = self.map.to_rpm(self.velocities)
+            commands = []
+            # Preflight every int24 axis and frame before sending any coupled motor an update.
+            for drive, (axis, speed), rpm in zip(self.map.drives, moves, motor_rates):
+                if not mks_can.MIN_AXIS <= axis <= mks_can.MAX_AXIS:
+                    raise ValueError(f'{drive.name}: axis {axis} is outside int24')
+                if rpm == 0.0:
+                    key = (None, 0)
+                    data = mks_can.absolute_axis(drive.can_id, 0, 0, 0)
+                else:
+                    key = (axis, speed)
+                    data = mks_can.absolute_axis(drive.can_id, axis, speed, self.acc)
+                commands.append((key, data))
         except (ValueError, OverflowError) as error:
             self.reject_command(f'Cannot synchronize drives: {error}')
             return
-        for index, (drive, move, data) in enumerate(zip(self.map.drives, moves, frames)):
-            if self.sent[index] == move:
+        for index, (drive, (key, data)) in enumerate(zip(self.map.drives, commands)):
+            if self.sent[index] == key:
                 continue
             self.bus.send(drive.can_id, data)
-            self.sent[index] = move
+            self.sent[index] = key
             self.last_command[index] = mks_can.hex_frame(drive.can_id, data)
 
     def on_reply(self, can_id, data, now):
@@ -278,6 +304,15 @@ def main():
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
+    except RCLError as error:
+        # SIGINT can shut down the context before spin recreates its wait set.
+        if rclpy.ok() or 'the given context is not valid' not in str(error):
+            raise
+    except RuntimeError as error:
+        # Jazzy may surface this binding error when SIGINT invalidates a subscription.
+        if (rclpy.ok() or not str(error).startswith(
+                "Unable to convert call argument '0' to Python object")):
+            raise
     finally:
         node.destroy_node()
         rclpy.try_shutdown()

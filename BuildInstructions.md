@@ -331,6 +331,14 @@ CAN map is not a powered-arm safety case. Do not change a wrist bound or operate
 motors until Mechanical identifies the URDF joint and measures signed travel from upright
 zero, including any cable or gear stop.
 
+In simulation, a zero-velocity joint command (including B and controller timeout)
+sends an MKS F5 frame with zero speed and zero acceleration to each moving drive.
+An out-of-range encoder target stops all drives instead of updating only part of
+the arm. The placeholder drive speed is capped at 300 RPM; the MKS manual warns
+against immediate software stops above 1000 RPM. This checks simulated behavior
+only. Do not connect powered drives or treat it as a hardware E-stop test; drive
+identities, wiring, zeroing and electrical safety still need hardware verification.
+
 The RViz camera follows the tool as the arm moves; drag to orbit and scroll to zoom
 as usual, or add `follow_camera:=false` to the launch command for a fixed view.
 
