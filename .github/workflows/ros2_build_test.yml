@@ -13,8 +13,8 @@ env:
   IMAGE: ghcr.io/waybionic/waybionic_ground_station
 
 jobs:
-  # Pull requests build and test with a read-only token. These job names are the required
-  # checks, so keep them.
+  # Pull requests build and test with a read-only token. Keep these check names
+  # stable for review.
   build-and-test:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
@@ -41,6 +41,8 @@ jobs:
   publish-amd64:
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
     permissions:
       contents: read
       packages: write
@@ -60,13 +62,24 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push the tested x86-64 image
+        id: push
+        shell: bash
         run: |
           docker tag "$IMAGE:jazzy" "$IMAGE:$GITHUB_SHA-amd64"
-          docker push "$IMAGE:$GITHUB_SHA-amd64"
+          push_log=$(docker push "$IMAGE:$GITHUB_SHA-amd64")
+          printf '%s\n' "$push_log"
+          if [[ "$push_log" =~ digest:\ (sha256:[0-9a-f]{64}) ]]; then
+            echo "digest=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::docker push did not report the tested image digest"
+            exit 1
+          fi
 
   publish-arm64:
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04-arm
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
     permissions:
       contents: read
       packages: write
@@ -86,9 +99,18 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push the tested ARM64 image
+        id: push
+        shell: bash
         run: |
           docker tag "$IMAGE:jazzy" "$IMAGE:$GITHUB_SHA-arm64"
-          docker push "$IMAGE:$GITHUB_SHA-arm64"
+          push_log=$(docker push "$IMAGE:$GITHUB_SHA-arm64")
+          printf '%s\n' "$push_log"
+          if [[ "$push_log" =~ digest:\ (sha256:[0-9a-f]{64}) ]]; then
+            echo "digest=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::docker push did not report the tested image digest"
+            exit 1
+          fi
 
   publish-image:
     if: github.event_name == 'push'
@@ -111,14 +133,25 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish one image for both architectures
+        shell: bash
         run: |
+          amd64="${{ needs.publish-amd64.outputs.digest }}"
+          arm64="${{ needs.publish-arm64.outputs.digest }}"
+          if [[ ! "$amd64" =~ ^sha256:[0-9a-f]{64}$ || ! "$arm64" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Missing tested image digest"
+            exit 1
+          fi
           tags=(--tag "$IMAGE:${GITHUB_SHA::7}")
           # Runs can finish out of order: only the newest commit on main moves :jazzy.
           head=$(git ls-remote "https://github.com/$GITHUB_REPOSITORY" refs/heads/main | cut -f1)
+          if [ -z "$head" ]; then
+            echo "::error::Could not resolve main before moving :jazzy"
+            exit 1
+          fi
           if [ "$head" = "$GITHUB_SHA" ]; then
             tags+=(--tag "$IMAGE:jazzy")
           else
             echo "main has moved on to $head, so :jazzy stays where it is"
           fi
           docker buildx imagetools create "${tags[@]}" \
-            "$IMAGE:$GITHUB_SHA-amd64" "$IMAGE:$GITHUB_SHA-arm64"
+            "$IMAGE@$amd64" "$IMAGE@$arm64"

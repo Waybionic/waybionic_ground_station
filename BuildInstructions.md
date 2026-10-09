@@ -89,10 +89,12 @@ their headless tests. A build or test failure fails the Docker build. The first
 build downloads ROS and Qt dependencies; later builds can reuse cached layers.
 Rebuild after source changes because this image contains a snapshot of the source.
 
-[CI](.github/workflows/ros2_build_test.yml) runs this Compose test build on native
-x86-64 and ARM64 Linux runners for every pull request, including one stacked on
-another pull request's branch. A passing container build does not verify RViz
-windows, camera access, USB devices, GPU acceleration, or networking with a robot.
+[CI](.github/workflows/ros2_build_test.yml) builds and tests on native x86-64
+and ARM64 Linux runners for pull requests, including stacked PRs. Existing
+stacked target branches with the old main-only event filter must pick up this
+workflow from main before they receive these checks. A passing container
+build does not verify RViz windows, camera access, USB devices, GPU
+acceleration, or networking with a robot.
 
 #### Headless Demo
 
@@ -165,11 +167,25 @@ its identifier with:
 docker image inspect ghcr.io/waybionic/waybionic_ground_station:jazzy --format '{{.Id}}'
 ```
 
-After each merge to main, CI publishes the tested image for x86-64 and ARM64 as
-`ghcr.io/waybionic/waybionic_ground_station:jazzy`, also tagged with the commit's
-short hash. Local builds reuse its layers, so a first build skips most of the
-dependency install. To run main without building, pull the image and start the
-service without `--build`:
+After a successful push-to-main build on both native runners, CI publishes
+one x86-64/ARM64 image index from the digests returned by the tested image
+pushes. It tags the index as `ghcr.io/waybionic/waybionic_ground_station:jazzy`
+and with the commit's short hash. Pull requests build and test with read-only
+tokens and do not publish.
+
+Tags are mutable. For a reproducible run, record the image index digest
+shown by:
+
+```console
+docker buildx imagetools inspect ghcr.io/waybionic/waybionic_ground_station:jazzy
+```
+
+Before the first successful main publish, there is no shared cache. GHCR may
+keep the first package private. An owner must make it public for anonymous
+pulls and cache imports; otherwise users need package read access and
+`docker login ghcr.io`. Push jobs also require package write access, which
+read-only PR checks cannot verify. Once the image is readable, local builds
+can reuse dependency layers. To run main without building, pull and start:
 
 ```console
 docker compose pull demo
