@@ -24,6 +24,7 @@ sim_arm_drives:
     # same as xbox_teleop's input_timeout_s).
     enable_timeout_s: 0.5
     # The placeholder grip has no URDF joint yet; every modeled arm joint must have a limit.
+    # Simulation only: on a real bus every drive joint needs a URDF limit.
     unmodeled_joints: [tool_grip]
     drives: [base_yaw, shoulder, elbow, wrist_left, wrist_right, tool]
     base_yaw:

@@ -29,6 +29,8 @@ from waybionic_teleop.sim_drives import SimulatedServo
 BITRATE = 1000000
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
         / 'waybionic_arm.urdf').read_text(encoding='utf-8')
+# The arm's drives without the placeholder tool, whose joint has no URDF limit yet.
+ARM_DRIVES = ['base_yaw', 'shoulder', 'elbow', 'wrist_left', 'wrist_right']
 
 
 @pytest.fixture
@@ -58,6 +60,21 @@ def make_node(context, parameters):
         executor.shutdown()
         node.close()
         node.destroy_node()
+
+
+@pytest.fixture
+def mock_drives():
+    """Answer as six MKS drives on a fresh python-can virtual channel."""
+    channel = uuid.uuid4().hex
+    bus = CanBus('virtual', channel, BITRATE)
+    servos = {can_id: SimulatedServo(can_id) for can_id in range(1, 7)}
+    stop = threading.Event()
+    thread = threading.Thread(target=serve, args=(bus, servos, stop), daemon=True)
+    thread.start()
+    yield channel, servos
+    stop.set()
+    thread.join()
+    bus.shutdown()
 
 
 def spin_until(executor, done, seconds=3.0):
@@ -142,7 +159,7 @@ def test_the_host_drives_mks_servos_over_can(make_node):
     thread = threading.Thread(target=serve, args=(drives_bus, servos, stop), daemon=True)
     thread.start()
     try:
-        node, executor = make_node(interface=interface, channel=channel)
+        node, executor = make_node(interface=interface, channel=channel, drives=ARM_DRIVES)
         assert spin_until(executor, lambda: all(state == 'ready' for state in node.state))
         spin_for(executor, 0.1)
         # Real drives are not driven, and no joint states are published, until zeroed.
@@ -155,6 +172,7 @@ def test_the_host_drives_mks_servos_over_can(make_node):
 
         press_start(node)
         assert node.authorized, node.stop_reason
+        assert set(node.limits) == set(node.map.joints)
         assert move(node, executor, joint_1=0.3, joint_4=0.2)
         # Wrist pitch turns both differential motors the same way.
         assert servos[4].axis == pytest.approx(servos[5].axis)
@@ -165,6 +183,26 @@ def test_the_host_drives_mks_servos_over_can(make_node):
         stop.set()
         thread.join()
         drives_bus.shutdown()
+
+
+def test_a_real_bus_needs_a_urdf_limit_for_every_drive_joint(make_node, mock_drives):
+    channel, servos = mock_drives
+    sim, _ = make_node()
+    sim.on_description(String(data=URDF))
+    assert sim.description_valid and 'tool_grip' not in sim.limits
+    # Simulation runs the placeholder tool drive without a limit; real drives never hold or
+    # take a command until the URDF limits every joint they move.
+    node, executor = make_node(interface='virtual', channel=channel)
+    assert spin_until(executor, lambda: all(state == 'ready' for state in node.state))
+    assert zero(node).success
+    assert spin_until(executor, lambda: node.commanded is not None)
+    node.on_description(String(data=URDF))
+    assert not node.description_valid and 'tool_grip' in node.stop_reason
+    press_start(node)
+    command(node, joint_1=0.3)
+    spin_for(executor, 0.2)
+    assert not node.authorized
+    assert all(servo.target is None and servo.axis == 0 for servo in servos.values())
 
 
 def test_commands_before_zeroing_are_ignored(make_node):

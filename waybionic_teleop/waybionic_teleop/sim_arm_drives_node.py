@@ -83,7 +83,10 @@ class SimArmDrives(Node):
         self.interface = params.get('interface', 'sim')
         channel = params.get('channel', '')
         unmodeled = set(params['unmodeled_joints'])
-        if not unmodeled <= set(self.map.joints):
+        if self.interface != 'sim':
+            # Real drives move only joints whose URDF limits are known.
+            unmodeled = set()
+        elif not unmodeled <= set(self.map.joints):
             raise ValueError('unmodeled_joints must name drives in the simulated map')
         self.modeled_joints = [joint for joint in self.map.joints if joint not in unmodeled]
         if not self.modeled_joints:

@@ -397,7 +397,9 @@ depend on the controller.
 `waybionic_teleop/config/arm_drives.yaml` is still a placeholder: check each CAN ID,
 gear ratio and direction before the first powered test, and start with the motors
 unloaded. Set every drive to the bitrate in that file (1 Mbit/s; the MKS default is
-500 kbit/s).
+500 kbit/s). On a real bus every drive joint needs a URDF limit before the host holds or
+moves anything (`unmodeled_joints` applies to simulation only), so remove the placeholder
+`tool` drive from the map, or give its joint a limit in the URDF.
 
 The computer running ROS needs the USB CAN adapter. Docker Desktop on Windows and
 macOS cannot reach USB devices, so use native ROS on Linux or macOS (RoboStack), or
