@@ -10,14 +10,17 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from sensor_msgs.msg import Joy
 
-from waybionic_teleop.gamepad import PACKET_SIZE, unpack
+from waybionic_teleop.gamepad import AXES, BUTTONS, PACKET_SIZE, unpack
+
+# What a connected packet with centred sticks, released triggers and no buttons unpacks to.
+NEUTRAL = ([0.0] * len(AXES), [0] * len(BUTTONS))
 
 
 class JoyUdpReceiver(Node):
     """Validate controller packets and republish the newest one on /joy."""
 
-    def __init__(self):
-        super().__init__('joy_udp_receiver')
+    def __init__(self, **kwargs):
+        super().__init__('joy_udp_receiver', **kwargs)
         self.address = (self.declare_parameter('bind_address', '127.0.0.1').value,
                         self.declare_parameter('port', 47300).value)
         self.timeout = self.declare_parameter('timeout_s', 0.5).value
@@ -61,8 +64,12 @@ class JoyUdpReceiver(Node):
             if not resumed and not 0 < (sequence - self.sequence) & 0xFFFFFFFF < 0x80000000:
                 continue
             self.sequence, self.last_packet, self.sender = sequence, now, sender
+            if connected:
+                latest = (axes, buttons)
+            elif self.connected:
+                # Release every control once; then publish nothing, so teleop still times out.
+                latest = NEUTRAL
             self.connected = connected
-            latest = (axes, buttons) if connected else None
         if latest is not None:
             message = Joy(axes=latest[0], buttons=latest[1])
             message.header.stamp = self.get_clock().now().to_msg()
