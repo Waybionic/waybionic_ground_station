@@ -70,6 +70,9 @@ DESCRIPTIONS = {
     'joint_4': 'wrist pitch (differential housing)', 'joint_5': 'wrist roll (output bevel)',
 }
 GEAR_LINKS = ('wrist_left_gear_link', 'wrist_right_gear_link')
+# Placeholder box around the jaws xbox_teleop draws at tool_link (36 mm across when open, 14 mm
+# thick, 30 mm long) as (centre, size), until the real tool is modelled.
+TOOL_BOX = ((0.0, 0.0, 0.015), (0.036, 0.014, 0.03))
 BEVELS = ('straight bevel pinion_iso-2', 'straight bevel pinion_iso-3', 'straight bevel pinion_iso-4')
 # Threaded screws and the enclosed cycloidal discs dominate the triangle count.
 COARSE_PARTS = ('m3-', 'discs-sweep', 'loose_disc')
@@ -589,7 +592,23 @@ def write_collada(path, link, groups):
     path.write_text('\n'.join(lines), encoding='utf-8')
 
 
-def write_urdf(model, source):
+def collision_box(groups):
+    """Return the centre and size of the box around a link's mesh, in link coordinates."""
+    points = [point for group in groups.values() for point in group['positions']]
+    low = [min(point[axis] for point in points) for axis in range(3)]
+    high = [max(point[axis] for point in points) for axis in range(3)]
+    return [(a + b) / 2 for a, b in zip(low, high)], [b - a for a, b in zip(low, high)]
+
+
+def collision_lines(center, size):
+    return [
+        '    <collision>',
+        f'      <origin xyz="{vector_text(center, 4)}" rpy="0 0 0"/>',
+        f'      <geometry><box size="{vector_text(size, 4)}"/></geometry>',
+        '    </collision>']
+
+
+def write_urdf(model, source, boxes):
     angles = ', '.join(f'{name}={math.degrees(model.cad_angles[name]):.2f}' for name, *_ in JOINTS)
     lines = [
         '<?xml version="1.0"?>',
@@ -605,8 +624,13 @@ def write_urdf(model, source):
             '    <visual>',
             f'      <geometry><mesh filename="{MESH_URI}{link}.dae"/></geometry>',
             '    </visual>',
+            *collision_lines(*boxes[link]),
             '  </link>']
-    lines += ['  <link name="tool_link"/>']
+    lines += [
+        '  <link name="tool_link">',
+        '    <!-- Placeholder around the RViz jaws until the real tool is modelled. -->',
+        *collision_lines(*TOOL_BOX),
+        '  </link>']
     for joint in model.joints:
         kind = 'continuous' if joint['mimic'] else 'revolute'
         note = DESCRIPTIONS.get(joint['name'], 'differential side gear, follows the output bevel')
@@ -768,16 +792,18 @@ def main():
 
     MESH_DIRECTORY.mkdir(parents=True, exist_ok=True)
     total_in = total_out = 0
+    boxes = {}
     for link in LINKS:
         groups, stats = quantized_link_mesh(model, link, arguments.grid)
         path = MESH_DIRECTORY / f'{link}.dae'
         write_collada(path, link, groups)
+        boxes[link] = collision_box(groups)
         total_in += stats['input']
         total_out += stats['output']
         print(f'  {path.name}: {stats["input"]} -> {stats["output"]} triangles, {len(groups)} colors, '
               f'{path.stat().st_size / 1e6:.2f} MB, {stats["flipped"]}/{stats["bodies"]} bodies flipped, '
               f'{stats["conflicts"]} winding conflicts')
-    write_urdf(model, source)
+    write_urdf(model, source, boxes)
     print(f'Wrote {URDF_PATH.relative_to(REPOSITORY)} ({total_in} -> {total_out} triangles)')
     return 0
 

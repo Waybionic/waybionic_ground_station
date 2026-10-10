@@ -8,9 +8,9 @@ import rclpy
 from rclpy._rclpy_pybind11 import RCLError
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from sensor_msgs.msg import Joy
+from sensor_msgs.msg import Joy, JoyFeedback
 
-from waybionic_teleop.gamepad import AXES, BUTTONS, PACKET_SIZE, unpack
+from waybionic_teleop.gamepad import AXES, BUTTONS, pack_rumble, PACKET_SIZE, unpack
 
 # What a connected packet with centred sticks, released triggers and no buttons unpacks to.
 NEUTRAL = ([0.0] * len(AXES), [0] * len(BUTTONS))
@@ -30,6 +30,8 @@ class JoyUdpReceiver(Node):
         self.socket.setblocking(False)
         self.joy_publisher = self.create_publisher(Joy, 'joy', 10)
         self.diagnostics_publisher = self.create_publisher(DiagnosticArray, topic, 10)
+        # Same rumble topic as game_controller_node, passed back to the host bridge.
+        self.create_subscription(JoyFeedback, 'joy/set_feedback', self.on_feedback, 10)
         self.sequence = None
         self.last_packet = None
         self.connected = False
@@ -76,6 +78,17 @@ class JoyUdpReceiver(Node):
             message.header.frame_id = 'joy'
             self.joy_publisher.publish(message)
             self.published += 1
+        if self.sender is not None and time.monotonic() - self.last_packet > self.timeout:
+            # The bridge has gone; its port may now belong to another program.
+            self.sender = None
+
+    def on_feedback(self, message):
+        if message.type != JoyFeedback.TYPE_RUMBLE or message.id != 0 or self.sender is None:
+            return
+        try:
+            self.socket.sendto(pack_rumble(message.intensity), self.sender)
+        except OSError as error:
+            self.get_logger().warning(f'Rumble not sent: {error}', throttle_duration_sec=5.0)
 
     def report(self):
         now = time.monotonic()

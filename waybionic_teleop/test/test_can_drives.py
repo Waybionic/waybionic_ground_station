@@ -449,6 +449,28 @@ def test_the_stale_stop_happens_once_and_clears_when_commands_return(make_node):
     assert not node.authorized
 
 
+def test_an_empty_command_stops_the_drives_until_a_fresh_start(make_node):
+    node, executor = make_node(max_rpm=6)
+    assert spin_until(executor, lambda: node.commanded is not None)
+    press_start(node)
+    command(node, joint_1=1.0)
+    spin_for(executor, 0.1)
+    assert node.bus.drives[1].target is not None
+    node.on_command(JointState())
+    assert not node.authorized and node.rejected == 1
+    assert all(servo.target is None and servo.rpm == 0.0 for servo in node.bus.drives.values())
+    response = zero(node)
+    assert not response.success and 'still arriving' in response.message
+    # Neither an invalid nor a valid command moves the arm again without a fresh Start.
+    node.on_command(JointState(name=['joint_1'], position=[math.nan]))
+    command(node, joint_1=0.3)
+    spin_for(executor, 0.1)
+    assert not node.authorized
+    assert all(servo.target is None and servo.rpm == 0.0 for servo in node.bus.drives.values())
+    press_start(node)
+    assert move(node, executor, joint_1=0.3)
+
+
 def test_silence_before_the_first_command_leaves_the_drives_holding(make_node):
     node, executor = make_node()
     assert spin_until(executor, lambda: node.commanded is not None)
