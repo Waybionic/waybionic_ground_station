@@ -69,6 +69,15 @@ def test_a_long_pause_still_trips_the_heartbeat():
     assert servo.axis == pytest.approx(0.5 * mks_can.COUNTS_PER_REV, rel=0.05)
 
 
+def test_set_zero_makes_the_current_position_zero():
+    servo = ready_servo()
+    servo.receive(mks_can.absolute_axis(1, 5000, 300, 0))
+    run(servo, 0.5)
+    assert servo.receive(mks_can.set_zero(1)) == [mks_can.frame(1, mks_can.SET_ZERO, [1])]
+    _, arguments = mks_can.parse(1, servo.receive(mks_can.read_encoder(1))[0])
+    assert mks_can.encoder_value(arguments) == 0
+
+
 def test_f5_stop_is_immediate_and_a_new_negative_target_rearms_the_drive():
     servo = ready_servo()
     assert servo.receive(mks_can.absolute_axis(1, 0x4000, 300, 0)) == [RUNNING]

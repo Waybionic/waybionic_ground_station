@@ -68,7 +68,16 @@ def generate_launch_description():
 
     teleop_arg = DeclareLaunchArgument(
         'teleop', default_value='false',
-        description='Drive the arm with an Xbox controller through simulated CAN drives')
+        description='Drive the arm with an Xbox controller through CAN drives')
+
+    drive_interface_arg = DeclareLaunchArgument(
+        'drive_interface', default_value='sim',
+        description='Drive bus: sim for simulated drives, or a python-can interface such as '
+                    'socketcan or slcan for the real MKS drives')
+
+    drive_channel_arg = DeclareLaunchArgument(
+        'drive_channel', default_value='',
+        description='CAN channel for a real drive bus, such as can0 or /dev/ttyACM0')
 
     joy_source_arg = DeclareLaunchArgument(
         'joy_source', default_value='device',
@@ -155,6 +164,10 @@ def generate_launch_description():
         package='waybionic_teleop', executable='sim_arm_drives', name='sim_arm_drives',
         output='screen', condition=IfCondition(teleop),
         parameters=[os.path.join(teleop_config_dir, 'arm_drives.yaml'), diagnostics_topic,
+                    {'interface': ParameterValue(LaunchConfiguration('drive_interface'),
+                                                 value_type=str),
+                     'channel': ParameterValue(LaunchConfiguration('drive_channel'),
+                                               value_type=str)},
                     sim_time]
     )
 
@@ -205,7 +218,8 @@ def generate_launch_description():
 
     return LaunchDescription([
         model_arg, use_mock_diag_arg, diag_topic_arg, start_temp_pub_arg,
-        use_jsp_gui_arg, demo_mode_arg, demo_speed_arg, teleop_arg, joy_source_arg,
+        use_jsp_gui_arg, demo_mode_arg, demo_speed_arg, teleop_arg, drive_interface_arg,
+        drive_channel_arg, joy_source_arg,
         joy_udp_bind_arg, joy_udp_port_arg, follow_camera_arg, use_sim_time_arg,
         launch_rviz_arg, rviz_config_arg, file_check, rsp_node, jsp_gui_node, joint_demo_node,
         joy_node, joy_udp_node, teleop_node, drives_node, camera_follower_node,

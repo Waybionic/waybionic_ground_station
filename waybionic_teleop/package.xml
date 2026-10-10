@@ -3,7 +3,7 @@
 <package format="3">
   <name>waybionic_teleop</name>
   <version>0.1.0</version>
-  <description>Xbox controller teleoperation and simulated CAN joint drives for the WayBionic arm.</description>
+  <description>Xbox controller teleoperation and MKS CAN joint drives, simulated or real, for the WayBionic arm.</description>
   <maintainer email="solimanyassin@gmail.com">Yassin Soliman</maintainer>
   <license>Apache-2.0</license>
 
@@ -11,7 +11,10 @@
   <depend>rclpy</depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
   <depend>visualization_msgs</depend>
+
+  <exec_depend>python3-can</exec_depend>
 
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>
