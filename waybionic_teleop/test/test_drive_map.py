@@ -40,13 +40,46 @@ def test_gear_ratio_scales_counts_and_speed():
     assert base.to_rpm({'joint_1': -2 * math.pi}) == pytest.approx([3000.0])
 
 
+def test_a_setpoint_that_jumped_ahead_is_chased_near_the_commanded_speed(arm_map):
+    period = 1.0 / 120.0
+    rates = {'joint_1': math.radians(60.0), 'joint_4': 0.5, 'joint_5': 0.2}
+    # A 100 ms host stall leaves the base setpoint 6 degrees ahead of its drive.
+    ahead = {joint: rates.get(joint, 0.0) * 0.1 for joint in arm_map.joints}
+    counts = arm_map.to_counts(dict.fromkeys(arm_map.joints, 0.0))
+    free = arm_map.synchronized(ahead, counts, period, 300)
+    capped = arm_map.synchronized(ahead, counts, period, 300, rates)
+    commanded = arm_map.to_rpm(rates)
+    assert commanded[0] == pytest.approx(10.0) and free[0][1] == 120
+    # Each wrist drive is capped by its own mix of pitch and roll.
+    for (axis, rpm), (free_axis, free_rpm), limit in zip(capped, free, commanded):
+        assert axis == free_axis and 1 <= rpm <= 1.5 * limit + 1.0
+        assert rpm == free_rpm or rpm >= 1.5 * limit
+    with pytest.raises(ValueError):
+        arm_map.synchronized(ahead, counts, period, 300, {'joint_1': math.nan})
+
+
 @pytest.mark.parametrize('drives', [
     [drive_map.Drive('a', 1, 1.0, {'j1': 1.0}), drive_map.Drive('b', 1, 1.0, {'j2': 1.0})],
     [drive_map.Drive('a', 1, 1.0, {'j1': 1.0, 'j2': 1.0}),
      drive_map.Drive('b', 2, 1.0, {'j1': 2.0, 'j2': 2.0})],
     [drive_map.Drive('a', 1, 0.0, {'j1': 1.0})],
     [drive_map.Drive('a', 1, 1.0, {'j1': 1.0, 'j2': 1.0})],
+    [drive_map.Drive('a', 1, math.nan, {'j1': 1.0})],
+    [drive_map.Drive('a', 1, 1.0, {'j1': math.inf})],
 ])
 def test_duplicate_ids_singular_mixes_and_bad_ratios_are_rejected(drives):
     with pytest.raises(ValueError):
         drive_map.DriveMap(drives, COUNTS)
+
+
+@pytest.mark.parametrize('positions,counts,period,max_rpm', [
+    ({'joint_1': math.nan}, [0], 0.01, 300),
+    ({}, [0], 0.01, 300),
+    ({'joint_1': 0.0}, [None], 0.01, 300),
+    ({'joint_1': 0.0}, [0], 0.0, 300),
+    ({'joint_1': 0.0}, [0], 0.01, 0),
+])
+def test_synchronized_move_rejects_invalid_setpoints(positions, counts, period, max_rpm):
+    mapping = drive_map.DriveMap([drive_map.Drive('base', 1, 1.0, {'joint_1': 1.0})], COUNTS)
+    with pytest.raises(ValueError):
+        mapping.synchronized(positions, counts, period, max_rpm)
