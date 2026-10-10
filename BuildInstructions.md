@@ -427,7 +427,10 @@ ros2 service call /sim_arm_drives/zero std_srvs/srv/Trigger
 
 Then press Start. Real drives take commands through the same gate as the simulated ones.
 If a drive stops answering, for example because the E-stop cut its power, every drive
-stops and the arm must be zeroed again. If the joint commands stop for 0.5 s, every drive
+stops and the arm must be zeroed again. The same happens when a drive reports a failed
+move (as when its stall protection releases the motor) or an end-limit stop, or stays more
+than `following_error_counts` from its target for `following_error_ticks` ticks; both are
+provisional values in `arm_drives.yaml`. If the joint commands stop for 0.5 s, every drive
 stops where it is, and if the host stops, the drives' heartbeat stops them. After any stop,
 disable teleop and press Start again.
 

@@ -41,6 +41,9 @@ REPLY_TIMEOUT_S = 0.5
 QUIET_BEFORE_ZERO_S = 1.0
 # Every drive must confirm these before it moves, so none runs without its heartbeat stop.
 SETUP = (mks_can.SET_MODE, mks_can.SET_RESPONSE, mks_can.ENABLE, mks_can.SET_HEARTBEAT)
+# F5 replies of a drive that no longer follows its targets: run failed, as when stall
+# protection releases the motor, and stopped at an end limit.
+RUN_FAULTS = (0, 3)
 
 
 def status(name, level, value, unit, message, **extra):
@@ -65,13 +68,16 @@ class SimArmDrives(Node):
         self.heartbeat_ms = int(params['heartbeat_ms'])
         self.enable_timeout = float(params['enable_timeout_s'])
         self.command_timeout = float(params.get('command_timeout_s', 0.5))
+        self.following_error = int(params.get('following_error_counts', 4096))
+        self.following_ticks = int(params.get('following_error_ticks', 12))
         if (not 0 <= self.acc <= 255 or not 1 <= self.max_rpm <= mks_can.MAX_SPEED_RPM
                 or not math.isfinite(rate_hz) or rate_hz <= 0 or self.bitrate <= 0
                 or not 1 <= self.heartbeat_ms <= 0xFFFFFFFF
+                or self.following_error < 1 or self.following_ticks < 1
                 or not 0 < self.command_timeout < math.inf
                 or not 0 < self.enable_timeout < math.inf):
-            raise ValueError('invalid drive rate, acceleration, speed, heartbeat, command '
-                             'timeout or enable timeout')
+            raise ValueError('invalid drive rate, acceleration, speed, heartbeat, following '
+                             'error, command timeout or enable timeout')
         self.period = 1.0 / rate_hz
         self.heartbeat_s = self.heartbeat_ms / 1000.0
         self.interface = params.get('interface', 'sim')
@@ -107,6 +113,8 @@ class SimArmDrives(Node):
         self.setup_time = [None] * len(drives)
         self.state = ['starting'] * len(drives)
         self.sent = [None] * len(drives)
+        # Ticks in a row each drive has been more than following_error from its target.
+        self.behind = [0] * len(drives)
         self.heartbeat_stops = [0] * len(drives)
         self.last_command = [''] * len(drives)
         self.commanded = None
@@ -298,6 +306,7 @@ class SimArmDrives(Node):
             self.bus.send(drive.can_id, mks_can.read_encoder(drive.can_id))
             self.unanswered[index] += 1
         self.drain(now)
+        self.check_following()
         if not all(self.zeroed) or None in self.counts:
             return
         positions = self.map.to_positions(self.counts)
@@ -320,6 +329,23 @@ class SimArmDrives(Node):
             self.lost[index], self.zeroed[index] = True, False
             self.stop_all(f'{drive.name} stopped answering')
             self.get_logger().error(f'{drive.name} stopped answering; every drive is stopped')
+
+    def check_following(self):
+        for index, (sent, count) in enumerate(zip(self.sent, self.counts)):
+            axis = sent[0] if self.authorized and sent else None
+            if axis is None or count is None or abs(axis - count) <= self.following_error:
+                self.behind[index] = 0
+                continue
+            self.behind[index] += 1
+            if self.behind[index] >= self.following_ticks:
+                self.fault(index, f'is {abs(axis - count)} counts from its target')
+
+    def fault(self, index, reason):
+        """Stop every drive after one stops following; the arm must be zeroed again."""
+        name = self.map.drives[index].name
+        self.zeroed[index] = False
+        self.stop_all(f'{name} {reason}')
+        self.get_logger().error(f'{name} {reason}; every drive is stopped. {self.zero_hint()}')
 
     def stop_drives(self):
         """Stop every drive with the manual's F5 zero-speed, zero-acceleration frame."""
@@ -380,11 +406,14 @@ class SimArmDrives(Node):
             self.set_up(index)
             self.get_logger().warning(
                 f'{self.map.drives[index].name} answers again. {self.zero_hint()}')
+        failed = None
         try:
             if code == mks_can.READ_ENCODER:
                 self.counts[index] = mks_can.encoder_value(arguments)
             elif code == mks_can.ABSOLUTE_AXIS and arguments:
                 self.state[index] = mks_can.RUN_STATUS.get(arguments[0], f'status {arguments[0]}')
+                if arguments[0] in RUN_FAULTS:
+                    failed = self.state[index]
             elif code == mks_can.SET_ZERO and arguments[:1] == b'\x01':
                 # Later encoder replies were read after the zero.
                 self.zeroed[index], self.counts[index] = True, None
@@ -399,6 +428,9 @@ class SimArmDrives(Node):
             self.get_logger().warning(str(error), throttle_duration_sec=2.0)
             return
         self.heard[index], self.unanswered[index] = now, 0
+        # Only stop frames go out while disarmed, and a released motor refuses those too.
+        if failed and self.authorized:
+            self.fault(index, failed)
 
     def report(self):
         now = time.monotonic()
@@ -434,7 +466,8 @@ class SimArmDrives(Node):
                                        f'target {target:+.1f} deg'))
         for index, drive in enumerate(self.map.drives):
             silent = self.heard[index] is None or now - self.heard[index] > REPLY_TIMEOUT_S
-            failed = 'failed' in self.state[index]
+            failed = ('failed' in self.state[index]
+                      or self.state[index] in [mks_can.RUN_STATUS[code] for code in RUN_FAULTS])
             turns = '' if self.counts[index] is None else (
                 f'{self.counts[index] / mks_can.COUNTS_PER_REV:+.3f}')
             text = 'no reply' if silent else self.state[index]

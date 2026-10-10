@@ -6,6 +6,7 @@ from pathlib import Path
 import time
 from unittest.mock import MagicMock
 
+from diagnostic_msgs.msg import DiagnosticStatus
 import pytest
 import rclpy
 from rclpy._rclpy_pybind11 import RCLError
@@ -257,6 +258,60 @@ def test_the_drives_stop_when_teleop_stops_republishing_its_enable(node):
     node.on_command(command(node, joint_1=1.0))
     advance(node)
     assert node.authorized and node.bus.drives[1].target is not None
+
+
+@pytest.mark.parametrize('status', [0, 3])
+def test_a_drive_that_fails_its_move_stops_every_drive_until_zeroed(node, monkeypatch, status):
+    ready(node)
+    node.on_command(command(node, joint_1=0.3, joint_2=0.3))
+    advance(node)
+    shoulder = node.bus.drives[2]
+    assert shoulder.target is not None
+    # Stall protection releases the shoulder, or it reaches an end limit: it stops moving and
+    # its F5 replies report the failure, while the other drives could follow on.
+    answer = shoulder.receive
+
+    def failing(data):
+        if data[0] != mks_can.ABSOLUTE_AXIS:
+            return answer(data)
+        shoulder.target, shoulder.rpm = None, 0.0
+        return [mks_can.frame(2, mks_can.ABSOLUTE_AXIS, [status])]
+    monkeypatch.setattr(shoulder, 'receive', failing)
+    node.on_command(command(node, joint_1=0.31, joint_2=0.31))
+    advance(node)
+    assert not node.authorized and not node.zeroed[1] and 'shoulder' in node.stop_reason
+    assert all(servo.target is None and servo.rpm == 0.0 for servo in node.bus.drives.values())
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+    node.report()
+    levels = {item.name: item.level for item in published[-1].status}
+    assert levels['drive.shoulder'] == DiagnosticStatus.ERROR
+    # A fresh Start alone does not resume: the arm must be zeroed again first.
+    node.on_enabled(Bool(data=False))
+    node.on_enabled(Bool(data=True))
+    assert not node.authorized
+
+
+def test_a_drive_that_stops_following_its_targets_stops_every_drive(node, monkeypatch):
+    ready(node)
+    node.following_error, node.following_ticks = 400, 5
+    base = node.bus.drives[1]
+    # The base accepts every move, but its encoder no longer turns.
+    monkeypatch.setattr(base, 'step', lambda dt: [])
+    behind = []
+    for tick in range(1, 100):
+        node.on_enabled(Bool(data=True))
+        node.on_command(command(node, velocities={'joint_1': 1.2},
+                                joint_1=1.2 * tick * node.period))
+        advance(node)
+        behind.append(node.behind[0])
+        if not node.authorized:
+            break
+    # Each target is 26 counts past the last, so the base first falls more than 400 counts
+    # behind on the 16th tick, and the fifth such tick in a row stops the arm.
+    assert behind[-6:] == [0, 1, 2, 3, 4, 5] and len(behind) == 20
+    assert not node.zeroed[0] and 'base_yaw' in node.stop_reason
+    assert all(servo.target is None and servo.rpm == 0.0 for servo in node.bus.drives.values())
 
 
 @pytest.mark.parametrize('timeout', [0.0, -0.5, math.inf])
