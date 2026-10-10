@@ -1,9 +1,14 @@
 x-tested-image: &tested-image
-  image: waybionic-ground-station:jazzy
+  # CI publishes main's tested image here; local builds reuse its layers.
+  image: ghcr.io/waybionic/waybionic_ground_station:jazzy
   build:
     context: .
     dockerfile: docker/Dockerfile
     target: test
+    cache_from:
+      - ghcr.io/waybionic/waybionic_ground_station:jazzy
+    args:
+      BUILDKIT_INLINE_CACHE: "1"
 
 services:
   demo:
@@ -34,6 +39,8 @@ services:
       context: .
       dockerfile: docker/Dockerfile
       target: development
+      cache_from:
+        - ghcr.io/waybionic/waybionic_ground_station:jazzy
     init: true
     command: [sleep, infinity]
     volumes:
@@ -82,7 +89,7 @@ services:
         source /waybionic_ws/install/setup.bash &&
         exec ros2 launch waybionic_bringup ground_station.launch.py
 
-  wslg:
+  wslg: &wslg
     <<: *tested-image
     profiles: [wslg]
     init: true
@@ -117,3 +124,18 @@ services:
       - waybionic_bringup
       - ground_station.launch.py
       - start_temporary_diagnostics_publisher:=true
+
+  wslg-teleop:
+    <<: *wslg
+    profiles: [wslg-teleop]
+    # The Windows controller bridge sends to this port.
+    ports:
+      - 127.0.0.1:47300:47300/udp
+    command:
+      - ros2
+      - launch
+      - waybionic_bringup
+      - ground_station.launch.py
+      - teleop:=true
+      - joy_source:=udp
+      - joy_udp_bind:=0.0.0.0
