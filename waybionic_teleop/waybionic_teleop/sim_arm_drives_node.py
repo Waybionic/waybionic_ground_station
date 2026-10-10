@@ -478,7 +478,8 @@ class SimArmDrives(Node):
         statuses = [status(
             'can.bus', level, f'{frames:.0f}', 'frames/s',
             f'{load:.0f}% worst-case load at {self.bitrate // 1000} kbit/s ({self.bus_label})',
-            load_percent=f'{load:.1f}', errors=errors, rejected_commands=self.rejected)]
+            load_percent=f'{load:.1f}', errors=errors, rejected_commands=self.rejected,
+            interface=self.interface)]
         gate_level = (DiagnosticStatus.OK if self.authorized else
                       DiagnosticStatus.ERROR if not self.description_valid else
                       DiagnosticStatus.WARN)

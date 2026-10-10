@@ -485,3 +485,14 @@ def test_silence_before_the_first_command_leaves_the_drives_holding(make_node):
     # target, and start-up never logs a stale-command warning.
     spin_until(executor, enabled_until(node), 1.0)
     assert stops == [] and node.authorized and node.commanded == held
+
+
+@pytest.mark.parametrize('interface', ['sim', 'virtual'])
+def test_the_bus_report_names_the_interface(make_node, interface):
+    # The autoplay demo only plays when this says sim.
+    node, _ = make_node(interface=interface, channel=uuid.uuid4().hex)
+    reports = []
+    node.diagnostics_publisher.publish = reports.append
+    node.report()
+    bus = next(status for status in reports[0].status if status.name == 'can.bus')
+    assert {item.key: item.value for item in bus.values}['interface'] == interface

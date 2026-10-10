@@ -7,8 +7,8 @@ from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, Opaq
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import (
-    AndSubstitution, Command, EqualsSubstitution, LaunchConfiguration, NotSubstitution,
-    OrSubstitution)
+    AndSubstitution, Command, EqualsSubstitution, IfElseSubstitution, LaunchConfiguration,
+    NotSubstitution, OrSubstitution)
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -26,6 +26,11 @@ def check_files_exist(context, *args, **kwargs):
     joy_source = LaunchConfiguration('joy_source').perform(context)
     if joy_source not in ('device', 'udp', 'none'):
         raise ValueError(f'joy_source must be device, udp or none, not {joy_source}')
+    if IfCondition(LaunchConfiguration('autoplay')).evaluate(context):
+        if not IfCondition(LaunchConfiguration('teleop')).evaluate(context):
+            raise RuntimeError('autoplay plays the controller demo, so it needs teleop:=true')
+        if LaunchConfiguration('drive_interface').perform(context) != 'sim':
+            raise RuntimeError('autoplay only runs with simulated drives')
     return []
 
 
@@ -83,6 +88,11 @@ def generate_launch_description():
     joy_source_arg = DeclareLaunchArgument(
         'joy_source', default_value='device',
         description='Controller input: device (local joystick), udp (host bridge) or none')
+
+    autoplay_arg = DeclareLaunchArgument(
+        'autoplay', default_value='false',
+        description='Play a scripted demo whenever the controller is left idle '
+                    '(teleop with simulated drives only)')
 
     joy_udp_bind_arg = DeclareLaunchArgument(
         'joy_udp_bind', default_value='127.0.0.1',
@@ -150,10 +160,14 @@ def generate_launch_description():
             NotSubstitution(simulated_joints)))
     )
 
+    # With autoplay, the controller goes through the autoplay node before it reaches teleop.
+    autoplay = AndSubstitution(teleop, LaunchConfiguration('autoplay'))
+    operator_joy = [('joy', IfElseSubstitution(autoplay, 'joy_operator', 'joy'))]
+
     joy_node = Node(
         package='joy', executable='game_controller_node', name='joy',
         condition=IfCondition(AndSubstitution(teleop, EqualsSubstitution(joy_source, 'device'))),
-        parameters=[sim_time]
+        parameters=[sim_time], remappings=operator_joy
     )
 
     joy_udp_node = Node(
@@ -163,7 +177,13 @@ def generate_launch_description():
             {'bind_address': LaunchConfiguration('joy_udp_bind')},
             {'port': ParameterValue(LaunchConfiguration('joy_udp_port'), value_type=int)},
             diagnostics_topic, sim_time
-        ]
+        ],
+        remappings=operator_joy
+    )
+
+    autoplay_node = Node(
+        package='waybionic_teleop', executable='autoplay', name='autoplay', output='screen',
+        condition=IfCondition(autoplay), parameters=[diagnostics_topic, sim_time]
     )
 
     teleop_node = Node(
@@ -245,10 +265,10 @@ def generate_launch_description():
     return LaunchDescription([
         model_arg, use_mock_diag_arg, diag_topic_arg, start_temp_pub_arg,
         use_jsp_gui_arg, demo_mode_arg, demo_speed_arg, teleop_arg, drive_interface_arg,
-        drive_channel_arg, joy_source_arg,
+        drive_channel_arg, joy_source_arg, autoplay_arg,
         joy_udp_bind_arg, joy_udp_port_arg, follow_camera_arg, use_sim_time_arg, camera_arg,
         camera_bind_arg, camera_log_arg,
         launch_rviz_arg, rviz_config_arg, file_check, rsp_node, jsp_gui_node, joint_demo_node,
-        joy_node, joy_udp_node, teleop_node, drives_node, camera_follower_node,
+        joy_node, joy_udp_node, autoplay_node, teleop_node, drives_node, camera_follower_node,
         temp_diag_pub_node, camera_launch, rviz_node
     ])
