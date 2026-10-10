@@ -15,10 +15,10 @@ LIMITS = {'joint_1': (-math.pi, math.pi), 'joint_2': (-1.5708, 1.5708),
           'joint_5': (-1.5708, 1.5708)}
 # The tool leaning forward and down, about 45 degrees from vertical.
 LEANING = {'joint_1': 0.3, 'joint_2': 0.4, 'joint_3': 1.2, 'joint_4': 0.8, 'joint_5': 0.0,
-           'tool_grip': 0.0}
+           'left_claw': 0.0, 'right_claw': 0.0}
 # The tool leaning forward and down, its tip about 60 mm above the table.
-NEAR_TABLE = {'joint_1': 0.2, 'joint_2': 0.87, 'joint_3': 1.5, 'joint_4': -0.17, 'joint_5': 0.0,
-              'tool_grip': 0.0}
+NEAR_TABLE = {'joint_1': 0.2, 'joint_2': 0.87, 'joint_3': 1.5, 'joint_4': -0.6, 'joint_5': 0.0,
+              'left_claw': 0.0, 'right_claw': 0.0}
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
         / 'waybionic_arm.urdf').read_text(encoding='utf-8')
 DT = 1.0 / 120.0

@@ -43,6 +43,8 @@ def drive_stop_reason(reason):
     """Name why the drives stopped the arm, one word per line for the RViz label."""
     words = reason.split(':')[0].split()
     return 'DRIVES-STOPPED' + ('\n' + '-'.join(words) if words else '')
+
+
 TOOL_MESH_ROOT = 'package://waybionic_description/meshes/tool/'
 
 

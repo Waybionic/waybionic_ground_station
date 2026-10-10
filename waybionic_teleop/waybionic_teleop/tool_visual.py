@@ -14,7 +14,8 @@ PREVIEW_OPEN_ANGLE = 0.35
 
 
 def claw_pose(side, closure):
-    """Return the assembled claw's provisional position and x-axis quaternion.
+    """
+    Return the assembled claw's provisional position and x-axis quaternion.
 
     ``closure=1`` preserves Julie's assembled pose. ``closure=0`` previews each
     claw swung away from that pose. Biomedical must confirm the range and sign.

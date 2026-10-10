@@ -1,4 +1,5 @@
-"""Split Julie's assembled clamp STL into fixed geometry and two moving claws.
+"""
+Split Julie's assembled clamp STL into fixed geometry and two moving claws.
 
 Usage: python3 scripts/cad/split_biomedical_assembly.py ASSEMBLY.stl OUTPUT_DIR
 The output keeps the assembly's coordinates in millimetres. No guessed part

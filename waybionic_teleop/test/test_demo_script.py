@@ -67,7 +67,7 @@ def make_teleop(parameters):
 
 def test_the_demo_draws_the_same_square_from_a_fresh_start_and_on_every_loop(make_teleop):
     teleop, kinematics = make_teleop()
-    measured = dict.fromkeys([*LIMITS, 'tool_grip'], 0.0)
+    measured = dict.fromkeys([*LIMITS, 'left_claw', 'right_claw'], 0.0)
     squares = play(teleop, kinematics, measured, 90.0)
     assert len(squares) >= 2
     for _, start, group, end, level in squares[:2]:
@@ -80,10 +80,11 @@ def test_the_demo_draws_the_same_square_from_a_fresh_start_and_on_every_loop(mak
 
 def test_the_demo_recovers_whatever_state_the_operator_left(make_teleop):
     fresh, kinematics = make_teleop()
-    reference = play(fresh, kinematics, dict.fromkeys([*LIMITS, 'tool_grip'], 0.0), 40.0)[0]
+    reference = play(fresh, kinematics, dict.fromkeys(
+        [*LIMITS, 'left_claw', 'right_claw'], 0.0), 40.0)[0]
     # Enabled in the Cartesian group at the slowest speed, with the arm away from home.
     measured = {'joint_1': 0.6, 'joint_2': -0.4, 'joint_3': 0.9, 'joint_4': -0.7,
-                'joint_5': 0.3, 'tool_grip': 0.5}
+                'joint_5': 0.3, 'left_claw': 0.5, 'right_claw': 0.5}
     teleop, _ = make_teleop(level=0, group=2)
     teleop.enable(measured, ())
     assert teleop.enabled and teleop.active_group.name == 'cartesian'
