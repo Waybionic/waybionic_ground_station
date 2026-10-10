@@ -61,8 +61,11 @@ def read_rumble(sock, receiver):
     for _ in range(MAX_READS):
         try:
             data, sender = sock.recvfrom(64)
-        except OSError:
+        except BlockingIOError:
             break
+        except OSError:
+            # Windows raises here for an oversize datagram or an earlier ICMP error.
+            continue
         if sender != receiver:
             continue
         try:

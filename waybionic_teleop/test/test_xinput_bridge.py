@@ -79,3 +79,24 @@ def test_a_flood_of_rumble_requests_is_read_a_few_per_update(sockets):
         intensity = xinput_bridge.read_rumble(bridge, station.getsockname())
         assert intensity == pytest.approx(update * xinput_bridge.MAX_READS / 100)
     assert xinput_bridge.read_rumble(bridge, station.getsockname()) is None
+
+
+class WindowsSocket:
+    """Raise the errors Windows reports for an oversize datagram and an ICMP reply."""
+
+    def __init__(self, *replies):
+        self.replies = list(replies)
+
+    def recvfrom(self, size):
+        reply = self.replies.pop(0) if self.replies else BlockingIOError()
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+
+def test_a_receive_error_does_not_hide_the_replies_behind_it():
+    station = ('127.0.0.1', 47300)
+    sock = WindowsSocket(OSError(10040, 'datagram larger than the buffer'),
+                         ConnectionResetError(10054, 'port unreachable'),
+                         (gamepad.pack_rumble(0.5), station))
+    assert xinput_bridge.read_rumble(sock, station) == pytest.approx(0.5)
