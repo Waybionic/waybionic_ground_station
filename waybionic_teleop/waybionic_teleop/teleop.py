@@ -200,7 +200,7 @@ class ArmTeleop:
         sticks = {axis for group in config.groups for axis in group.axes}
         buttons = {config.buttons[action] for action in ('home', 'tilt_up', 'tilt_down')}
         return (any(self.stick(axes, axis) for axis in sticks)
-                or any(self.trigger(axes, axis) > config.deadzone
+                or any(self.trigger(axes, axis)
                        for axis in (config.tool_close_axis, config.tool_open_axis))
                 or bool(buttons & self.held))
 
@@ -324,7 +324,10 @@ class ArmTeleop:
 
     def trigger(self, axes, name):
         # game_controller_node triggers rest at 0 and reach -1 when fully pressed.
-        return clamp(-self.axis(axes, name), 0.0, 1.0)
+        magnitude = clamp(-self.axis(axes, name), 0.0, 1.0) - self.config.deadzone
+        if magnitude <= 0:
+            return 0.0
+        return min(magnitude / (1.0 - self.config.deadzone), 1.0)
 
     @staticmethod
     def axis(axes, name):
