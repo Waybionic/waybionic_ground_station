@@ -7,7 +7,7 @@ import time
 import unittest
 
 from ament_index_python.packages import get_package_share_directory
-from diagnostic_msgs.msg import DiagnosticArray
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 import launch
 from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -75,11 +75,13 @@ class TestCartesian(unittest.TestCase):
 
         try:
             deadline = time.monotonic() + 30.0
-            # The group row appears once teleop has loaded the robot description.
-            while (('teleop.group' not in diagnostics
-                    or not buffer.can_transform('base_link', 'tool_link', Time()))
-                   and time.monotonic() < deadline):
-                rclpy.spin_once(node, timeout_sec=0.1)
+            # Press Start only once teleop has loaded the robot description (the group row
+            # appears) and receives the controller, or the press is lost on a slow machine.
+            while time.monotonic() < deadline and not (
+                    'teleop.group' in diagnostics
+                    and diagnostics['teleop.input'].level == DiagnosticStatus.OK
+                    and buffer.can_transform('base_link', 'tool_link', Time())):
+                hold(0.1)
             hold(0.2, 'start')
             hold(0.3, 'y')
             # Bend the shoulder, elbow and wrist away from the upright pose.

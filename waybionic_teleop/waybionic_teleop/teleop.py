@@ -46,6 +46,7 @@ class TeleopConfig:
     tool_speed: float
     tool_close_axis: str
     tool_open_axis: str
+    period: float
     max_speed: float
     max_accel: float
     linear_speed: float
@@ -60,6 +61,9 @@ class TeleopConfig:
 def config_from_parameters(params):
     """Build a TeleopConfig from flat ROS parameter names such as 'base.joints'."""
     try:
+        rate_hz = float(params['rate_hz'])
+        if not math.isfinite(rate_hz) or rate_hz <= 0:
+            raise ValueError('rate_hz must be positive')
         groups = [Group(name, list(params[f'{name}.joints']), list(params[f'{name}.axes']),
                         [float(scale) for scale in params[f'{name}.scales']],
                         params.get(f'{name}.mode', 'joint'))
@@ -72,10 +76,11 @@ def config_from_parameters(params):
             tool_speed=float(params['tool_speed']),
             tool_close_axis=params['tool_close_axis'],
             tool_open_axis=params['tool_open_axis'],
+            period=1.0 / rate_hz,
             max_speed=math.radians(params['max_speed_deg_s']),
             max_accel=math.radians(params['max_accel_deg_s2']),
-            linear_speed=params['max_linear_speed_mm_s'] / 1000.0,
-            linear_accel=params['max_linear_accel_mm_s2'] / 1000.0,
+            linear_speed=float(params['max_linear_speed_mm_s']) / 1000.0,
+            linear_accel=float(params['max_linear_accel_mm_s2']) / 1000.0,
             tilt_speed=math.radians(params['max_tilt_speed_deg_s']),
             speed_levels=[float(level) for level in params['speed_levels']],
             speed_level=int(params['initial_speed_level']),
@@ -83,7 +88,26 @@ def config_from_parameters(params):
             home_gain=float(params['home_gain']))
     except KeyError as missing:
         raise ValueError(f'missing teleop parameter {missing}') from None
+    check_config(config)
+    return config
+
+
+def check_config(config):
+    """Raise ValueError unless the controller mapping and motion limits are usable."""
+    if not 0 < config.period < math.inf:
+        raise ValueError('the control period (1 / rate_hz) must be positive and finite')
+    if not config.groups:
+        raise ValueError('at least one teleop group is required')
+    speeds = (config.tool_speed, config.max_speed, config.max_accel, config.linear_speed,
+              config.linear_accel, config.tilt_speed, config.home_gain)
+    if any(not math.isfinite(value) or value <= 0 for value in speeds):
+        raise ValueError('teleop speeds and accelerations must be positive and finite')
+    if any(not math.isfinite(value) or not 0 < value <= 1 for value in config.speed_levels):
+        raise ValueError('speed_levels must be in (0, 1]')
     for group in config.groups:
+        # A scale above 1 would let a full stick pass the speed limits.
+        if any(not -1.0 <= scale <= 1.0 for scale in group.scales):
+            raise ValueError(f'group {group.name} scales must be between -1 and 1')
         if group.mode in MOVES:
             moves = ', '.join(MOVES[group.mode])
             if not len(group.axes) == len(group.scales) == len(MOVES[group.mode]):
@@ -99,9 +123,8 @@ def config_from_parameters(params):
         raise ValueError('unknown controller inputs: ' + ', '.join(map(str, unknown)))
     if not 0 <= config.speed_level < len(config.speed_levels) or not 0 <= config.deadzone < 1:
         raise ValueError('initial_speed_level or deadzone out of range')
-    if not config.tool_limits[0] < config.tool_limits[1]:
+    if len(config.tool_limits) != 2 or not config.tool_limits[0] < config.tool_limits[1]:
         raise ValueError('tool_limits must be [open, closed] with open < closed')
-    return config
 
 
 class ArmTeleop:
@@ -109,17 +132,29 @@ class ArmTeleop:
 
     def __init__(self, config, limits, kinematics=None):
         """Take the config, {joint: (lower, upper)} radians and optional ArmKinematics."""
+        check_config(config)
         self.config = config
         self.kinematics = kinematics
         # Without kinematics for this arm, the Cartesian and incision groups are left out.
         self.groups = [group for group in config.groups
                        if group.mode not in MOVES or kinematics is not None]
+        if not self.groups:
+            raise ValueError('no joint-space group or compatible Cartesian kinematics')
+        for group in self.groups:
+            if group.mode in MOVES and (
+                    tuple(group.joints) != kinematics.joints
+                    or any(joint not in limits for joint in kinematics.joints)):
+                raise ValueError(
+                    f'{group.mode.capitalize()} group {group.name} does not match the URDF chain')
         self.limits = dict(limits)
         self.limits[config.tool_joint] = config.tool_limits
         self.enabled = False
         self.group = 0
         self.level = config.speed_level
         self.targets = {}
+        # Published positions are the next-period setpoints, not joint-wise extrapolations
+        # of a Cartesian solve that could leave the straight line at a limit.
+        self.command_targets = {}
         self.velocities = dict.fromkeys(self.limits, 0.0)
         self.linear = (0.0, 0.0, 0.0)
         self.tilt = 0.0
@@ -128,6 +163,7 @@ class ArmTeleop:
         # Where the tool enters the body: the tip position when the incision group took over.
         self.incision = None
         self.held = set()
+        self.wait_for_center = False
         self.blocked = []
         self.note = 'Press Start (Xbox Menu button) to enable'
         self.warning = False
@@ -158,6 +194,9 @@ class ArmTeleop:
         if 'group' in pressed:
             self.group = (self.group + 1) % len(self.groups)
             self.stop_cartesian()
+            self.velocities = dict.fromkeys(self.limits, 0.0)
+            self.command_targets = dict(self.targets)
+            self.wait_for_center = True
             self.incision = None
         if 'faster' in pressed:
             self.level = min(self.level + 1, len(self.config.speed_levels) - 1)
@@ -165,42 +204,59 @@ class ArmTeleop:
             self.level = max(self.level - 1, 0)
         if not self.enabled:
             return False
+        if self.wait_for_center:
+            if self.motion_input_held(axes):
+                self.note = 'Center motion controls before moving in the new group'
+                self.warning = True
+                return True
+            self.wait_for_center = False
+            self.note, self.warning = '', False
         self.move(axes, self.config.buttons['home'] in held, dt)
         return True
 
-    def enable(self, measured, axes):
-        missing = [joint for joint in self.limits if joint not in measured]
-        if missing:
-            self.note, self.warning = 'Waiting for joint states: ' + ', '.join(missing), True
-            return
+    def motion_input_held(self, axes):
         config = self.config
         sticks = {axis for group in config.groups for axis in group.axes}
         buttons = {config.buttons[action] for action in ('home', 'tilt_up', 'tilt_down')}
-        if (any(self.stick(axes, axis) for axis in sticks)
-                or any(self.trigger(axes, axis) > config.deadzone
+        return (any(self.stick(axes, axis) for axis in sticks)
+                or any(self.trigger(axes, axis)
                        for axis in (config.tool_close_axis, config.tool_open_axis))
-                or buttons & self.held):
+                or bool(buttons & self.held))
+
+    def enable(self, measured, axes):
+        missing = [joint for joint in self.limits
+                   if joint not in measured or not math.isfinite(measured[joint])]
+        if missing:
+            self.note, self.warning = 'Waiting for joint states: ' + ', '.join(missing), True
+            return
+        if self.motion_input_held(axes):
             # A stuck or held input must never start moving the arm the moment it is enabled.
             self.note = 'Center the sticks and release the triggers and buttons, then press Start'
             self.warning = True
             return
         # Start from the measured pose so enabling never makes the arm jump.
         self.targets = {joint: measured[joint] for joint in self.limits}
+        self.command_targets = dict(self.targets)
         self.velocities = dict.fromkeys(self.limits, 0.0)
         self.stop_cartesian()
+        self.wait_for_center = False
         self.enabled, self.note, self.warning = True, '', False
 
     def disable(self, measured, note, warning=False):
         self.enabled, self.note, self.warning = False, note, warning
         self.velocities = dict.fromkeys(self.limits, 0.0)
         self.stop_cartesian()
-        self.targets.update({joint: measured[joint] for joint in self.limits if joint in measured})
+        self.wait_for_center = False
+        self.targets.update({joint: measured[joint] for joint in self.limits
+                             if joint in measured and math.isfinite(measured[joint])})
+        self.command_targets = dict(self.targets)
 
     def stop_cartesian(self):
         self.linear, self.tilt, self.roll, self.insert = (0.0, 0.0, 0.0), 0.0, 0.0, 0.0
 
     def move(self, axes, homing, dt):
         config = self.config
+        self.command_targets = dict(self.targets)
         desired = dict.fromkeys(self.limits, 0.0)
         self.blocked = []
         # Going home would drag the tool sideways through the incision.
@@ -240,6 +296,8 @@ class ArmTeleop:
                 target, velocity = min(self.targets[joint], lower), 0.0
                 self.blocked.append(joint)
             self.targets[joint], self.velocities[joint] = target, velocity
+            self.command_targets[joint] = clamp(
+                target + velocity * config.period, min(lower, target), max(upper, target))
 
     def jog(self, axes, dt):
         """Move the tool tip along a straight line set by the sticks, or tilt the tool about it."""
@@ -249,6 +307,10 @@ class ArmTeleop:
         if config.buttons['lock'] in self.held:
             dominant = max(range(3), key=lambda index: abs(linear[index]))
             linear = [value if index == dominant else 0.0 for index, value in enumerate(linear)]
+        length = math.hypot(*linear)
+        if length > 1.0:
+            # A diagonal must not move the tip faster than the top speed along one axis.
+            linear = [value / length for value in linear]
         # Ramp the tip velocity as one vector, so speeding up or slowing down never bends the line.
         change = [self.linear_speed * goal - current for goal, current in zip(linear, self.linear)]
         size, most = math.sqrt(sum(value * value for value in change)), config.linear_accel * dt
@@ -269,6 +331,13 @@ class ArmTeleop:
         for joint in self.kinematics.joints:
             self.velocities[joint] = (after[joint] - before[joint]) / dt
             self.targets[joint] = after[joint]
+        if any(self.linear) or self.tilt or self.roll:
+            future, _, _ = self.kinematics.jog(
+                after, self.linear, self.tilt, self.roll, config.period, self.limits,
+                config.max_speed)
+        else:
+            future = after
+        self.command_targets.update(future)
 
     def incise(self, axes, dt):
         """
@@ -287,34 +356,55 @@ class ArmTeleop:
         self.tilt += clamp(tilt - self.tilt, -step, step)
         self.roll += clamp(roll * self.speed - self.roll, -step, step)
         before = {joint: self.targets[joint] for joint in kinematics.joints}
-        tip, pitch = kinematics.forward(before)
         if self.incision is None:
             # Selecting the group again is the documented way out of INCISION_LOST, and it
             # takes the tool's own tip as the new incision point. Clear that warning, and
             # only that one, so a later warning is never hidden by this.
-            self.incision = tip
+            self.incision = kinematics.forward(before)[0]
             if self.note == INCISION_LOST:
                 self.note, self.warning = '', False
-        offset = [a - b for a, b in zip(tip, self.incision)]
-        depth = sum(a * b for a, b in zip(offset, kinematics.axis(before)))
-        if math.sqrt(max(sum(a * a for a in offset) - depth * depth, 0.0)) > INCISION_TOLERANCE:
+        if self.incision_offset(before)[0] > INCISION_TOLERANCE:
             # The arm was re-enabled away from the incision point: never pull it back there.
             self.insert = self.tilt = self.roll = 0.0
             self.blocked = ['incision']
             self.note, self.warning = INCISION_LOST, True
             return
-        # Aim for the point on the new axis through the incision, at the new depth, so the
-        # incision never drifts off the axis.
-        target = [point + (depth + self.insert * dt) * direction for point, direction
-                  in zip(self.incision, kinematics.axis(before, pitch + self.tilt * dt))]
-        velocity = [(goal - now) / dt for goal, now in zip(target, tip)]
-        after, fraction, self.blocked = kinematics.jog(
-            before, velocity, self.tilt, self.roll, dt, self.limits, config.max_speed)
+        if not (self.insert or self.tilt or self.roll):
+            # Hold the pose exactly: solving for it again would only add rounding noise.
+            self.velocities.update(dict.fromkeys(kinematics.joints, 0.0))
+            return
+        after, fraction, self.blocked = self.incision_step(before, dt)
         self.insert, self.tilt, self.roll = (
             self.insert * fraction, self.tilt * fraction, self.roll * fraction)
         for joint in kinematics.joints:
             self.velocities[joint] = (after[joint] - before[joint]) / dt
             self.targets[joint] = after[joint]
+        if self.insert or self.tilt or self.roll:
+            # The next period's pose on the same path, so the axis still passes the incision.
+            future, _, _ = self.incision_step(after, config.period)
+        else:
+            future = after
+        self.command_targets.update(future)
+
+    def incision_offset(self, joints):
+        """Return how far the tool axis misses the incision point and the tip's depth past it."""
+        tip, _ = self.kinematics.forward(joints)
+        offset = [a - b for a, b in zip(tip, self.incision)]
+        depth = sum(a * b for a, b in zip(offset, self.kinematics.axis(joints)))
+        return math.sqrt(max(sum(a * a for a in offset) - depth * depth, 0.0)), depth
+
+    def incision_step(self, joints, dt):
+        """Step dt along the insert and tilt path through the incision, as kinematics.jog does."""
+        kinematics = self.kinematics
+        tip, pitch = kinematics.forward(joints)
+        _, depth = self.incision_offset(joints)
+        # Aim for the point on the new axis through the incision, at the new depth, so the
+        # incision never drifts off the axis.
+        target = [point + (depth + self.insert * dt) * direction for point, direction
+                  in zip(self.incision, kinematics.axis(joints, pitch + self.tilt * dt))]
+        velocity = [(goal - now) / dt for goal, now in zip(target, tip)]
+        return kinematics.jog(joints, velocity, self.tilt, self.roll, dt, self.limits,
+                              self.config.max_speed)
 
     def stick(self, axes, name):
         value = self.axis(axes, name)
@@ -325,7 +415,10 @@ class ArmTeleop:
 
     def trigger(self, axes, name):
         # game_controller_node triggers rest at 0 and reach -1 when fully pressed.
-        return clamp(-self.axis(axes, name), 0.0, 1.0)
+        magnitude = clamp(-self.axis(axes, name), 0.0, 1.0) - self.config.deadzone
+        if magnitude <= 0:
+            return 0.0
+        return min(magnitude / (1.0 - self.config.deadzone), 1.0)
 
     @staticmethod
     def axis(axes, name):

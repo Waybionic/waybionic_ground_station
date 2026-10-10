@@ -69,6 +69,20 @@ def test_insertion_slides_the_tip_along_the_tool_axis(teleop, arm):
     assert teleop.targets['joint_1'] == pytest.approx(start['joint_1'], abs=1e-9)
 
 
+def test_the_published_setpoint_is_one_period_ahead_through_the_incision(teleop, arm):
+    period = teleop.config.period
+    for _ in range(round(0.5 / DT)):
+        teleop.update(*sample(left_y=1.0, right_y=1.0), dict(teleop.targets), DT)
+        _, depth = through(arm, teleop.targets, teleop.incision)
+        distance, ahead = through(arm, teleop.command_targets, teleop.incision)
+        # The drives aim at the next period's pose, so it too passes the incision point.
+        assert distance < 1e-9
+        assert ahead - depth == pytest.approx(teleop.insert * period, abs=1e-9)
+        assert arm.forward(teleop.command_targets)[1] - arm.forward(teleop.targets)[1] == (
+            pytest.approx(teleop.tilt * period, abs=1e-9))
+    assert teleop.insert > 0 and teleop.tilt < 0
+
+
 def test_tilting_turns_the_tool_about_the_incision_point(teleop, arm):
     run(teleop, 1.2, left_y=1.0)
     run(teleop, 0.3)

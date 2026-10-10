@@ -5,6 +5,8 @@ import math
 
 from waybionic_teleop import mks_can
 
+MAX_STEP_S = 0.01
+
 
 def ramp_rpm_per_s(acc):
     """Return the manual's acceleration: 1 rpm every (256 - acc) * 50 us; None when acc is 0."""
@@ -57,12 +59,30 @@ class SimulatedServo:
             return 0
         self.speed = min(int.from_bytes(arguments[:2], 'big'), mks_can.MAX_SPEED_RPM)
         self.acc = arguments[2]
-        # Speed 0 is the manual's stop command: slow down with acc, or stop at once if acc is 0.
-        self.target = int.from_bytes(arguments[3:], 'big', signed=True) if self.speed else None
+        # F5 with speed 0 stops; acc 0 makes the stop immediate without releasing the shaft.
+        if not self.speed:
+            self.target = None
+            if not self.acc:
+                self.rpm = 0.0
+                return 2
+            return 1
+        self.target = int.from_bytes(arguments[3:], 'big', signed=True)
         return 1
 
     def step(self, dt):
         """Advance the motor by dt seconds and return any frames it sends unprompted."""
+        frames = []
+        # Short steps keep a long pause exact, and the heartbeat still sees all of it.
+        while dt > 0.0:
+            if self.target is None and not self.rpm:
+                self.quiet_ms += dt * 1000.0
+                break
+            part = min(dt, MAX_STEP_S)
+            frames += self._advance(part)
+            dt -= part
+        return frames
+
+    def _advance(self, dt):
         self.quiet_ms += dt * 1000.0
         if self.heartbeat_ms and self.quiet_ms > self.heartbeat_ms and (
                 self.target is not None or self.rpm):

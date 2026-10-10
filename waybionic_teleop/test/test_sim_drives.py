@@ -59,6 +59,31 @@ def test_heartbeat_stops_a_moving_motor_when_the_host_goes_quiet():
     assert (servo.heartbeat_stops, servo.rpm, servo.target) == (1, 0.0, None)
 
 
+def test_a_long_pause_still_trips_the_heartbeat():
+    servo = ready_servo()
+    servo.receive(mks_can.set_heartbeat(1, 500))
+    servo.receive(mks_can.absolute_axis(1, 100 * mks_can.COUNTS_PER_REV, 60, 0))
+    servo.step(2.0)
+    # The motor ran for the 500 ms the heartbeat allows, then stopped.
+    assert (servo.heartbeat_stops, servo.rpm, servo.target) == (1, 0.0, None)
+    assert servo.axis == pytest.approx(0.5 * mks_can.COUNTS_PER_REV, rel=0.05)
+
+
+def test_f5_stop_is_immediate_and_a_new_negative_target_rearms_the_drive():
+    servo = ready_servo()
+    assert servo.receive(mks_can.absolute_axis(1, 0x4000, 300, 0)) == [RUNNING]
+    run(servo, 0.05)
+    assert servo.rpm > 0.0 and servo.axis > 0.0
+    held = servo.axis
+    assert servo.receive(mks_can.absolute_axis(1, 0, 0, 0)) == [COMPLETE]
+    assert servo.enabled and servo.target is None and servo.rpm == 0.0
+    assert run(servo, 0.4) == []
+    assert servo.axis == held
+    assert servo.receive(mks_can.absolute_axis(1, -0x4000, 300, 0)) == [RUNNING]
+    run(servo, 0.05)
+    assert servo.target == -0x4000 and servo.rpm < 0.0 and servo.axis < held
+
+
 def test_bus_routes_replies_and_counts_bad_frames():
     bus = SimulatedBus([SimulatedServo(1), SimulatedServo(2)], 500000)
     bus.send(2, mks_can.read_encoder(2))

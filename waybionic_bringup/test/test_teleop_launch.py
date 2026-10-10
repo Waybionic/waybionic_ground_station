@@ -6,7 +6,7 @@ import time
 import unittest
 
 from ament_index_python.packages import get_package_share_directory
-from diagnostic_msgs.msg import DiagnosticArray
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 import launch
 from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -16,7 +16,7 @@ import pytest
 import rclpy
 from sensor_msgs.msg import JointState
 
-from waybionic_teleop import gamepad
+from waybionic_teleop import gamepad, mks_can
 
 PORT = 47391
 
@@ -67,9 +67,16 @@ class TestTeleop(unittest.TestCase):
 
         try:
             deadline = time.monotonic() + 30.0
-            while 'tool_grip' not in joints and time.monotonic() < deadline:
-                rclpy.spin_once(node, timeout_sec=0.1)
+            # Press Start only once teleop has loaded the robot description (the group row
+            # appears) and receives the controller, or the press is lost on a slow machine.
+            while time.monotonic() < deadline and not (
+                    'tool_grip' in joints and 'teleop.group' in diagnostics
+                    and diagnostics['teleop.input'].level == DiagnosticStatus.OK):
+                hold(0.1)
             self.assertIn('tool_grip', joints, 'the simulated drives never reported positions')
+            self.assertIn('teleop.group', diagnostics, 'teleop never loaded the robot description')
+            self.assertEqual(diagnostics['teleop.input'].level, DiagnosticStatus.OK,
+                             'teleop never received the controller packets')
             hold(1.0, left_x=1.0)
             self.assertAlmostEqual(joints['joint_1'], 0.0, places=3, msg='moved while disabled')
             hold(0.2, 'start')
@@ -84,9 +91,18 @@ class TestTeleop(unittest.TestCase):
             self.assertGreater(joints['tool_grip'], 0.3)
             hold(0.2, 'b')
             pitch = joints['joint_4']
-            hold(0.5, right_y=1.0)
+            hold(0.75, right_y=1.0)
             self.assertAlmostEqual(joints['joint_4'], pitch, places=2, msg='moved after B')
             self.assertEqual(diagnostics['teleop.state'].values[0].value, 'disabled')
+            for drive in ('base_yaw', 'shoulder', 'elbow', 'wrist_left', 'wrist_right', 'tool'):
+                values = {item.key: item.value for item in diagnostics[f'drive.{drive}'].values}
+                can_id = int(values['can_id'])
+                stop = mks_can.hex_frame(can_id, mks_can.absolute_axis(can_id, 0, 0, 0))
+                self.assertEqual(values['last_command'], stop, f'{drive} did not stop')
+            hold(0.2, 'start')
+            hold(0.9, right_y=1.0)
+            self.assertGreater(joints['joint_4'], pitch + 0.05, 'Start did not re-arm')
+            self.assertEqual(diagnostics['teleop.state'].values[0].value, 'enabled')
             self.assertEqual(diagnostics['can.bus'].level, b'\x00')
             self.assertEqual(diagnostics['drive.wrist_left'].level, b'\x00')
         finally:
