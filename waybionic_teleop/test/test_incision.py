@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from waybionic_teleop.collision import ArmCollision
 from waybionic_teleop.gamepad import AXES, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
@@ -15,6 +16,9 @@ LIMITS = {'joint_1': (-math.pi, math.pi), 'joint_2': (-1.5708, 1.5708),
 # The tool leaning forward and down, about 45 degrees from vertical.
 LEANING = {'joint_1': 0.3, 'joint_2': 0.4, 'joint_3': 1.2, 'joint_4': 0.8, 'joint_5': 0.0,
            'tool_grip': 0.0}
+# The tool leaning forward and down, its tip about 60 mm above the table.
+NEAR_TABLE = {'joint_1': 0.2, 'joint_2': 0.87, 'joint_3': 1.5, 'joint_4': -0.17, 'joint_5': 0.0,
+              'tool_grip': 0.0}
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
         / 'waybionic_arm.urdf').read_text(encoding='utf-8')
 DT = 1.0 / 120.0
@@ -156,6 +160,46 @@ def test_moving_into_a_joint_limit_sends_targets_within_the_urdf_limits(
         pytest.fail(f'{joint} never reached its limit')
     assert teleop.targets[joint] == pytest.approx(limits[joint][1], abs=1e-6)
     assert through(arm, teleop.targets, teleop.incision)[0] < 1e-6
+
+
+@pytest.mark.parametrize('into, back, contact', [
+    ({'left_y': 1.0}, {'left_y': -1.0}, 'tool_link: table'),
+    ({'right_y': -1.0}, {'right_y': 1.0}, 'tool_link: table'),
+    ({'right_y': 1.0}, {'right_y': -1.0}, 'forearm_link: table'),
+], ids=['insert', 'pivot_tool_down', 'pivot_forearm_down'])
+def test_an_incision_move_into_the_table_is_refused_but_backing_out_is_not(
+        parameters, arm, into, back, contact):
+    check = ArmCollision.from_urdf(URDF)
+    teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
+                       LIMITS, arm, check)
+    for button in ('start', 'y', 'y', 'y'):
+        teleop.update(*sample(button), NEAR_TABLE, DT)
+        teleop.update(*sample(), NEAR_TABLE, DT)
+    # With the tool 25 mm in, inserting further or pivoting either way reaches the table.
+    run(teleop, 1.0, left_y=1.0)
+    run(teleop, 0.3)
+    first = teleop.incision
+    stopped = False
+    for _ in range(round(3.0 / DT)):
+        before = dict(teleop.targets)
+        teleop.update(*sample(**into), dict(teleop.targets), DT)
+        assert check.hits(teleop.targets) == []
+        if contact in teleop.blocked:
+            stopped = True
+            # The whole step is undone, its published one-period lookahead included.
+            assert teleop.targets == teleop.command_targets == before
+            assert not any(teleop.velocities.values())
+            assert teleop.insert == teleop.tilt == teleop.roll == 0.0
+    # It stopped at the table, not short of it, and kept the incision point and group.
+    assert stopped and contact in ArmCollision.from_urdf(
+        URDF, clearance=check.clearance + 0.001).hits(teleop.targets)
+    assert teleop.active_group.name == 'incision' and teleop.incision == first
+    stopped_at = dict(teleop.targets)
+    for _ in range(round(0.5 / DT)):
+        teleop.update(*sample(**back), dict(teleop.targets), DT)
+        assert teleop.blocked == []
+    assert max(abs(teleop.targets[joint] - stopped_at[joint]) for joint in arm.joints) > 0.05
+    assert through(arm, teleop.targets, first)[0] < 1e-6
 
 
 def test_re_enabling_away_from_the_incision_point_moves_nothing(teleop, arm):
