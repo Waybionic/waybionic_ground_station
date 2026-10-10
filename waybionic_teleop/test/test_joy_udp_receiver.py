@@ -6,6 +6,7 @@ import socket
 import pytest
 import rclpy
 from rclpy.parameter import Parameter
+from sensor_msgs.msg import JoyFeedback
 
 from waybionic_teleop import gamepad
 from waybionic_teleop.joy_udp_receiver import JoyUdpReceiver
@@ -89,3 +90,22 @@ def test_oversize_packets_are_rejected(receiver, joys, send):
     assert receiver.rejected == 2 and not joys
     send(packet)
     assert len(joys) == 1
+
+
+def test_rumble_goes_back_to_the_bridge_until_its_link_times_out(receiver):
+    bridge = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    rumble = JoyFeedback(type=JoyFeedback.TYPE_RUMBLE, id=0, intensity=0.6)
+    try:
+        bridge.sendto(gamepad.pack(1, *NEUTRAL), receiver.socket.getsockname())
+        assert select.select([receiver.socket], [], [], 2.0)[0], 'the packet never arrived'
+        receiver.poll()
+        receiver.on_feedback(rumble)
+        assert select.select([bridge], [], [], 2.0)[0], 'the rumble never came back'
+        assert gamepad.unpack_rumble(bridge.recv(64)) == pytest.approx(0.6)
+        receiver.last_packet -= receiver.timeout + 0.01
+        receiver.poll()
+        assert receiver.sender is None
+        receiver.on_feedback(rumble)
+        assert not select.select([bridge], [], [], 0.2)[0], 'rumble sent over a timed-out link'
+    finally:
+        bridge.close()

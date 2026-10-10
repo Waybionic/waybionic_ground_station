@@ -78,6 +78,9 @@ class JoyUdpReceiver(Node):
             message.header.frame_id = 'joy'
             self.joy_publisher.publish(message)
             self.published += 1
+        if self.sender is not None and time.monotonic() - self.last_packet > self.timeout:
+            # The bridge has gone; its port may now belong to another program.
+            self.sender = None
 
     def on_feedback(self, message):
         if message.type != JoyFeedback.TYPE_RUMBLE or message.id != 0 or self.sender is None:

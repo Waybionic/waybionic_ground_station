@@ -1,5 +1,8 @@
 """The Windows bridge must send exactly what game_controller_node would publish."""
 
+import select
+import socket
+
 import pytest
 
 from waybionic_teleop import gamepad, xinput_bridge
@@ -7,6 +10,23 @@ from waybionic_teleop import gamepad, xinput_bridge
 
 def pressed(buttons):
     return [gamepad.BUTTONS[index] for index, value in enumerate(buttons) if value]
+
+
+@pytest.fixture
+def sockets():
+    """Return the bridge socket, the ground station's socket and another program's socket."""
+    opened = [socket.socket(socket.AF_INET, socket.SOCK_DGRAM) for _ in range(3)]
+    for sock in opened:
+        sock.bind(('127.0.0.1', 0))
+    opened[0].setblocking(False)
+    yield opened
+    for sock in opened:
+        sock.close()
+
+
+def rumble_from(sock, bridge, intensity):
+    sock.sendto(gamepad.pack_rumble(intensity), bridge.getsockname())
+    assert select.select([bridge], [], [], 2.0)[0], 'the rumble request never arrived'
 
 
 def test_sticks_are_positive_left_and_up():
@@ -39,3 +59,23 @@ def test_bridge_output_fits_the_packet():
 def test_rumble_drives_both_motors(intensity, speed):
     motors = xinput_bridge.vibration(intensity)
     assert (motors.left_motor, motors.right_motor) == (speed, speed)
+
+
+def test_only_the_ground_station_address_can_rumble_the_controller(sockets):
+    bridge, station, stranger = sockets
+    rumble_from(stranger, bridge, 1.0)
+    assert xinput_bridge.read_rumble(bridge, station.getsockname()) is None
+    rumble_from(stranger, bridge, 1.0)
+    rumble_from(station, bridge, 0.5)
+    assert xinput_bridge.read_rumble(bridge, station.getsockname()) == pytest.approx(0.5)
+
+
+def test_a_flood_of_rumble_requests_is_read_a_few_per_update(sockets):
+    bridge, station, _ = sockets
+    count = 2 * xinput_bridge.MAX_READS
+    for index in range(1, count + 1):
+        rumble_from(station, bridge, index / 100)
+    for update in range(1, 3):
+        intensity = xinput_bridge.read_rumble(bridge, station.getsockname())
+        assert intensity == pytest.approx(update * xinput_bridge.MAX_READS / 100)
+    assert xinput_bridge.read_rumble(bridge, station.getsockname()) is None

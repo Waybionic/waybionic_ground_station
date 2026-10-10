@@ -18,6 +18,8 @@ from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS, pack, unpack_rumble
 ERROR_SUCCESS = 0
 # game_controller_node rumbles for a second per request unless told to stop; so does this.
 RUMBLE_S = 1.0
+# Replies read per update; a flood waits for later updates instead of stalling the controller.
+MAX_READS = 8
 XINPUT_BUTTONS = {
     0x0001: 'dpad_up', 0x0002: 'dpad_down', 0x0004: 'dpad_left', 0x0008: 'dpad_right',
     0x0010: 'start', 0x0020: 'back', 0x0040: 'left_stick', 0x0080: 'right_stick',
@@ -51,6 +53,23 @@ def vibration(intensity):
     """Return both motors at the same speed for an intensity between 0 and 1."""
     speed = round(min(max(intensity, 0.0), 1.0) * 65535)
     return XInputVibration(left_motor=speed, right_motor=speed)
+
+
+def read_rumble(sock, receiver):
+    """Return the newest rumble intensity that the receiver address sent, or None."""
+    intensity = None
+    for _ in range(MAX_READS):
+        try:
+            data, sender = sock.recvfrom(64)
+        except OSError:
+            break
+        if sender != receiver:
+            continue
+        try:
+            intensity = unpack_rumble(data)
+        except ValueError:
+            continue
+    return intensity
 
 
 def to_joy(gamepad):
@@ -96,6 +115,8 @@ def main():
                         help='XInput controller slot (default: first connected)')
     args = parser.parse_args()
     get_state, set_state = load_xinput()
+    # Replies come from the address packets go to; nothing else may rumble the controller.
+    receiver = (socket.gethostbyname(args.host), args.port)
     sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sender.setblocking(False)
     state = XInputState()
@@ -122,21 +143,14 @@ def main():
             axes, buttons = to_joy(state.gamepad) if active is not None else neutral
             sequence += 1
             try:
-                sender.sendto(pack(sequence, axes, buttons, active is not None),
-                              (args.host, args.port))
+                sender.sendto(pack(sequence, axes, buttons, active is not None), receiver)
             except BlockingIOError:
                 pass
             # The ground station answers on the same socket when the arm stops at a limit.
-            while True:
-                try:
-                    intensity = unpack_rumble(sender.recvfrom(64)[0])
-                except ValueError:
-                    continue
-                except OSError:
-                    break
-                if active is not None:
-                    set_state(active, ctypes.byref(vibration(intensity)))
-                    rumble_until = started + RUMBLE_S if intensity > 0 else None
+            intensity = read_rumble(sender, receiver)
+            if intensity is not None and active is not None:
+                set_state(active, ctypes.byref(vibration(intensity)))
+                rumble_until = started + RUMBLE_S if intensity > 0 else None
             if rumble_until is not None and started >= rumble_until:
                 if active is not None:
                     set_state(active, ctypes.byref(vibration(0.0)))
