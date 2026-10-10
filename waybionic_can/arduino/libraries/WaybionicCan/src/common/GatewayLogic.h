@@ -10,8 +10,8 @@ namespace waybionic
 
 enum class NodeHealth : uint8_t
 {
-  kUnknown,  // never asked, or asked and still within the reply timeout
-  kOnline,   // answered its latest request
+  kUnknown,  // no reply has been received yet and no request has timed out
+  kOnline,   // answered before and no pending request has timed out
   kOffline,  // a request went unanswered for longer than the reply timeout
 };
 
