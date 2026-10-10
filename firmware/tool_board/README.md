@@ -103,9 +103,12 @@ controller.
 
 The clamp model defines the tool's joints. Once it exists, replace the `tool`
 placeholder in `waybionic_teleop/config/arm_drives.yaml` (CAN ID 6, with no hardware
-behind it) with the four motors as drives with CAN IDs 7 to 10. The arm's own drives
+behind it) with the four motors as drives with CAN IDs 7 to 10, and remove `tool_grip`
+from `unmodeled_joints`, or the drive node refuses to start. The arm's own drives
 are IDs 1 to 5. The host waits for every listed drive to answer before it publishes
 joint states, and zeroing fails while one is silent, so the placeholder must not stay.
+Keep the tool joints' URDF limits inside this board's travel limits: the host treats a
+move that stops at an end limit (status 3) as a fault and stops every drive.
 Polling all nine drives at 120 Hz uses a little under half of the 1 Mbit/s bus.
 
 The tool's CAN IDs are provisional until the team settles them. To change them, edit
