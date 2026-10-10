@@ -1,6 +1,6 @@
 # Camera System Design (First Prototype Recommendations)
 - [Specific Camera Needs](#specific-camera-needs)
-- [Electrial Requirements](#electrical-requirements)
+- [Electrical Requirements](#electrical-requirements)
 - [Mechanical Requirements](#mechanical-requirements)
 - [Benchtop Testing](#benchtop-testing)
 - [ROS2 Topic Name Proposals](#ros2-topic-name-proposal)
@@ -33,7 +33,7 @@
 | Power Input | **5V** via USB-C |
 | Power Consumption | Typical Average: **<2.0W**, Max Average: <2.5W, Max Peak Average: <6.5W |
 | Cable/Connector | **1 - 1.5m** in length |
-| CPU needed | **qual-core, 2.9GHz** |
+| CPU needed | **quad-core, 2.9GHz** |
 | RAM needed | **4GB** |
 
 ## Mechanical Requirements
@@ -48,7 +48,7 @@
 | **Occlusion Risks** | View may be blocked or impacted by the tools of the arm. This needs to be considered in mounting position and arm movement. | Since the camera is so small, tools may have a bigger impact on the occlusion |
 | **Cable Routing** | Similar to motors on the arm | Similar to the motors on the arm |
 | **Lighting Conditions** | Must be able to handle very harsh light | Must work in darker areas (with light mounted?)|
-| **Mounting** | A removeable mount may be helpful for maintenance purpose | Directly attatched to arm |
+| **Mounting** | A removeable mount may be helpful for maintenance purpose | Directly attached  to arm |
 
 > \* for personnel who are NOT scrubbed in... not sure if this applies for our robot
 
@@ -99,9 +99,9 @@ Then, we should note down:
 
 For long term, a **GigE** camera would be best due to its ability to send camera feeds over long distances. It has low latency and is relatively easier to implement compared to the MIPI CSI cameras. ROS2 also has drivers that are compatible with many GigE cameras.
 
-**Stereo Camera**: Stereo cameras on the market are generally very small and are automatically synchronized. With this type of camera, the placement of the camera only needs to be considered if we are using two seperate cameras to make a stereo camera (which is harder than buying an already stereoscopic camera)
+**Stereo Camera**: Stereo cameras on the market are generally very small and are automatically synchronized. With this type of camera, the placement of the camera only needs to be considered if we are using two separate cameras to make a stereo camera (which is harder than buying an already stereoscopic camera)
 
-**Endoscopic Camera**: Endoscopic cameras would be very helpful for seeing closer internal footage. With this camera, we would need to decide how exaxtly we are going to implement this tool with the rest of the robotic arm. For a short-term target, it might not be possible to add this as endoscopic cameras can get expensive... but would be good to implement for a long-term project.
+**Endoscopic Camera**: Endoscopic cameras would be very helpful for seeing closer internal footage. With this camera, we would need to decide how exactly we are going to implement this tool with the rest of the robotic arm. For a short-term target, it might not be possible to add this as endoscopic cameras can get expensive... but would be good to implement for a long-term project.
 
 ## Component Shortlist 
 > Note: (TBD when mechanical gets back to us with more concrete materials needed)
