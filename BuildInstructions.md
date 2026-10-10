@@ -400,8 +400,18 @@ Finally, tick **Doctor View** in RViz's Displays panel.
   the display.
 - **Full delay:** point the camera at a millisecond stopwatch on the same screen as
   RViz, then compare the live stopwatch with the one in the Doctor View.
-- **Logging each frame:** add `camera_log:=/tmp/camera.csv` to log every frame's
-  capture time, arrival time and delay.
+- **Logging each frame:** add `camera_log:=` with a CSV path to the launch command to
+  log every frame's capture time, arrival time and delay. `frame` counts the frames
+  that arrived, so a dropped frame shows as a longer gap in `captured_s`. With native
+  ROS, any path works, such as `camera_log:=/tmp/camera.csv`. In Docker, `--rm`
+  deletes the container and its files when it stops, so log to a Windows folder
+  mounted into the container instead. This writes `camera.csv` to `camera-logs` in
+  your user folder:
+
+  ```powershell
+  & "$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin\docker.exe" compose run --rm --build -p 127.0.0.1:47310:47310 -v "$HOME\camera-logs:/camera-logs" wslg ros2 launch waybionic_bringup ground_station.launch.py camera:=true camera_bind:=0.0.0.0 camera_log:=/camera-logs/camera.csv
+  ```
+
 - **Clocks:** the bridge stamps frames with the camera computer's clock, so the two
   clocks must agree. Docker Desktop keeps them within a few milliseconds. If the
   delay looks negative or keeps growing after the PC sleeps, restart Docker Desktop.
