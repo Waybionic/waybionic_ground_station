@@ -369,8 +369,9 @@ passes through that point, whether you insert it, withdraw it or tilt it, and th
 return to the zero pose is off so the tool is never dragged sideways through the
 incision. With five joints, the tool can only tilt in the arm's vertical plane:
 tilting sideways about the incision point would need a sixth joint. If the arm is
-re-enabled with the tool no longer through the incision point, the group stops
-rather than pull it back; select the group again to set a new incision point.
+re-enabled with the tool axis passing within 2 mm of the incision point, the point
+moves onto the axis instead of the arm moving. Further away, the group stops rather
+than pull the tool back; select the group again to set a new incision point.
 
 The current arm URDF has provisional joint limits and no collision boxes. Cartesian moves
 have no table, base or self-collision protection or verified escape path. The simulated

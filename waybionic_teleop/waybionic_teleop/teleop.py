@@ -241,6 +241,8 @@ class ArmTeleop:
         self.stop_cartesian()
         self.wait_for_center = False
         self.enabled, self.note, self.warning = True, '', False
+        if self.active_group.mode == 'incision' and self.incision is not None:
+            self.align_incision()
 
     def disable(self, measured, note, warning=False):
         self.enabled, self.note, self.warning = False, note, warning
@@ -392,6 +394,16 @@ class ArmTeleop:
         offset = [a - b for a, b in zip(tip, self.incision)]
         depth = sum(a * b for a, b in zip(offset, self.kinematics.axis(joints)))
         return math.sqrt(max(sum(a * a for a in offset) - depth * depth, 0.0)), depth
+
+    def align_incision(self):
+        """Move the incision point, never the arm, onto the tool axis; False if it is too far."""
+        miss, depth = self.incision_offset(self.targets)
+        if miss > INCISION_TOLERANCE:
+            return False
+        tip, _ = self.kinematics.forward(self.targets)
+        self.incision = tuple(point - depth * direction for point, direction
+                              in zip(tip, self.kinematics.axis(self.targets)))
+        return True
 
     def incision_step(self, joints, dt):
         """Step dt along the insert and tilt path through the incision, as kinematics.jog does."""

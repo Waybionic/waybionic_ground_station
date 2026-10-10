@@ -37,6 +37,16 @@ def through(arm, joints, point):
     return math.sqrt(max(sum(a * a for a in offset) - along * along, 0.0)), -along
 
 
+def shifted(arm, joints, distance):
+    """Return joints that move the tool sideways by distance, parallel to its own axis."""
+    tip, pitch = arm.forward(joints)
+    yaw = joints['joint_1']
+    # Square to the tool axis, in the arm's vertical plane.
+    side = (math.cos(yaw) * math.cos(pitch), math.sin(yaw) * math.cos(pitch), -math.sin(pitch))
+    position = [a + distance * b for a, b in zip(tip, side)]
+    return {**joints, **arm.inverse(position, pitch, joints['joint_5'], joints, LIMITS)}
+
+
 @pytest.fixture
 def arm():
     return ArmKinematics.from_urdf(URDF)
@@ -133,6 +143,27 @@ def test_re_enabling_away_from_the_incision_point_moves_nothing(teleop, arm):
     run(teleop, 0.5, left_y=1.0)
     assert teleop.targets == pytest.approx(moved, abs=1e-9)
     assert teleop.blocked == ['incision'] and 'press Y' in teleop.note
+
+
+def test_re_enabling_a_little_off_the_incision_point_moves_the_point_not_the_arm(teleop, arm):
+    run(teleop, 1.0, left_y=1.0)
+    run(teleop, 0.3)
+    first = teleop.incision
+    teleop.update(*sample('b'), dict(teleop.targets), DT)
+    teleop.update(*sample(), dict(teleop.targets), DT)
+    # While disabled, the tool ends up 1.5 mm to the side of the incision point.
+    moved = shifted(arm, teleop.targets, 0.0015)
+    teleop.update(*sample('start'), moved, DT)
+    run(teleop, 0.5)
+    assert teleop.enabled and teleop.targets == moved and not teleop.warning
+    distance, _ = through(arm, moved, teleop.incision)
+    assert distance < 1e-9
+    assert math.dist(teleop.incision, first) == pytest.approx(0.0015, abs=1e-9)
+    # Inserting then slides along the tool's own axis, with no step sideways onto the old one.
+    tip = arm.forward(moved)[0]
+    teleop.update(*sample(left_y=1.0), dict(teleop.targets), DT)
+    assert 0 < math.dist(arm.forward(teleop.targets)[0], tip) < 1e-4
+    assert through(arm, teleop.targets, teleop.incision)[0] < 1e-9
 
 
 def test_selecting_the_group_again_sets_a_new_incision_point(teleop, arm):
