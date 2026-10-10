@@ -340,17 +340,25 @@ Press **Ctrl+C** in each window to stop.
 
 Start is refused until the sticks are centred and the triggers and motion buttons released;
 after Y changes groups with motion held, the new group waits until the controls are neutral.
-The simulated drives accept complete finite joint commands only after receiving a valid
-URDF and a fresh teleop enable. A host pause past the 500 ms drive heartbeat stops the
-simulated servos; teleop must be disabled and Start released and pressed again before
-motion resumes. The diagnostics panel shows the command gate, teleop state, each joint,
-each drive's last CAN frame and the simulated bus load.
+Stick and trigger movement inside the 15% deadzone is ignored, so a trigger that does not
+fully return does not move the tool. The simulated drives accept complete finite joint
+commands only after receiving a valid URDF and a fresh teleop enable, which teleop repeats
+on every update. If the enable stops for 0.5 s (for example because teleop stopped), the
+drives stop. A host pause past the 500 ms drive heartbeat also stops the simulated servos.
+In both cases teleop must be disabled and Start released and pressed again before motion
+resumes. The diagnostics panel shows the command gate, teleop state, each joint, each
+drive's last CAN frame and the simulated bus load.
+
+When the bridge reports that the controller disconnected, every control is released once,
+so the arm slows to a stop. After 0.5 s without controller input, teleop disables and holds
+the arm where it is. Reconnect the controller and press Start to continue.
 
 The Cartesian group computes its next setpoint with the same limit-aware solver used for
-the current tool-tip pose. The simulated drives are assigned speeds for a common nominal
-arrival time, with tracking error from encoder quantization and acceleration. Tilt moves
-the shoulder, elbow and wrist around the tool tip. Roll counters spin about the tool axis;
-a downward-pointing blade retains its heading in this model.
+the current tool-tip pose. Diagonal moves are limited to the same 50 mm/s as moves along
+one axis. The simulated drives are assigned speeds for a common nominal arrival time, with
+tracking error from encoder quantization and acceleration. Tilt moves the shoulder, elbow
+and wrist around the tool tip. Roll counters spin about the tool axis; a downward-pointing
+blade retains its heading in this model.
 
 The current arm URDF has provisional joint limits and no collision boxes. Cartesian moves
 have no table, base or self-collision protection or verified escape path. The simulated
@@ -362,17 +370,24 @@ In simulation, a zero-velocity joint command (including B and controller timeout
 sends an MKS F5 frame with zero speed and zero acceleration to each moving drive.
 An out-of-range encoder target stops all drives instead of updating only part of
 the arm. The placeholder drive speed is capped at 300 RPM; the MKS manual warns
-against immediate software stops above 1000 RPM. This checks simulated behavior
-only. Do not connect powered drives or treat it as a hardware E-stop test; drive
+against immediate software stops above 1000 RPM. Each drive also runs no faster
+than 1.5 times its commanded speed plus 1 RPM, and teleop never advances its
+targets by more than two updates at once, so after a pause the drives do not catch
+up faster than the teleop speed limits. This checks simulated behavior only. Do
+not connect powered drives or treat it as a hardware E-stop test; drive
 identities, wiring, zeroing and electrical safety still need hardware verification.
 
 The RViz camera follows the tool as the arm moves; drag to orbit and scroll to zoom
 as usual, or add `follow_camera:=false` to the launch command for a fixed view.
 
-If the arm stops responding and the bridge's axis values stop changing while you
-move the sticks, Windows has stopped updating the controller. Turn the controller
-off and on (or unplug and replug it), then press Start again; the bridge
-reconnects by itself.
+If the arm stops responding or keeps moving after you release the sticks, and the
+bridge's axis values stop changing while you move them, Windows has stopped
+updating the controller. The bridge keeps sending the last state it read, so the
+controller cannot stop the arm, not even with B. Press **Ctrl+C** in the bridge
+window; with no controller input, teleop disables and holds the arm after the
+0.5 s input timeout. Turn the controller off and on (or unplug and replug it),
+start the bridge again and press Start. Real drives need a stop that does not
+depend on the controller.
 
 ## Native Ubuntu Setup for RViz
 
