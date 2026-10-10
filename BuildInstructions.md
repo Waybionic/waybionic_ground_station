@@ -430,12 +430,14 @@ ros2 service call /sim_arm_drives/zero std_srvs/srv/Trigger
 Then press Start. Real drives take commands through the same gate as the simulated ones.
 If a drive stops answering, for example because the E-stop cut its power, or its encoder
 count jumps further than `max_rpm` allows between two readings, as after a brief power
-loss, every drive stops and the arm must be zeroed again. The same happens when a drive reports a failed
-move (as when its stall protection releases the motor) or an end-limit stop, or stays more
-than `following_error_counts` from its target for `following_error_ticks` ticks; both are
-provisional values in `arm_drives.yaml`. If the joint commands stop for 0.5 s, every drive
-stops where it is, and if the host stops, the drives' heartbeat stops them. After any stop,
-disable teleop and press Start again.
+loss, every drive stops and the arm must be zeroed again. The same happens when a drive
+reports a failed move (as when its stall protection releases the motor) or an end-limit
+stop, or stays more than `following_error_counts` from its target for
+`following_error_ticks` ticks; both are provisional values in `arm_drives.yaml`. If the
+joint commands stop for 0.5 s, every drive stops where it is, and if the host stops, the
+drives' heartbeat stops them. A stop frame the adapter refuses is sent again on every
+tick, and Start is refused until it has gone out. After any stop, disable teleop and press
+Start again.
 
 **Without hardware.** `mks_drive_sim` answers on a CAN interface the way the drives
 do, so the host can be tested end to end over a virtual CAN interface on Linux:

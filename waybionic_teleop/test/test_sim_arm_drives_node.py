@@ -337,6 +337,35 @@ def test_a_drive_that_restarts_between_polls_is_set_up_and_zeroed_again(node):
     assert not node.authorized
 
 
+def test_a_stop_the_interface_refuses_is_sent_again_until_it_goes_out(node, monkeypatch):
+    ready(node)
+    node.on_command(command(node, joint_1=1.0))
+    advance(node)
+    base = node.bus.drives[1]
+    assert base.target is not None
+    send, refusing = node.bus.send, [True]
+
+    def full(can_id, data):
+        # The adapter's transmit queue has no room for the stop frame.
+        if refusing[0] and data == mks_can.stop(can_id, 0):
+            return False
+        return send(can_id, data)
+    monkeypatch.setattr(node.bus, 'send', full)
+    node.on_enabled(Bool(data=False))
+    for _ in range(3):
+        advance(node)
+        assert base.target is not None and node.stopping == {0}
+    # The encoder polls still reach the drive, so its own heartbeat never stops it.
+    assert base.heartbeat_stops == 0
+    node.on_enabled(Bool(data=True))
+    assert not node.authorized
+    refusing[0] = False
+    advance(node)
+    assert not node.stopping and base.target is None and base.rpm == 0.0
+    node.on_enabled(Bool(data=True))
+    assert node.authorized
+
+
 @pytest.mark.parametrize('timeout', [0.0, -0.5, math.inf])
 def test_the_enable_timeout_must_be_positive_and_finite(monkeypatch, parameters, timeout):
     monkeypatch.setenv('ROS_AUTOMATIC_DISCOVERY_RANGE', 'OFF')

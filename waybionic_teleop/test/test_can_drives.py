@@ -318,7 +318,9 @@ def test_a_drive_that_stops_answering_stops_the_arm_until_it_is_zeroed_again(mak
     assert all(servo.target is None for servo in node.bus.drives.values())
 
     node.bus.drives[3] = elbow
-    assert spin_until(executor, lambda: not node.lost[2] and node.state[2] == 'ready')
+    assert spin_until(executor, lambda: not node.lost[2] and not node.unconfirmed[2])
+    # The stop it missed while silent went out once it answered again.
+    assert not node.stopping and elbow.target is None
     spin_for(executor, QUIET_BEFORE_ZERO_S)
     assert node.commanded is None
     press_start(node)

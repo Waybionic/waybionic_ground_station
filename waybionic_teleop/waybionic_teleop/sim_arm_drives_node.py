@@ -118,6 +118,8 @@ class SimArmDrives(Node):
         self.setup_time = [None] * len(drives)
         self.state = ['starting'] * len(drives)
         self.sent = [None] * len(drives)
+        # Drives whose stop frame the interface has not accepted yet.
+        self.stopping = set()
         # Ticks in a row each drive has been more than following_error from its target.
         self.behind = [0] * len(drives)
         self.heartbeat_stops = [0] * len(drives)
@@ -228,7 +230,7 @@ class SimArmDrives(Node):
             self.disarm('Teleop disabled')
             self.awaiting_release = False
         elif (not self.awaiting_release and self.description_valid and all(self.zeroed)
-              and not any(self.unconfirmed) and None not in self.counts
+              and not any(self.unconfirmed) and not self.stopping and None not in self.counts
               and self.feedback_fresh(now)):
             if not self.authorized:
                 self.commanded = self.map.to_positions(self.counts)
@@ -298,6 +300,7 @@ class SimArmDrives(Node):
                 self.get_logger().warning(
                     f'No joint command for {self.command_timeout:.1f} s; every drive is stopped')
         self.check_replies()
+        self.send_stops()
         if dt >= self.heartbeat_s:
             self.disarm('Host paused past the drive heartbeat', require_release=True)
         else:
@@ -361,13 +364,19 @@ class SimArmDrives(Node):
     def stop_drives(self):
         """Stop every drive with the manual's F5 zero-speed, zero-acceleration frame."""
         self.velocities.clear()
-        for index, drive in enumerate(self.map.drives):
-            if self.sent[index] == (None, 0):
-                continue
+        self.stopping.update(index for index, sent in enumerate(self.sent) if sent != (None, 0))
+        self.send_stops()
+
+    def send_stops(self):
+        # A refused stop goes out again on every tick, as the encoder polls keep the drive's
+        # heartbeat from stopping it.
+        for index in sorted(self.stopping):
+            drive = self.map.drives[index]
             data = mks_can.stop(drive.can_id, 0)
-            self.bus.send(drive.can_id, data)
-            self.sent[index] = (None, 0)
-            self.last_command[index] = mks_can.hex_frame(drive.can_id, data)
+            if self.bus.send(drive.can_id, data):
+                self.stopping.discard(index)
+                self.sent[index] = (None, 0)
+                self.last_command[index] = mks_can.hex_frame(drive.can_id, data)
 
     def send_targets(self):
         try:
