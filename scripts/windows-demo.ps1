@@ -80,3 +80,5 @@ try {
         Stop-Process -Id $bridge.Id
     }
 }
+# With -File, PowerShell exits with 0 unless told otherwise; windows-demo.cmd pauses on failure.
+exit $LASTEXITCODE
