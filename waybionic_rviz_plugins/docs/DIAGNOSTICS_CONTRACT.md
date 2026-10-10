@@ -54,7 +54,9 @@ Other rows can remain `OK` while these fault rows generate visible alerts.
 
 ## Safety and Power Interface
 
-The simulated safety source and the future carrier-board publisher share these interfaces:
+The simulated safety source and carrier-board firmware share these interfaces. Keep the names,
+types, and value encodings stable so teleop and RViz can use either source without configuration
+changes.
 
 | Signal | ROS topic | Type | Diagnostics row | Unit |
 | --- | --- | --- | --- | --- |
@@ -62,12 +64,29 @@ The simulated safety source and the future carrier-board publisher share these i
 | Motor supply voltage | `/waybionic/power/motor_supply_voltage` | `std_msgs/msg/Float32` | `power.motor_supply_voltage` | `V` |
 | Age since last report | `/waybionic/safety/last_report_age` | `std_msgs/msg/Float32` | `safety.last_report_age` | `s` |
 
-The E-stop row uses `OK` with value `released` and `ERROR` with value `pressed`. The simulator
-can be toggled with `std_srvs/srv/SetBool` at `/waybionic/safety/emergency_stop/set`. Its
-default 24 V supply reading is only placeholder data; no hardware threshold is defined here.
-The report-age value is elapsed seconds since the previous report. The carrier-board node
-should publish the same topic names, types, and diagnostics row names so it can replace the
-simulator without changing consumers.
+Publish a `diagnostic_msgs/msg/DiagnosticArray` on `/diagnostics` (or the configured diagnostics
+topic) containing one `DiagnosticStatus` for each row above. Each status must use the table's
+exact `name` and include `KeyValue` entries with keys `value` and `unit`. Use these E-stop
+encodings:
+
+| Diagnostic row | Level | `value` | `unit` | `message` |
+| --- | --- | --- | --- | --- |
+| `safety.emergency_stop` released | `OK` | `released` | empty string | empty string |
+| `safety.emergency_stop` pressed | `ERROR` | `pressed` | empty string | `Emergency stop is pressed` |
+| `power.motor_supply_voltage` | `OK` when reported normally | decimal voltage, e.g. `24.0` | `V` | May state that the reading/limits are provisional |
+| `safety.last_report_age` | `OK` when reports are current; use `STALE` when report health is stale | elapsed seconds as a decimal string | `s` | Explain a non-OK/stale condition |
+
+Publish the direct E-stop Bool with `false` for released and `true` for pressed. Use transient-local
+durability (latched state) so late-joining teleop nodes receive the latest state. Publish state
+changes promptly and refresh the diagnostics/report-age data periodically; consumers treat status
+older than their configured timeout as stale. `last_report_age` is elapsed seconds since the
+previous safety/power report.
+
+The simulator can be toggled with `std_srvs/srv/SetBool` at
+`/waybionic/safety/emergency_stop/set`; this is a simulator test service, not a required carrier
+board firmware service. The simulator's default 24 V reading is placeholder data. Voltage limits
+and fault thresholds are not defined yet: report the measured value, but do not infer `WARN` or
+`ERROR` from voltage until hardware limits are agreed.
 
 ## ROS 2 Diagnostics Mapping
 
