@@ -13,11 +13,12 @@ from rclpy._rclpy_pybind11 import RCLError
 from rclpy.parameter import Parameter
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, String
+from std_srvs.srv import Trigger
 
 from waybionic_teleop import joy_udp_receiver, mks_can, sim_arm_drives_node, xbox_teleop_node
 from waybionic_teleop.gamepad import AXES, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
-from waybionic_teleop.sim_arm_drives_node import REPLY_TIMEOUT_S, SimArmDrives
+from waybionic_teleop.sim_arm_drives_node import QUIET_BEFORE_ZERO_S, REPLY_TIMEOUT_S, SimArmDrives
 from waybionic_teleop.sim_drives import SimulatedServo
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
@@ -335,6 +336,45 @@ def test_a_drive_that_restarts_between_polls_is_set_up_and_zeroed_again(node):
     node.on_enabled(Bool(data=False))
     node.on_enabled(Bool(data=True))
     assert not node.authorized
+
+
+def test_zeroing_waits_until_teleop_stops_streaming_to_an_arm_that_lost_its_zero(node):
+    ready(node)
+    held = command(node, joint_1=0.3, joint_2=0.3)
+    node.on_command(held)
+    advance(node)
+    # The E-stop cuts power to every drive, so none answers and none keeps its zero.
+    servos = list(node.bus.drives)
+    node.bus.drives.clear()
+    for _ in range(2 * node.max_unanswered):
+        # Teleop stays enabled and keeps streaming the targets it had before the loss.
+        node.on_enabled(Bool(data=True))
+        node.on_command(held)
+        advance(node)
+    assert all(node.lost) and not any(node.zeroed) and not node.authorized
+    # Power returns, and someone puts the arm back in the zero pose by hand.
+    node.bus.drives.update((can_id, SimulatedServo(can_id)) for can_id in servos)
+    for _ in range(3):
+        node.on_enabled(Bool(data=True))
+        node.on_command(held)
+        advance(node)
+    assert not any(node.lost)
+    # However long that takes, every command teleop streams restarts the quiet interval.
+    node.command_time -= QUIET_BEFORE_ZERO_S
+    node.on_command(held)
+    response = node.on_zero(Trigger.Request(), Trigger.Response())
+    assert not response.success and 'still arriving' in response.message
+    assert not any(node.zeroed)
+    # Once the commands stop for QUIET_BEFORE_ZERO_S, the arm can be zeroed, and the old
+    # targets still need a fresh Start before they move it.
+    node.command_time -= QUIET_BEFORE_ZERO_S
+    assert node.on_zero(Trigger.Request(), Trigger.Response()).success
+    assert all(node.zeroed)
+    node.on_enabled(Bool(data=True))
+    node.on_command(held)
+    advance(node)
+    assert not node.authorized
+    assert all(servo.target is None for servo in node.bus.drives.values())
 
 
 def test_a_stop_the_interface_refuses_is_sent_again_until_it_goes_out(node, monkeypatch):

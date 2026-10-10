@@ -123,11 +123,12 @@ def check_config(config):
 class ArmTeleop:
     """Hold joint targets and move them with the active group's sticks while enabled."""
 
-    def __init__(self, config, limits, kinematics=None):
-        """Take the config, {joint: (lower, upper)} radians and optional ArmKinematics."""
+    def __init__(self, config, limits, kinematics=None, collision=None):
+        """Take the config, {joint: (lower, upper)} radians, ArmKinematics and ArmCollision."""
         check_config(config)
         self.config = config
         self.kinematics = kinematics
+        self.collision = collision
         # Without kinematics for this arm, the Cartesian groups are left out.
         self.groups = [group for group in config.groups
                        if group.mode != 'cartesian' or kinematics is not None]
@@ -247,6 +248,7 @@ class ArmTeleop:
         self.command_targets = dict(self.targets)
         desired = dict.fromkeys(self.limits, 0.0)
         self.blocked = []
+        before = dict(self.targets)
         if homing:
             self.stop_cartesian()
             for joint, (lower, upper) in self.limits.items():
@@ -281,6 +283,30 @@ class ArmTeleop:
             self.targets[joint], self.velocities[joint] = target, velocity
             self.command_targets[joint] = clamp(
                 target + velocity * config.period, min(lower, target), max(upper, target))
+        self.avoid_collisions(before)
+
+    def avoid_collisions(self, before):
+        """Undo this step's arm motion if it would take a link into the table or the base."""
+        if self.collision is None:
+            return
+        intrusions = self.collision.check(self.targets)
+        if not intrusions:
+            return
+        # Backing out of a collision is allowed, but every contact has to be measured on its
+        # own: a total would let one link press further in while another one pulls clear.
+        # The relative slack, for depths and volumes alike, is rounding noise, not a margin.
+        was = self.collision.check(before)
+        worse = [hit for hit, amount in intrusions.items()
+                 if amount > was.get(hit, 0.0) * (1.0 + 1e-9)]
+        if not worse:
+            return
+        for joint, position in before.items():
+            if joint != self.config.tool_joint:
+                # Revert the published lookahead too, so no command continues into the contact.
+                self.targets[joint] = self.command_targets[joint] = position
+                self.velocities[joint] = 0.0
+        self.stop_cartesian()
+        self.blocked += worse
 
     def jog(self, axes, dt):
         """Move the tool tip along a straight line set by the sticks, or tilt the tool about it."""

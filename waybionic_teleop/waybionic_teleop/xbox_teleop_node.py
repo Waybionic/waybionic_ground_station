@@ -19,6 +19,7 @@ from sensor_msgs.msg import JointState, Joy
 from std_msgs.msg import Bool, String
 from visualization_msgs.msg import Marker, MarkerArray
 
+from waybionic_teleop.collision import ArmCollision
 from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
@@ -46,6 +47,8 @@ class XboxTeleop(Node):
             raise ValueError('input_timeout_s must be positive and finite')
         self.tool_frame = params['tool_frame']
         self.base_frame = params['base_frame']
+        self.table_height = float(params.get('table_height', 0.0))
+        self.clearance = float(params.get('collision_clearance', 0.01))
         self.teleop = None
         self.problem = 'Waiting for robot_description'
         self.joy = None
@@ -80,6 +83,10 @@ class XboxTeleop(Node):
         joints = {joint for group in self.config.groups for joint in group.joints}
         try:
             limits = joint_limits(message.data, joints)
+            # The collision boxes are the only thing keeping the arm off the table and out of
+            # its own base, so a description without them leaves teleop off rather than
+            # running it unprotected.
+            collision = ArmCollision.from_urdf(message.data, self.table_height, self.clearance)
         except ValueError as error:
             self.teleop, self.problem = None, str(error)
             self.get_logger().error(f'Teleop disabled: {error}')
@@ -90,7 +97,7 @@ class XboxTeleop(Node):
             kinematics = None
             self.get_logger().warning(f'Cartesian group unavailable: {error}')
         try:
-            self.teleop = ArmTeleop(self.config, limits, kinematics)
+            self.teleop = ArmTeleop(self.config, limits, kinematics, collision)
         except ValueError as error:
             self.teleop, self.problem = None, str(error)
             self.get_logger().error(f'Teleop disabled: {error}')

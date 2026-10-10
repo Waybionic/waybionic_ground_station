@@ -361,8 +361,8 @@ tracking error from encoder quantization and acceleration. Tilt moves the should
 and wrist around the tool tip. Roll counters spin about the tool axis; a downward-pointing
 blade retains its heading in this model.
 
-The current arm URDF has provisional joint limits and no collision boxes. Cartesian moves
-have no table, base or self-collision protection or verified escape path. The simulated
+The current arm URDF has provisional joint limits, and the collision checks below model
+each link as a box; they have been tested with simulated drives only. The simulated
 CAN map is not a powered-arm safety case. Do not change a wrist bound or operate powered
 motors until Mechanical identifies the URDF joint and measures signed travel from upright
 zero, including any cable or gear stop.
@@ -377,6 +377,27 @@ targets by more than two updates at once, so after a pause the drives do not cat
 up faster than the teleop speed limits. This checks simulated behavior only. Do
 not connect powered drives or treat it as a hardware E-stop test; drive
 identities, wiring, zeroing and electrical safety still need hardware verification.
+
+Every group stops a move before any part of the arm comes within 10 mm of the
+table or folds into the arm's own base. The checks use a box around each link,
+which you can see by ticking **Collision Enabled** on RViz's RobotModel display.
+The tool's box is a placeholder around the RViz jaws, which reach 30 mm past
+`tool_link`, until the real tool is modelled; a longer tool needs a longer box.
+When a move stops, the diagnostics panel names the part, for example
+`At limit: forearm_link: table`. If the arm stands on a raised mount, set
+`table_height` in `waybionic_teleop/config/xbox_teleop.yaml` to the table's height
+above the bottom of the base. `collision_clearance` in the same file sets the 10 mm
+margin. If the arm is already touching something, the only moves still allowed are
+the ones that back out of it: a move that presses any contact further in is
+refused, even if it would ease another contact at the same time.
+
+The boxes are what makes any of this work. A `robot_description` without a
+collision box for the base, shoulder, upper arm, forearm, wrist, wrist roll or tool
+leaves teleop disabled, and the diagnostics panel names the missing links.
+A description reload while teleop is enabled disables teleop and holds the arm where
+it is, and the drives stop on any `robot_description` change, so Start has to be
+released and pressed again under the new model. This path has been tested with
+simulated drives; powered hardware has not been tested.
 
 The RViz camera follows the tool as the arm moves; drag to orbit and scroll to zoom
 as usual, or add `follow_camera:=false` to the launch command for a fixed view.
