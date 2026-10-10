@@ -89,9 +89,12 @@ their headless tests. A build or test failure fails the Docker build. The first
 build downloads ROS and Qt dependencies; later builds can reuse cached layers.
 Rebuild after source changes because this image contains a snapshot of the source.
 
-[CI](.github/workflows/ros2_build_test.yml) runs this Compose test build on native
-x86-64 and ARM64 Linux runners. A passing container build does not verify RViz
-windows, camera access, USB devices, GPU acceleration, or networking with a robot.
+[CI](.github/workflows/ros2_build_test.yml) builds and tests on native x86-64
+and ARM64 Linux runners for pull requests, including stacked PRs. Existing
+stacked target branches with the old main-only event filter must pick up this
+workflow from main before they receive these checks. A passing container
+build does not verify RViz windows, camera access, USB devices, GPU
+acceleration, or networking with a robot.
 
 #### Headless Demo
 
@@ -161,13 +164,37 @@ frozen dependency lock. Keep the built image when reproducing a problem; record
 its identifier with:
 
 ```console
-docker image inspect waybionic-ground-station:jazzy --format '{{.Id}}'
+docker image inspect ghcr.io/waybionic/waybionic_ground_station:jazzy --format '{{.Id}}'
 ```
 
-CI currently builds and tests images; it does not publish a shared development
-image. Sharing an immutable, verified project image is a follow-up once the
-container build has been validated. Base-image updates must pass both CI
-architectures before adoption.
+After a successful push-to-main build on both native runners, CI publishes
+one x86-64/ARM64 image index from the digests returned by the tested image
+pushes. It tags the index with the commit's short hash, and also as
+`ghcr.io/waybionic/waybionic_ground_station:jazzy` if that commit is still the
+newest on main. Publish builds don't reuse the registry cache. Pull requests
+build and test with read-only tokens and do not publish.
+
+Tags are mutable. For a reproducible run, record the image index digest
+shown by:
+
+```console
+docker buildx imagetools inspect ghcr.io/waybionic/waybionic_ground_station:jazzy
+```
+
+Before the first successful main publish, there is no shared cache. GHCR may
+keep the first package private. An owner must make it public for anonymous
+pulls and cache imports; otherwise users need package read access and
+`docker login ghcr.io`. Push jobs also require package write access, which
+read-only PR checks cannot verify. Once the image is readable, local builds
+can reuse dependency layers. To run main without building, pull and start:
+
+```console
+docker compose pull demo
+docker compose up demo
+```
+
+Build your branch (`docker compose up --build demo`) to test your own changes.
+Base-image updates must pass both CI architectures before adoption.
 
 The default container configuration is **headless**. For RViz, use the Linux GUI or
 Windows WSLg demo below, or a native path. Do not add privileged containers or broad
@@ -541,52 +568,174 @@ source ~/waybionic_ws/install/setup.bash
 
 ## macOS (Apple Silicon)
 
-The workspace runs natively through RoboStack. Docker and XQuartz are not required.
-Intel macOS is not currently verified.
+The workspace runs natively through RoboStack. Docker and XQuartz are not
+required. Intel macOS is not verified.
 
-### Prerequisites
+### First-time setup
 
-Install the Xcode command-line tools, Git, and Miniforge:
+1. Install the prerequisites:
 
-```bash
-xcode-select --install
-brew install git
-brew install --cask miniforge
-```
+   ```bash
+   xcode-select --install
+   brew install git
+   brew install --cask miniforge
+   conda init "$(basename "$SHELL")"
+   ```
 
-Reopen the terminal if `mamba` or `conda` is not immediately available.
+   If Homebrew is missing, install it from [brew.sh](https://brew.sh/) first.
+   If Xcode reports that its tools are already installed, continue.
 
-### Setup and launch
+2. Close Terminal, open a new Terminal window, and verify Miniforge:
 
-For a new clone, run:
+   ```bash
+   mamba --version
+   ```
 
-```bash
-git clone https://github.com/Waybionic/waybionic_ground_station.git && cd waybionic_ground_station && ./scripts/macos.sh setup
-```
+3. Clone the repository:
 
-For an existing clone, run `./scripts/macos.sh setup` from the repository root.
-The command creates or updates the `waybionic_robostack` environment and builds
-the workspace.
+   ```bash
+   mkdir -p ~/waybionic
+   cd ~/waybionic
+   git clone https://github.com/Waybionic/waybionic_ground_station.git
+   cd waybionic_ground_station
+   ```
 
-Launch RViz and Joint State Publisher GUI:
+   For an existing clone, skip the clone commands and change to that
+   repository's root directory.
+
+4. Create the RoboStack environment and build the workspace:
+
+   ```bash
+   ./scripts/macos.sh setup
+   ```
+
+   Wait for `Setup complete` before continuing.
+
+### Launch
+
+From the repository root, run:
 
 ```bash
 ./scripts/macos.sh launch
 ```
 
-Other useful commands:
+Keep this Terminal window open. Within a few seconds:
+
+- The RViz splash screen is replaced by the main window.
+- `DiagnosticsPanel` displays **WayBionic Engineering Monitor** and
+  **Current State: NORMAL**.
+- Joint State Publisher displays the `joint_1` to `joint_5` sliders. Move them
+  to check base yaw, shoulder, elbow, wrist pitch, and wrist roll.
+
+To stop the application, return to the launch Terminal and press
+<kbd>Control</kbd>+<kbd>C</kbd>.
+
+Always use `scripts/macos.sh`. It selects the macOS SDK and Cyclone DDS and
+loads the workspace correctly. Do not source `install/setup.bash` from zsh or
+replace the helper with direct `colcon` or `ros2 launch` commands.
+
+`setup` installs Cyclone DDS explicitly. Builds pass the selected SDK to
+CMake as `CMAKE_OSX_SYSROOT`; an existing `CONDA_BUILD_SYSROOT` takes precedence
+over `xcrun --show-sdk-path`.
+
+### Verify ROS nodes
+
+While the application is running, open a second Terminal, change to the
+repository root, and run:
 
 ```bash
-./scripts/macos.sh build                 # rebuild the workspace
-./scripts/macos.sh run ros2 topic list   # run any overlaid ROS command
+RMW_IMPLEMENTATION=rmw_cyclonedds_cpp ./scripts/macos.sh run ros2 node list
 ```
 
-After pulling repository changes, update and rebuild with:
+The output must include:
+
+```text
+/joint_state_publisher
+/robot_state_publisher
+/rviz2
+```
+
+### Update or rebuild
+
+After pulling repository changes:
 
 ```bash
-git pull && ./scripts/macos.sh setup
+git pull
+./scripts/macos.sh setup
 ```
 
-If RViz reports a missing workspace package, rerun `./scripts/macos.sh build`.
-Do not source `install/setup.bash` directly from zsh; the helper handles the
-workspace overlay through Bash.
+To rebuild without updating the environment:
+
+```bash
+./scripts/macos.sh build
+```
+
+### Troubleshooting
+
+Run these commands from the repository root. After applying a fix, use the
+single command in the **Launch** section.
+
+#### `mamba` is not found
+
+Close and reopen Terminal. If `mamba --version` still fails, reinstall
+Miniforge and reopen Terminal again:
+
+```bash
+brew reinstall --cask miniforge
+```
+
+#### Setup cannot solve the environment or reports missing ROS tools
+
+Use this for `Could not solve for environment specs`, `colcon: not found`,
+`xacro: not found`, or a missing Joint State Publisher.
+
+First confirm that `waybionic_robostack` appears in:
+
+```bash
+mamba env list
+```
+
+If it exists, repair and rebuild it:
+
+```bash
+mamba install --yes --name waybionic_robostack --freeze-installed \
+  --channel conda-forge --channel robostack-jazzy \
+  colcon-common-extensions ros-jazzy-xacro \
+  ros-jazzy-joint-state-publisher-gui
+./scripts/macos.sh build
+```
+
+If the environment does not exist, rerun the first-time setup command instead.
+
+#### CMake reports a missing OpenGL framework header
+
+If the error names
+`/System/Library/Frameworks/OpenGL.framework/Headers`, update and rebuild:
+
+```bash
+git pull
+./scripts/macos.sh build
+```
+
+#### RViz remains on `Initializing`
+
+Stop the application with <kbd>Control</kbd>+<kbd>C</kbd>, remove any Fast DDS
+override, and use the launch command above:
+
+```bash
+unset RMW_IMPLEMENTATION
+```
+
+#### `DiagnosticsPanel` reports `_PyExc_RuntimeError`
+
+Stop the application, clean the plugin's CMake cache, and rebuild it:
+
+```bash
+./scripts/macos.sh run colcon build \
+  --packages-select waybionic_rviz_plugins \
+  --cmake-clean-cache --symlink-install \
+  --cmake-args "-DCMAKE_OSX_SYSROOT=${CONDA_BUILD_SYSROOT:-$(xcrun --show-sdk-path)}"
+```
+
+The panel should display **WayBionic Engineering Monitor** after the next
+launch.
