@@ -11,7 +11,11 @@ INCISION_AXES = ('insert', 'pivot', 'roll')
 MOVES = {'cartesian': CARTESIAN_AXES, 'incision': INCISION_AXES}
 # How far the tool axis may pass from the incision point before the incision group stops.
 INCISION_TOLERANCE = 0.002
-INCISION_LOST = 'The tool is off the incision point; press Y to choose the incision group again'
+# A tip past the incision point by more than solver rounding is inside the body.
+INSERTED = 1e-9
+INCISION_LOST = ('The tool is off the incision point; press Y, withdraw it in another group, '
+                 'then choose the incision group again')
+INCISION_HELD = 'The tool is inserted; withdraw it to the incision point before pressing Y'
 
 
 def clamp(value, low, high):
@@ -162,6 +166,8 @@ class ArmTeleop:
         self.insert = 0.0
         # Where the tool enters the body: the tip position when the incision group took over.
         self.incision = None
+        # Whether the tool was out of the body when it last left the incision group.
+        self.withdrawn = True
         self.held = set()
         self.wait_for_center = False
         self.blocked = []
@@ -192,12 +198,7 @@ class ArmTeleop:
         if 'enable' in pressed:
             self.enable(measured, axes)
         if 'group' in pressed:
-            self.group = (self.group + 1) % len(self.groups)
-            self.stop_cartesian()
-            self.velocities = dict.fromkeys(self.limits, 0.0)
-            self.command_targets = dict(self.targets)
-            self.wait_for_center = True
-            self.incision = None
+            self.change_group()
         if 'faster' in pressed:
             self.level = min(self.level + 1, len(self.config.speed_levels) - 1)
         if 'slower' in pressed:
@@ -213,6 +214,27 @@ class ArmTeleop:
             self.note, self.warning = '', False
         self.move(axes, self.config.buttons['home'] in held, dt)
         return True
+
+    def change_group(self):
+        """Select the next group, unless the tool is inserted through the incision point."""
+        if self.active_group.mode == 'incision' and self.incision is not None:
+            miss, depth = self.incision_offset(self.targets)
+            if miss <= INCISION_TOLERANCE and depth > INSERTED:
+                # The other groups, and going home, could drag the tool sideways in the incision.
+                self.note, self.warning = INCISION_HELD, True
+                return
+            self.withdrawn = depth <= INSERTED
+        self.group = (self.group + 1) % len(self.groups)
+        self.stop_cartesian()
+        self.velocities = dict.fromkeys(self.limits, 0.0)
+        self.command_targets = dict(self.targets)
+        self.wait_for_center = True
+        if self.active_group.mode == 'incision' and self.incision is not None:
+            withdrawn = self.withdrawn or self.incision_offset(self.targets)[1] <= INSERTED
+            # Keep the incision point while the tool axis still passes it. Otherwise only a
+            # withdrawn tool takes a new one, at its tip; one still inside stays stopped.
+            if not self.align_incision() and withdrawn:
+                self.incision = None
 
     def motion_input_held(self, axes):
         config = self.config
@@ -365,12 +387,15 @@ class ArmTeleop:
             self.incision = kinematics.forward(before)[0]
             if self.note == INCISION_LOST:
                 self.note, self.warning = '', False
-        if self.incision_offset(before)[0] > INCISION_TOLERANCE:
-            # The arm was re-enabled away from the incision point: never pull it back there.
+        miss, depth = self.incision_offset(before)
+        if miss > INCISION_TOLERANCE:
+            # Re-enabled or reselected away from the incision point: never pull it back there.
             self.insert = self.tilt = self.roll = 0.0
             self.blocked = ['incision']
             self.note, self.warning = INCISION_LOST, True
             return
+        if self.note == INCISION_HELD and depth <= INSERTED:
+            self.note, self.warning = '', False
         if not (self.insert or self.tilt or self.roll):
             # Hold the pose exactly: solving for it again would only add rounding noise.
             self.velocities.update(dict.fromkeys(kinematics.joints, 0.0))

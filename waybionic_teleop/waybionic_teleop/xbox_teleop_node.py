@@ -242,7 +242,8 @@ class XboxTeleop(Node):
             cartesian = group.mode == 'cartesian'
             hint = 'B stops, Y switches group, A holds to go home'
             if group.mode == 'incision':
-                hint = 'Tilt stays in the arm plane; going home is off here; B stops, Y switches'
+                hint = ('Tilt stays in the arm plane; going home is off here; B stops; '
+                        'Y switches once the tool is withdrawn')
             note = teleop.note or ('At limit: ' + ', '.join(teleop.blocked) if teleop.blocked
                                    else ('LB moves along one axis; ' if cartesian else '') + hint)
             speed = (f'{1000.0 * teleop.linear_speed:.1f} mm/s' if group.mode != 'joint'

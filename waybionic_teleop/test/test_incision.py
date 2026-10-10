@@ -29,6 +29,11 @@ def run(teleop, seconds, *pressed, **axes):
         teleop.update(*sample(*pressed, **axes), dict(teleop.targets), DT)
 
 
+def press(teleop, button):
+    teleop.update(*sample(button), dict(teleop.targets), DT)
+    teleop.update(*sample(), dict(teleop.targets), DT)
+
+
 def through(arm, joints, point):
     """Return how far point is from the tool axis, and how deep the tip is past it."""
     tip, _ = arm.forward(joints)
@@ -166,32 +171,76 @@ def test_re_enabling_a_little_off_the_incision_point_moves_the_point_not_the_arm
     assert through(arm, teleop.targets, teleop.incision)[0] < 1e-9
 
 
-def test_selecting_the_group_again_sets_a_new_incision_point(teleop, arm):
+def test_y_keeps_the_incision_group_until_the_tool_is_withdrawn(teleop, arm):
     run(teleop, 1.0, left_y=1.0)
     run(teleop, 0.3)
-    first = teleop.incision
+    first, inserted = teleop.incision, dict(teleop.targets)
     for _ in range(len(teleop.groups)):
-        teleop.update(*sample('y'), dict(teleop.targets), DT)
-        teleop.update(*sample(), dict(teleop.targets), DT)
+        press(teleop, 'y')
+    assert teleop.active_group.name == 'incision' and teleop.incision == first
+    assert teleop.warning and 'withdraw' in teleop.note
+    run(teleop, 0.5, 'a')
+    assert teleop.targets == inserted
+    # Withdrawing the tip out of the incision clears the warning and frees Y.
+    run(teleop, 1.5, left_y=-1.0)
+    run(teleop, 0.3)
+    assert through(arm, teleop.targets, first)[1] < 0 and not teleop.warning
+    press(teleop, 'y')
+    assert teleop.active_group.name == 'base'
+    # The tool axis still passes the incision point, so choosing the group again keeps it.
+    for _ in range(len(teleop.groups) - 1):
+        press(teleop, 'y')
+    assert teleop.active_group.name == 'incision'
+    assert teleop.incision == pytest.approx(first, abs=1e-12)
+
+
+def test_a_stopped_arm_keeps_the_incision_group_while_the_tool_is_inserted(teleop):
+    run(teleop, 1.0, left_y=1.0)
+    run(teleop, 0.3)
+    press(teleop, 'b')
+    press(teleop, 'y')
+    assert teleop.active_group.name == 'incision' and 'withdraw' in teleop.note
+
+
+def test_a_withdrawn_tool_moved_elsewhere_takes_a_new_incision_point(teleop, arm):
+    first = teleop.incision
+    press(teleop, 'y')
+    assert teleop.active_group.name == 'base'
+    run(teleop, 0.5, left_x=1.0)
+    run(teleop, 0.3)
+    for _ in range(len(teleop.groups) - 1):
+        press(teleop, 'y')
     assert teleop.active_group.name == 'incision'
     assert math.dist(teleop.incision, first) > 0.02
     assert teleop.incision == pytest.approx(arm.forward(teleop.targets)[0])
 
 
-def test_choosing_the_group_again_clears_the_incision_warning(teleop, arm):
+def test_choosing_the_group_again_sets_a_new_point_only_once_the_tool_is_withdrawn(teleop, arm):
     run(teleop, 1.0, left_y=1.0)
     run(teleop, 0.3)
-    teleop.update(*sample('b'), dict(teleop.targets), DT)
-    teleop.update(*sample(), dict(teleop.targets), DT)
+    first = teleop.incision
+    press(teleop, 'b')
+    # While stopped, the arm swings forward: the tool goes deeper in, off the incision point.
     moved = {**teleop.targets, 'joint_2': teleop.targets['joint_2'] + 0.1}
     teleop.update(*sample('start'), moved, DT)
     teleop.update(*sample(), moved, DT)
     run(teleop, 0.1, left_y=1.0)
     assert teleop.warning and 'press Y' in teleop.note
-    # The documented way out: select the incision group again to set a new incision point.
+    assert through(arm, moved, first)[1] > 0.02
+    # With the tool still inside, choosing the group again keeps the incision point.
     for _ in range(len(teleop.groups)):
-        teleop.update(*sample('y'), dict(teleop.targets), DT)
-        teleop.update(*sample(), dict(teleop.targets), DT)
+        press(teleop, 'y')
+    run(teleop, 0.1, left_y=1.0)
+    assert teleop.active_group.name == 'incision' and teleop.incision == first
+    assert teleop.blocked == ['incision'] and teleop.warning
+    assert teleop.targets == pytest.approx(moved, abs=1e-9)
+    # The documented way out: withdraw the tool in another group, then choose the group again.
+    press(teleop, 'y')
+    run(teleop, 0.5, left_y=-1.0)
+    run(teleop, 0.3)
+    assert through(arm, teleop.targets, first)[1] < 0
+    for _ in range(len(teleop.groups) - 1):
+        press(teleop, 'y')
     assert teleop.active_group.name == 'incision'
     run(teleop, 1.0, left_y=1.0)
     run(teleop, 0.3)
