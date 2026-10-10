@@ -3,8 +3,9 @@ import os
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch.conditions import IfCondition
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import (
     AndSubstitution, Command, EqualsSubstitution, LaunchConfiguration, NotSubstitution,
     OrSubstitution)
@@ -89,6 +90,18 @@ def generate_launch_description():
     use_sim_time_arg = DeclareLaunchArgument(
         'use_sim_time', default_value='false',
         description='Use simulation time')
+
+    camera_arg = DeclareLaunchArgument(
+        'camera', default_value='false',
+        description='Show the doctor view sent by camera_bridge and report its delay')
+
+    camera_bind_arg = DeclareLaunchArgument(
+        'camera_bind', default_value='127.0.0.1',
+        description='Address the camera receiver listens on (0.0.0.0 inside Docker)')
+
+    camera_log_arg = DeclareLaunchArgument(
+        'camera_log', default_value='',
+        description='CSV file for each camera frame: capture time, arrival time and delay')
 
     launch_rviz_arg = DeclareLaunchArgument(
         'launch_rviz', default_value='true',
@@ -190,7 +203,19 @@ def generate_launch_description():
         ]
     )
 
-    # Demo mode and teleop report on /diagnostics, so the panel listens to live diagnostics.
+    camera = LaunchConfiguration('camera')
+    camera_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(
+            get_package_share_directory('waybionic_camera'), 'launch', 'camera.launch.py')),
+        condition=IfCondition(camera),
+        launch_arguments={
+            'bind_address': LaunchConfiguration('camera_bind'),
+            'log_csv': LaunchConfiguration('camera_log'),
+            'diagnostics_topic': LaunchConfiguration('diagnostics_topic'),
+        }.items()
+    )
+
+    # Demo mode, teleop and the camera report on /diagnostics, so the panel listens to them.
     rviz_node = Node(
         package='rviz2', executable='rviz2', name='rviz2', output='screen',
         arguments=['-d', LaunchConfiguration('rvizconfig')],
@@ -198,7 +223,8 @@ def generate_launch_description():
         parameters=[
             {'use_sim_time': LaunchConfiguration('use_sim_time')},
             {'use_mock_diagnostics': AndSubstitution(
-                LaunchConfiguration('use_mock_diagnostics'), NotSubstitution(simulated_joints))},
+                LaunchConfiguration('use_mock_diagnostics'),
+                NotSubstitution(OrSubstitution(simulated_joints, camera)))},
             {'diagnostics_topic': LaunchConfiguration('diagnostics_topic')}
         ]
     )
@@ -206,8 +232,9 @@ def generate_launch_description():
     return LaunchDescription([
         model_arg, use_mock_diag_arg, diag_topic_arg, start_temp_pub_arg,
         use_jsp_gui_arg, demo_mode_arg, demo_speed_arg, teleop_arg, joy_source_arg,
-        joy_udp_bind_arg, joy_udp_port_arg, follow_camera_arg, use_sim_time_arg,
+        joy_udp_bind_arg, joy_udp_port_arg, follow_camera_arg, use_sim_time_arg, camera_arg,
+        camera_bind_arg, camera_log_arg,
         launch_rviz_arg, rviz_config_arg, file_check, rsp_node, jsp_gui_node, joint_demo_node,
         joy_node, joy_udp_node, teleop_node, drives_node, camera_follower_node,
-        temp_diag_pub_node, rviz_node
+        temp_diag_pub_node, camera_launch, rviz_node
     ])

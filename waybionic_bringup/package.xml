@@ -27,6 +27,7 @@
   <exec_depend>tf2_ros_py</exec_depend>
   <exec_depend>joy</exec_depend>
   <exec_depend>waybionic_teleop</exec_depend>
+  <exec_depend>waybionic_camera</exec_depend>
 
   <test_depend>ament_cmake_ros</test_depend>
   <test_depend>ament_lint_auto</test_depend>

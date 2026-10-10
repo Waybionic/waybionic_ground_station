@@ -354,6 +354,56 @@ move the sticks, Windows has stopped updating the controller. Turn the controlle
 off and on (or unplug and replug it), then press Start again; the bridge
 reconnects by itself.
 
+## Doctor View Camera
+
+Until the doctor's camera is chosen, a USB webcam stands in for it. `camera_bridge`
+captures the webcam on the computer it is plugged into and sends JPEG frames to the
+ground station, each stamped with its capture time. The ground station publishes
+them on `/doctor_view/left/image_raw/compressed` with `/doctor_view/left/camera_info`.
+The diagnostics panel's `camera.doctor_view` entry shows the frame rate and the delay
+from capture to arrival: mean, minimum, maximum and jitter.
+
+**Windows (Docker):** first install OpenCV for the bridge with
+`python -m pip install opencv-python`. Then start the ground station with the camera
+port, from the repository root:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin\docker.exe" compose run --rm --build -p 127.0.0.1:47310:47310 wslg ros2 launch waybionic_bringup ground_station.launch.py camera:=true camera_bind:=0.0.0.0
+```
+
+In a second PowerShell window, start the bridge from the repository root:
+
+```powershell
+cd waybionic_camera
+python -m waybionic_camera.camera_bridge
+```
+
+Finally, tick **Doctor View** in RViz's Displays panel.
+
+**Bridge options:**
+
+- `--camera 1` uses another camera.
+- `--width 1280 --height 720` changes the resolution.
+- On Windows, `--backend dshow` often opens a webcam faster.
+
+**Linux (native ROS):** run
+`ros2 launch waybionic_bringup ground_station.launch.py camera:=true`. Then, from
+`waybionic_camera`, run `python3 -m waybionic_camera.camera_bridge`; it needs
+`python3-opencv`.
+
+**Measuring the delay.**
+
+- **What the reported delay covers:** from when OpenCV hands the bridge a frame to
+  when the frame reaches ROS. It leaves out the time spent inside the camera and on
+  the display.
+- **Full delay:** point the camera at a millisecond stopwatch on the same screen as
+  RViz, then compare the live stopwatch with the one in the Doctor View.
+- **Logging each frame:** add `camera_log:=/tmp/camera.csv` to log every frame's
+  capture time, arrival time and delay.
+- **Clocks:** the bridge stamps frames with the camera computer's clock, so the two
+  clocks must agree. Docker Desktop keeps them within a few milliseconds. If the
+  delay looks negative or keeps growing after the PC sleeps, restart Docker Desktop.
+
 ## Native Ubuntu Setup for RViz
 
 Only follow this section if you need ROS and RViz outside the container. It is
