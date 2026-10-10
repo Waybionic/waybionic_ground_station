@@ -326,7 +326,7 @@ Press **Ctrl+C** in each window to stop.
 | --- | --- |
 | Start (Xbox Menu button, three lines) | Enable or disable; the arm starts disabled |
 | B | Stop and hold the current pose |
-| Y | Switch group: base (joints 1-3), upper (joints 2-5) or Cartesian (tool tip) |
+| Y | Switch group: base (joints 1-3), upper (joints 2-5), Cartesian (tool tip) or incision |
 | Base group: left stick | Base yaw (left/right) and shoulder (up/down) |
 | Base group: right stick up/down | Elbow |
 | Upper group: left stick | Shoulder (left/right) and elbow (up/down) |
@@ -335,9 +335,12 @@ Press **Ctrl+C** in each window to stop.
 | Cartesian group: right stick | Tool roll (left/right) and tool tip up/down |
 | Cartesian group: LB (hold) | Move along one axis only: the stick direction pushed furthest |
 | Cartesian group: D-pad left/right | Tilt the tool about its tip; the tip stays still |
+| Incision group: left stick up/down | Insert or withdraw the tool along its own axis |
+| Incision group: right stick up/down | Tilt the tool about the incision point |
+| Incision group: right stick left/right | Tool roll |
 | RT / LT | Close / open the placeholder end effector |
-| D-pad up/down | Speed: 10, 25, 50 or 100% of 60 deg/s, or of 50 mm/s and 30 deg/s of tilt in the Cartesian group |
-| A (hold) | Return to the zero pose |
+| D-pad up/down | Speed: 10, 25, 50 or 100% of 60 deg/s, or of 50 mm/s and 30 deg/s of tilt in the Cartesian and incision groups |
+| A (hold) | Return to the zero pose (not in the incision group) |
 
 Start is refused until the sticks are centred and the triggers and motion buttons released;
 after Y changes groups with motion held, the new group waits until the controls are neutral.
@@ -360,6 +363,21 @@ one axis. The simulated drives are assigned speeds for a common nominal arrival 
 tracking error from encoder quantization and acceleration. Tilt moves the shoulder, elbow
 and wrist around the tool tip. Roll counters spin about the tool axis; a downward-pointing
 blade retains its heading in this model.
+
+The incision group is for working through a keyhole. The incision point is where the
+tip was when you selected the group, shown as a pink dot in RViz. The tool always
+passes through that point, whether you insert it, withdraw it or tilt it, and the
+return to the zero pose is off so the tool is never dragged sideways through the
+incision. With five joints, the tool can only tilt in the arm's vertical plane:
+tilting sideways about the incision point would need a sixth joint.
+
+Y does not leave the incision group while the tool is inserted past the incision
+point; withdraw it first. Selecting the group again keeps the incision point while
+the tool axis still passes within 2 mm of it, and otherwise sets a new one at the tip.
+If the arm is re-enabled with the tool axis passing within 2 mm of the incision point,
+the point moves onto the axis instead of the arm moving. Further away, the group stops
+rather than pull the tool back: press Y, withdraw the tool in another group, then
+select the incision group again to set a new incision point.
 
 The current arm URDF has provisional joint limits, and the collision checks below model
 each link as a box; they have been tested with simulated drives only. The simulated
