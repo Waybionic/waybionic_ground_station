@@ -19,6 +19,7 @@ from sensor_msgs.msg import JointState, Joy
 from std_msgs.msg import Bool, String
 from visualization_msgs.msg import Marker, MarkerArray
 
+from waybionic_teleop.collision import ArmCollision
 from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
@@ -46,6 +47,8 @@ class XboxTeleop(Node):
             raise ValueError('input_timeout_s must be positive and finite')
         self.tool_frame = params['tool_frame']
         self.base_frame = params['base_frame']
+        self.table_height = float(params.get('table_height', 0.0))
+        self.clearance = float(params.get('collision_clearance', 0.01))
         self.teleop = None
         self.problem = 'Waiting for robot_description'
         self.joy = None
@@ -80,6 +83,10 @@ class XboxTeleop(Node):
         joints = {joint for group in self.config.groups for joint in group.joints}
         try:
             limits = joint_limits(message.data, joints)
+            # The collision boxes are the only thing keeping the arm off the table and out of
+            # its own base, so a description without them leaves teleop off rather than
+            # running it unprotected.
+            collision = ArmCollision.from_urdf(message.data, self.table_height, self.clearance)
         except ValueError as error:
             self.teleop, self.problem = None, str(error)
             self.get_logger().error(f'Teleop disabled: {error}')
@@ -90,7 +97,7 @@ class XboxTeleop(Node):
             kinematics = None
             self.get_logger().warning(f'Cartesian group unavailable: {error}')
         try:
-            self.teleop = ArmTeleop(self.config, limits, kinematics)
+            self.teleop = ArmTeleop(self.config, limits, kinematics, collision)
         except ValueError as error:
             self.teleop, self.problem = None, str(error)
             self.get_logger().error(f'Teleop disabled: {error}')
@@ -213,6 +220,16 @@ class XboxTeleop(Node):
         label.color.r, label.color.g, label.color.b, label.color.a = (
             (0.5, 1.0, 0.5, 1.0) if enabled else (1.0, 0.8, 0.3, 1.0))
         markers.markers.append(label)
+        incision = self.teleop.incision if self.teleop.active_group.mode == 'incision' else None
+        point = Marker(ns='incision', id=0, type=Marker.SPHERE,
+                       action=Marker.ADD if incision else Marker.DELETE)
+        point.header.frame_id = self.base_frame
+        point.pose.orientation.w = 1.0
+        if incision:
+            point.pose.position.x, point.pose.position.y, point.pose.position.z = incision
+        point.scale.x = point.scale.y = point.scale.z = 0.016
+        point.color.r, point.color.g, point.color.b, point.color.a = 1.0, 0.2, 0.6, 0.8
+        markers.markers.append(point)
         self.marker_publisher.publish(markers)
 
     def report(self):
@@ -231,9 +248,12 @@ class XboxTeleop(Node):
             group = teleop.active_group
             cartesian = group.mode == 'cartesian'
             hint = 'B stops, Y switches group, A holds to go home'
+            if group.mode == 'incision':
+                hint = ('Tilt stays in the arm plane; going home is off here; B stops; '
+                        'Y switches once the tool is withdrawn')
             note = teleop.note or ('At limit: ' + ', '.join(teleop.blocked) if teleop.blocked
                                    else ('LB moves along one axis; ' if cartesian else '') + hint)
-            speed = (f'{1000.0 * teleop.linear_speed:.1f} mm/s' if cartesian
+            speed = (f'{1000.0 * teleop.linear_speed:.1f} mm/s' if group.mode != 'joint'
                      else f'{math.degrees(teleop.speed):.0f} deg/s')
             low, high = self.config.tool_limits
             closed = (self.measured.get(self.config.tool_joint, low) - low) / (high - low)

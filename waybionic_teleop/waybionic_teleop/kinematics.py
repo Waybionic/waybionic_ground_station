@@ -154,6 +154,13 @@ class ArmKinematics:
         cos, sin = math.cos(yaw), math.sin(yaw)
         return (cos * reach - sin * self.offset, sin * reach + cos * self.offset, height), pitch
 
+    def axis(self, joints, pitch=None):
+        """Return the tool axis as a unit vector in the base frame, optionally at another pitch."""
+        yaw = joints[self.joints[0]]
+        if pitch is None:
+            pitch = sum(joints[name] for name in self.joints[1:4])
+        return (math.cos(yaw) * math.sin(pitch), math.sin(yaw) * math.sin(pitch), math.cos(pitch))
+
     def inverse(self, position, pitch, roll, reference, limits=None, tolerance=TOLERANCE):
         """Return the joints nearest reference that put the tip at position, or None."""
         limits = limits or {}

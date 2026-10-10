@@ -7,6 +7,15 @@ from waybionic_teleop.gamepad import AXIS, BUTTON
 
 ACTIONS = ('enable', 'stop', 'group', 'home', 'faster', 'slower', 'lock', 'tilt_up', 'tilt_down')
 CARTESIAN_AXES = ('x', 'y', 'z', 'roll')
+INCISION_AXES = ('insert', 'pivot', 'roll')
+MOVES = {'cartesian': CARTESIAN_AXES, 'incision': INCISION_AXES}
+# How far the tool axis may pass from the incision point before the incision group stops.
+INCISION_TOLERANCE = 0.002
+# A tip past the incision point by more than solver rounding is inside the body.
+INSERTED = 1e-9
+INCISION_LOST = ('The tool is off the incision point; press Y, withdraw it in another group, '
+                 'then choose the incision group again')
+INCISION_HELD = 'The tool is inserted; withdraw it to the incision point before pressing Y'
 
 
 def clamp(value, low, high):
@@ -21,11 +30,12 @@ class Group:
     joints: list
     axes: list
     scales: list
-    # 'cartesian' groups move the tool tip along x, y, z and roll instead of single joints.
+    # 'cartesian' groups move the tool tip along x, y, z and roll instead of single joints;
+    # 'incision' groups insert along the tool axis and tilt about the incision point.
     mode: str = 'joint'
 
     def describe(self):
-        moves = CARTESIAN_AXES if self.mode == 'cartesian' else self.joints
+        moves = MOVES.get(self.mode, self.joints)
         return ', '.join(f'{axis} {move}' for axis, move in zip(self.axes, moves))
 
 
@@ -102,11 +112,12 @@ def check_config(config):
         # A scale above 1 would let a full stick pass the speed limits.
         if any(not -1.0 <= scale <= 1.0 for scale in group.scales):
             raise ValueError(f'group {group.name} scales must be between -1 and 1')
-        if group.mode == 'cartesian':
-            if not len(group.axes) == len(group.scales) == len(CARTESIAN_AXES):
-                raise ValueError(f'group {group.name} needs x, y, z and roll axes and scales')
+        if group.mode in MOVES:
+            moves = ', '.join(MOVES[group.mode])
+            if not len(group.axes) == len(group.scales) == len(MOVES[group.mode]):
+                raise ValueError(f'group {group.name} needs {moves} axes and scales')
         elif group.mode != 'joint':
-            raise ValueError(f'group {group.name} mode must be joint or cartesian')
+            raise ValueError(f'group {group.name} mode must be joint, cartesian or incision')
         elif not len(group.joints) == len(group.axes) == len(group.scales):
             raise ValueError(f'group {group.name} needs one axis and scale per joint')
     unknown = [name for name in [axis for group in config.groups for axis in group.axes]
@@ -123,21 +134,23 @@ def check_config(config):
 class ArmTeleop:
     """Hold joint targets and move them with the active group's sticks while enabled."""
 
-    def __init__(self, config, limits, kinematics=None):
-        """Take the config, {joint: (lower, upper)} radians and optional ArmKinematics."""
+    def __init__(self, config, limits, kinematics=None, collision=None):
+        """Take the config, {joint: (lower, upper)} radians, ArmKinematics and ArmCollision."""
         check_config(config)
         self.config = config
         self.kinematics = kinematics
-        # Without kinematics for this arm, the Cartesian groups are left out.
+        self.collision = collision
+        # Without kinematics for this arm, the Cartesian and incision groups are left out.
         self.groups = [group for group in config.groups
-                       if group.mode != 'cartesian' or kinematics is not None]
+                       if group.mode not in MOVES or kinematics is not None]
         if not self.groups:
             raise ValueError('no joint-space group or compatible Cartesian kinematics')
         for group in self.groups:
-            if group.mode == 'cartesian' and (
+            if group.mode in MOVES and (
                     tuple(group.joints) != kinematics.joints
                     or any(joint not in limits for joint in kinematics.joints)):
-                raise ValueError(f'Cartesian group {group.name} does not match the URDF chain')
+                raise ValueError(
+                    f'{group.mode.capitalize()} group {group.name} does not match the URDF chain')
         self.limits = dict(limits)
         self.limits[config.tool_joint] = config.tool_limits
         self.enabled = False
@@ -151,6 +164,11 @@ class ArmTeleop:
         self.linear = (0.0, 0.0, 0.0)
         self.tilt = 0.0
         self.roll = 0.0
+        self.insert = 0.0
+        # Where the tool enters the body: the tip position when the incision group took over.
+        self.incision = None
+        # Whether the tool was out of the body when it last left the incision group.
+        self.withdrawn = True
         self.held = set()
         self.wait_for_center = False
         self.blocked = []
@@ -181,11 +199,7 @@ class ArmTeleop:
         if 'enable' in pressed:
             self.enable(measured, axes)
         if 'group' in pressed:
-            self.group = (self.group + 1) % len(self.groups)
-            self.stop_cartesian()
-            self.velocities = dict.fromkeys(self.limits, 0.0)
-            self.command_targets = dict(self.targets)
-            self.wait_for_center = True
+            self.change_group()
         if 'faster' in pressed:
             self.level = min(self.level + 1, len(self.config.speed_levels) - 1)
         if 'slower' in pressed:
@@ -201,6 +215,27 @@ class ArmTeleop:
             self.note, self.warning = '', False
         self.move(axes, self.config.buttons['home'] in held, dt)
         return True
+
+    def change_group(self):
+        """Select the next group, unless the tool is inserted through the incision point."""
+        if self.active_group.mode == 'incision' and self.incision is not None:
+            miss, depth = self.incision_offset(self.targets)
+            if miss <= INCISION_TOLERANCE and depth > INSERTED:
+                # The other groups, and going home, could drag the tool sideways in the incision.
+                self.note, self.warning = INCISION_HELD, True
+                return
+            self.withdrawn = depth <= INSERTED
+        self.group = (self.group + 1) % len(self.groups)
+        self.stop_cartesian()
+        self.velocities = dict.fromkeys(self.limits, 0.0)
+        self.command_targets = dict(self.targets)
+        self.wait_for_center = True
+        if self.active_group.mode == 'incision' and self.incision is not None:
+            withdrawn = self.withdrawn or self.incision_offset(self.targets)[1] <= INSERTED
+            # Keep the incision point while the tool axis still passes it. Otherwise only a
+            # withdrawn tool takes a new one, at its tip; one still inside stays stopped.
+            if not self.align_incision() and withdrawn:
+                self.incision = None
 
     def motion_input_held(self, axes):
         config = self.config
@@ -229,6 +264,8 @@ class ArmTeleop:
         self.stop_cartesian()
         self.wait_for_center = False
         self.enabled, self.note, self.warning = True, '', False
+        if self.active_group.mode == 'incision' and self.incision is not None:
+            self.align_incision()
 
     def disable(self, measured, note, warning=False):
         self.enabled, self.note, self.warning = False, note, warning
@@ -240,14 +277,17 @@ class ArmTeleop:
         self.command_targets = dict(self.targets)
 
     def stop_cartesian(self):
-        self.linear, self.tilt, self.roll = (0.0, 0.0, 0.0), 0.0, 0.0
+        self.linear, self.tilt, self.roll, self.insert = (0.0, 0.0, 0.0), 0.0, 0.0, 0.0
 
     def move(self, axes, homing, dt):
         config = self.config
         self.command_targets = dict(self.targets)
         desired = dict.fromkeys(self.limits, 0.0)
         self.blocked = []
-        if homing:
+        before = dict(self.targets)
+        # Going home would drag the tool sideways through the incision.
+        incision = self.active_group.mode == 'incision'
+        if homing and not incision:
             self.stop_cartesian()
             for joint, (lower, upper) in self.limits.items():
                 if joint != config.tool_joint:
@@ -255,6 +295,9 @@ class ArmTeleop:
                     desired[joint] = clamp(config.home_gain * error, -self.speed, self.speed)
         elif self.active_group.mode == 'cartesian':
             self.jog(axes, dt)
+            desired = {config.tool_joint: 0.0}
+        elif incision:
+            self.incise(axes, dt)
             desired = {config.tool_joint: 0.0}
         else:
             group = self.active_group
@@ -281,6 +324,30 @@ class ArmTeleop:
             self.targets[joint], self.velocities[joint] = target, velocity
             self.command_targets[joint] = clamp(
                 target + velocity * config.period, min(lower, target), max(upper, target))
+        self.avoid_collisions(before)
+
+    def avoid_collisions(self, before):
+        """Undo this step's arm motion if it would take a link into the table or the base."""
+        if self.collision is None:
+            return
+        intrusions = self.collision.check(self.targets)
+        if not intrusions:
+            return
+        # Backing out of a collision is allowed, but every contact has to be measured on its
+        # own: a total would let one link press further in while another one pulls clear.
+        # The relative slack, for depths and volumes alike, is rounding noise, not a margin.
+        was = self.collision.check(before)
+        worse = [hit for hit, amount in intrusions.items()
+                 if amount > was.get(hit, 0.0) * (1.0 + 1e-9)]
+        if not worse:
+            return
+        for joint, position in before.items():
+            if joint != self.config.tool_joint:
+                # Revert the published lookahead too, so no command continues into the contact.
+                self.targets[joint] = self.command_targets[joint] = position
+                self.velocities[joint] = 0.0
+        self.stop_cartesian()
+        self.blocked += worse
 
     def jog(self, axes, dt):
         """Move the tool tip along a straight line set by the sticks, or tilt the tool about it."""
@@ -321,6 +388,86 @@ class ArmTeleop:
         else:
             future = after
         self.command_targets.update(future)
+
+    def incise(self, axes, dt):
+        """
+        Slide the tool along its own axis, or tilt it about the incision point.
+
+        The incision point stays on the tool axis. Five joints keep the axis in the arm's
+        vertical plane, so the tool tilts only in that plane.
+        """
+        config, group, kinematics = self.config, self.active_group, self.kinematics
+        insert, pivot, roll = [scale * self.stick(axes, axis)
+                               for axis, scale in zip(group.axes, group.scales)]
+        linear_step, step = config.linear_accel * dt, config.max_accel * dt
+        self.insert += clamp(self.linear_speed * insert - self.insert, -linear_step, linear_step)
+        # Pushing up tilts the tool axis towards straight up, like the tilt-up button.
+        tilt = -config.tilt_speed * config.speed_levels[self.level] * pivot
+        self.tilt += clamp(tilt - self.tilt, -step, step)
+        self.roll += clamp(roll * self.speed - self.roll, -step, step)
+        before = {joint: self.targets[joint] for joint in kinematics.joints}
+        if self.incision is None:
+            # Selecting the group again is the documented way out of INCISION_LOST, and it
+            # takes the tool's own tip as the new incision point. Clear that warning, and
+            # only that one, so a later warning is never hidden by this.
+            self.incision = kinematics.forward(before)[0]
+            if self.note == INCISION_LOST:
+                self.note, self.warning = '', False
+        miss, depth = self.incision_offset(before)
+        if miss > INCISION_TOLERANCE:
+            # Re-enabled or reselected away from the incision point: never pull it back there.
+            self.insert = self.tilt = self.roll = 0.0
+            self.blocked = ['incision']
+            self.note, self.warning = INCISION_LOST, True
+            return
+        if self.note == INCISION_HELD and depth <= INSERTED:
+            self.note, self.warning = '', False
+        if not (self.insert or self.tilt or self.roll):
+            # Hold the pose exactly: solving for it again would only add rounding noise.
+            self.velocities.update(dict.fromkeys(kinematics.joints, 0.0))
+            return
+        after, fraction, self.blocked = self.incision_step(before, dt)
+        self.insert, self.tilt, self.roll = (
+            self.insert * fraction, self.tilt * fraction, self.roll * fraction)
+        for joint in kinematics.joints:
+            self.velocities[joint] = (after[joint] - before[joint]) / dt
+            self.targets[joint] = after[joint]
+        if self.insert or self.tilt or self.roll:
+            # The next period's pose on the same path, so the axis still passes the incision.
+            future, _, _ = self.incision_step(after, config.period)
+        else:
+            future = after
+        self.command_targets.update(future)
+
+    def incision_offset(self, joints):
+        """Return how far the tool axis misses the incision point and the tip's depth past it."""
+        tip, _ = self.kinematics.forward(joints)
+        offset = [a - b for a, b in zip(tip, self.incision)]
+        depth = sum(a * b for a, b in zip(offset, self.kinematics.axis(joints)))
+        return math.sqrt(max(sum(a * a for a in offset) - depth * depth, 0.0)), depth
+
+    def align_incision(self):
+        """Move the incision point, never the arm, onto the tool axis; False if it is too far."""
+        miss, depth = self.incision_offset(self.targets)
+        if miss > INCISION_TOLERANCE:
+            return False
+        tip, _ = self.kinematics.forward(self.targets)
+        self.incision = tuple(point - depth * direction for point, direction
+                              in zip(tip, self.kinematics.axis(self.targets)))
+        return True
+
+    def incision_step(self, joints, dt):
+        """Step dt along the insert and tilt path through the incision, as kinematics.jog does."""
+        kinematics = self.kinematics
+        tip, pitch = kinematics.forward(joints)
+        _, depth = self.incision_offset(joints)
+        # Aim for the point on the new axis through the incision, at the new depth, so the
+        # incision never drifts off the axis.
+        target = [point + (depth + self.insert * dt) * direction for point, direction
+                  in zip(self.incision, kinematics.axis(joints, pitch + self.tilt * dt))]
+        velocity = [(goal - now) / dt for goal, now in zip(target, tip)]
+        return kinematics.jog(joints, velocity, self.tilt, self.roll, dt, self.limits,
+                              self.config.max_speed)
 
     def stick(self, axes, name):
         value = self.axis(axes, name)

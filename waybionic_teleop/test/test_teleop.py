@@ -274,7 +274,7 @@ def test_group_change_discards_cartesian_motion_and_lookahead(cartesian):
         cartesian.update(*sample(left_x=1.0, right_x=1.0), DOWN, DT)
     assert cartesian.linear[1] > 0 and cartesian.roll > 0
     cartesian.update(*sample('y'), DOWN, DT)
-    assert cartesian.active_group.name == 'base'
+    assert cartesian.active_group.name == 'incision'
     assert cartesian.linear == (0.0, 0.0, 0.0) and cartesian.roll == 0.0
     assert not any(cartesian.velocities.values())
     assert cartesian.command_targets == cartesian.targets
@@ -283,14 +283,14 @@ def test_group_change_discards_cartesian_motion_and_lookahead(cartesian):
 def test_switching_groups_with_a_held_stick_waits_for_neutral(cartesian):
     cartesian.update(*sample('y', left_y=1.0), DOWN, DT)
     held = dict(cartesian.targets)
-    assert cartesian.active_group.name == 'base' and cartesian.warning
+    assert cartesian.active_group.name == 'incision' and cartesian.warning
     for _ in range(10):
         cartesian.update(*sample(left_y=1.0), DOWN, DT)
         assert cartesian.targets == held and cartesian.command_targets == held
     cartesian.update(*sample(), DOWN, DT)
     assert cartesian.targets == held and not cartesian.warning
     cartesian.update(*sample(left_y=1.0), DOWN, DT)
-    assert cartesian.targets['joint_2'] > held['joint_2']
+    assert cartesian.targets != held
 
 
 def test_cartesian_group_must_name_the_actual_urdf_chain(params, arm):
