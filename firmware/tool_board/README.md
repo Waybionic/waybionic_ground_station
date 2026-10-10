@@ -54,6 +54,10 @@ counts, 16384 per motor turn.
 The motors have no encoders, so the reported position is the commanded one. A
 stalled motor goes unnoticed until it is zeroed again.
 
+The CAN controller sends one frame at a time, so replies wait in a queue of 32
+until it takes them. If the queue overflows, the oldest replies are dropped and the
+serial monitor prints how many.
+
 ## Build and Flash
 
 **Arduino IDE:**
@@ -87,7 +91,8 @@ cansend can0 007#9299              # zero here: 007#92019A
 
 The `waybionic_teleop` tests check this firmware's frame code against `mks_can.py`. They
 also run the motor logic in `tool_motor.h` with a fake stepper driver: moves, travel limits,
-the heartbeat stop, stops, enable and zero.
+the heartbeat stop, stops, enable and zero. The reply queue in `reply_queue.h` is tested
+with back-to-back replies against a fake one-frame CAN controller.
 
 ## Using It from the Ground Station
 

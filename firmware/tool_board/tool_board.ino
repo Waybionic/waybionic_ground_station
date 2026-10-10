@@ -5,6 +5,7 @@
 #include <AccelStepper.h>
 #include <Arduino_CAN.h>
 
+#include "reply_queue.h"
 #include "tool_motor.h"
 
 // ---- Check every value in this block against the tool board before flashing ----
@@ -60,10 +61,12 @@ ToolMotor<AccelStepper> motors[MOTORS] = {
   ToolMotor<AccelStepper>(FIRST_CAN_ID + 3, steppers[3], config(3)),
 };
 
-void send(uint16_t id, const uint8_t * data, uint8_t length)
+ReplyQueue replies;
+
+bool transmit(const Reply & reply)
 {
-  CanMsg const message(CanStandardId(id), length, data);
-  CAN.write(message);
+  CanMsg const message(CanStandardId(reply.id), reply.length, reply.data);
+  return CAN.write(message) > 0;
 }
 
 void setup()
@@ -103,16 +106,26 @@ void loop()
       if (const uint8_t length = motor.handle(message.data, message.data_length, millis(),
           reply))
       {
-        send(motor.id(), reply, length);
+        replies.push(motor.id(), reply, length);
       }
     }
   }
   bool any = false;
   for (ToolMotor<AccelStepper> & motor : motors) {
     if (const uint8_t length = motor.update(millis(), reply)) {
-      send(motor.id(), reply, length);
+      replies.push(motor.id(), reply, length);
     }
     any = any || motor.enabled();
   }
   digitalWrite(ENABLE_PIN, any ? LOW : HIGH);
+  replies.send(transmit);
+  // At most once a second, so a bus that takes no frames cannot flood the serial port.
+  static uint32_t reported = 0;
+  static uint32_t reported_ms = 0;
+  if (replies.dropped() != reported && millis() - reported_ms >= 1000) {
+    reported = replies.dropped();
+    reported_ms = millis();
+    Serial.print("Tool board: CAN replies dropped so far: ");
+    Serial.println(reported);
+  }
 }
