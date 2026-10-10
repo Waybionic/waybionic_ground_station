@@ -11,7 +11,7 @@
 // ---- Check every value in this block against the tool board before flashing ----
 
 constexpr uint8_t MOTORS = 4;
-// The motors answer on CAN IDs 7 to 10, after the arm's six drives.
+// Provisional: the motors answer on CAN IDs 7 to 10, and the arm's drives use 1 to 5.
 constexpr uint16_t FIRST_CAN_ID = 7;
 #define CAN_BITRATE CanBitRate::BR_1000k
 
