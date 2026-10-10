@@ -70,41 +70,53 @@ def test_description_reload_stops_a_moving_drive(
         Parameter(name, value=value) for name, value in values.items()])
     executor = SingleThreadedExecutor(context=context)
     executor.add_node(drives)
+
+    def spin_until(done, failure):
+        for _ in range(100):
+            executor.spin_once(timeout_sec=0.01)
+            if done():
+                return
+        pytest.fail(failure)
+
+    def enable():
+        # The enable topic keeps one message, so let the drive see Start released first.
+        node.publish_enabled(False)
+        spin_until(lambda: not drives.awaiting_release, 'the drive never saw Start released')
+        node.measured.update(drives.map.to_positions(drives.counts))
+        node.teleop.enable(node.measured, [0.0] * 8)
+        assert node.teleop.enabled
+        node.publish_enabled(True)
+        spin_until(lambda: drives.authorized, 'the drive never accepted the enable')
+
     try:
         drives.on_description(String(data=URDF))
         node.load(String(data=URDF))
         drives.tick()
         assert drives.commanded is not None
-        node.measured.update(drives.map.to_positions(drives.counts))
-        node.teleop.enable(node.measured, [0.0] * 8)
-        assert node.teleop.enabled
+        enable()
 
-        node.teleop.targets['joint_1'] = 2.0
+        node.teleop.command_targets['joint_1'] = 2.0
         node.teleop.velocities['joint_1'] = 1.0
         node.publish_command()
-        for _ in range(100):
-            executor.spin_once(timeout_sec=0.01)
-            if drives.commanded['joint_1'] > 1.0:
-                break
-        else:
-            pytest.fail('the drive never received the moving joint command')
-        drives.last_tick -= 0.05
-        drives.tick()
+        spin_until(lambda: drives.commanded['joint_1'] > 1.0,
+                   'the drive never received the moving joint command')
+        # The first tick sends the target, the second moves the drive toward it.
+        for _ in range(2):
+            drives.last_tick -= 0.05
+            drives.tick()
         motor = drives.bus.drives[1]
         assert motor.target is not None and motor.axis > 0.0
+        assert drives.authorized
 
+        heard = drives.command_time
         node.load(String(data=URDF if valid_replacement else without_box('forearm_link')))
-        for _ in range(100):
-            executor.spin_once(timeout_sec=0.01)
-            if drives.safety_stop:
-                break
-        else:
-            pytest.fail('the drive never received the explicit stop')
+        # Teleop withdraws its enable, then sends one last hold.
+        spin_until(lambda: not drives.authorized and drives.command_time > heard,
+                   'the drive never stopped')
         if valid_replacement:
             assert node.teleop is not None and not node.teleop.enabled and node.problem == ''
         else:
             assert node.teleop is None and 'forearm_link' in node.problem
-        assert drives.commanded is None
         response = drives.on_zero(Trigger.Request(), Trigger.Response())
         assert not response.success and 'still arriving' in response.message
         drives.last_tick -= 0.05
@@ -114,20 +126,14 @@ def test_description_reload_stops_a_moving_drive(
         for _ in range(10):
             drives.last_tick -= 0.05
             drives.tick()
-        assert motor.axis == stopped_at
-        assert drives.safety_stop and drives.commanded is None
+        assert motor.axis == stopped_at and not drives.authorized
         if valid_replacement:
-            node.measured.update(drives.map.to_positions(drives.counts))
-            node.teleop.enable(node.measured, [0.0] * 8)
-            assert node.teleop.enabled
+            enable()
+            heard = drives.command_time
             node.publish_command()
-            for _ in range(100):
-                executor.spin_once(timeout_sec=0.01)
-                if not drives.safety_stop:
-                    break
-            else:
-                pytest.fail('valid replacement never released the drive stop')
-            assert drives.commanded is not None and not drives.stale
+            spin_until(lambda: drives.command_time > heard,
+                       'the drive never received a command after the reload')
+            assert drives.authorized and not drives.stale
     finally:
         executor.remove_node(drives)
         executor.shutdown()

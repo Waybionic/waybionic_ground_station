@@ -97,7 +97,11 @@ def test_teleop_stops_before_the_forearm_reaches_the_table(parameters, check):
     for _ in range(round(4.0 / DT)):
         # Left stick up bends the elbow down towards the table.
         teleop.update(*sample(left_y=1.0), dict(teleop.targets), DT)
-        stopped |= any(hit.endswith(': table') for hit in teleop.blocked)
+        if any(hit.endswith(': table') for hit in teleop.blocked):
+            stopped = True
+            # The published one-period lookahead stops with the refused step.
+            assert teleop.command_targets == teleop.targets
+            assert not any(teleop.velocities.values())
         assert check.hits(teleop.targets) == []
     assert stopped and teleop.targets['joint_3'] < LIMITS['joint_3'][1] - 0.05
     elbow = teleop.targets['joint_3']

@@ -1,10 +1,24 @@
 """Carry MKS frames on a python-can interface, with the same calls as the simulated bus."""
 
 from collections import deque
+import time
 
 import can
 
 from waybionic_teleop import mks_can
+
+
+class _Reader(can.BufferedReader):
+    """Queue received frames, counting receive errors instead of ending the reading thread."""
+
+    def __init__(self, bus):
+        super().__init__()
+        self.bus = bus
+
+    def on_error(self, exc):
+        self.bus.errors += 1
+        # Back off, so an adapter that has gone away does not spin this thread.
+        time.sleep(0.01)
 
 
 class CanBus:
@@ -20,6 +34,11 @@ class CanBus:
         self.frames = 0
         self.bits = 0
         self.errors = 0
+        # A thread reads the interface as lines arrive. An slcan adapter also answers every
+        # frame sent with a line that recv() returns as None, so reading until the first None
+        # would leave most replies behind.
+        self.reader = _Reader(self)
+        self.notifier = can.Notifier(self.bus, [self.reader], timeout=0.1)
 
     def send(self, can_id, data):
         """Transmit a frame; return False if the interface refused it."""
@@ -37,11 +56,7 @@ class CanBus:
     def receive(self, timeout=0.0):
         """Return the next (can_id, data) frame from another node, or None."""
         while True:
-            try:
-                message = self.bus.recv(timeout)
-            except can.CanError:
-                self.errors += 1
-                return None
+            message = self.reader.get_message(timeout)
             timeout = 0.0
             if message is None:
                 return None
@@ -62,6 +77,7 @@ class CanBus:
         """Real drives move on their own."""
 
     def shutdown(self):
+        self.notifier.stop()
         self.bus.shutdown()
 
     def _count(self, data):

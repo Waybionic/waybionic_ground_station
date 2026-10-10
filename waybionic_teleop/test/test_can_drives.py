@@ -5,6 +5,7 @@ The end-to-end test uses python-can's in-process virtual bus. The CAN CI job set
 WAYBIONIC_CAN_TEST=socketcan:vcan0 to run it over a kernel CAN interface instead.
 """
 
+import io
 import math
 import os
 from pathlib import Path
@@ -17,18 +18,20 @@ import rclpy
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.parameter import Parameter
 from sensor_msgs.msg import JointState
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 
 from waybionic_teleop import mks_can
 from waybionic_teleop.can_bus import CanBus
 from waybionic_teleop.mks_drive_sim import serve
-from waybionic_teleop.sim_arm_drives_node import SimArmDrives
+from waybionic_teleop.sim_arm_drives_node import QUIET_BEFORE_ZERO_S, SimArmDrives
 from waybionic_teleop.sim_drives import SimulatedServo
 
 BITRATE = 1000000
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
         / 'waybionic_arm.urdf').read_text(encoding='utf-8')
+# The arm's drives without the placeholder tool, whose joint has no URDF limit yet.
+ARM_DRIVES = ['base_yaw', 'shoulder', 'elbow', 'wrist_left', 'wrist_right']
 
 
 @pytest.fixture
@@ -60,6 +63,21 @@ def make_node(context, parameters):
         node.destroy_node()
 
 
+@pytest.fixture
+def mock_drives():
+    """Answer as six MKS drives on a fresh python-can virtual channel."""
+    channel = uuid.uuid4().hex
+    bus = CanBus('virtual', channel, BITRATE)
+    servos = {can_id: SimulatedServo(can_id) for can_id in range(1, 7)}
+    stop = threading.Event()
+    thread = threading.Thread(target=serve, args=(bus, servos, stop), daemon=True)
+    thread.start()
+    yield channel, servos
+    stop.set()
+    thread.join()
+    bus.shutdown()
+
+
 def spin_until(executor, done, seconds=3.0):
     deadline = time.monotonic() + seconds
     while not done() and time.monotonic() < deadline:
@@ -75,12 +93,43 @@ def zero(node):
     return node.on_zero(Trigger.Request(), Trigger.Response())
 
 
-def command(node, **positions):
-    node.on_command(JointState(name=list(positions), position=list(positions.values())))
-
-
 def positions(node):
     return node.map.to_positions(node.counts)
+
+
+def press_start(node):
+    """Load the URDF limits, then release and press Start the way teleop reports it."""
+    node.on_description(String(data=URDF))
+    node.on_enabled(Bool(data=False))
+    node.on_enabled(Bool(data=True))
+
+
+def command(node, speed=1.0, **targets):
+    """Refresh the enable and send one complete command toward the named joint targets."""
+    current = positions(node)
+    goal = {**(node.commanded or current), **targets}
+    velocities = [math.copysign(speed, goal[joint] - current[joint]) if joint in targets
+                  else 0.0 for joint in goal]
+    node.on_enabled(Bool(data=True))
+    node.on_command(JointState(name=list(goal), position=list(goal.values()),
+                               velocity=velocities))
+
+
+def move(node, executor, **targets):
+    """Stream commands like teleop until the named joints reach their targets."""
+    def reached():
+        command(node, **targets)
+        return all(abs(positions(node)[joint] - value) < 1e-3
+                   for joint, value in targets.items())
+    return spin_until(executor, reached)
+
+
+def enabled_until(node, done=lambda: False):
+    """Republish the enable, as teleop does on every update, without sending a command."""
+    def check():
+        node.on_enabled(Bool(data=True))
+        return done()
+    return check
 
 
 def test_the_bus_drops_its_own_echo_but_not_an_identical_reply():
@@ -90,14 +139,92 @@ def test_the_bus_drops_its_own_echo_but_not_an_identical_reply():
     try:
         # A successful enable reply is byte for byte the enable command.
         host.send(1, mks_can.enable(1))
-        assert host.receive() is None
-        assert drive.receive() == (1, mks_can.enable(1))
+        assert drive.receive(1.0) == (1, mks_can.enable(1))
+        assert host.receive(0.1) is None
         drive.send(1, mks_can.frame(1, mks_can.ENABLE, [1]))
-        assert drive.receive() is None
-        assert host.receive() == (1, mks_can.enable(1))
+        assert host.receive(1.0) == (1, mks_can.enable(1))
+        assert drive.receive(0.1) is None
     finally:
         host.shutdown()
         drive.shutdown()
+
+
+class FakeSlcanPort:
+    """The serial port of an slcan (LAWICEL) adapter, with MKS drives on its CAN side."""
+
+    def __init__(self, servos):
+        self.servos = servos
+        self.output = bytearray()
+        self.ready = threading.Condition()
+        self.write_timeout = None
+
+    @property
+    def in_waiting(self):
+        with self.ready:
+            return len(self.output)
+
+    def read(self, size=1):
+        with self.ready:
+            if not self.output:
+                self.ready.wait(0.001)
+            data = bytes(self.output[:size])
+            del self.output[:size]
+            return data
+
+    def write(self, data):
+        with self.ready:
+            for line in bytes(data).split(b'\r')[:-1]:
+                if line[:1] != b't':
+                    self.output += b'\r'
+                    continue
+                can_id, size = int(line[1:4], 16), int(line[4:5])
+                data = bytes.fromhex(line[5:5 + 2 * size].decode())
+                # The adapter acknowledges every frame it transmits with a z line.
+                self.output += b'z\r'
+                for reply in self.servos[can_id].receive(data):
+                    self.output += f't{can_id:03X}{len(reply)}{reply.hex().upper()}\r'.encode()
+            self.ready.notify_all()
+        return len(data)
+
+    def flush(self):
+        pass
+
+    def reset_input_buffer(self):
+        with self.ready:
+            self.output.clear()
+
+    def close(self):
+        pass
+
+    def fileno(self):
+        raise io.UnsupportedOperation('fileno')
+
+
+def test_every_slcan_reply_is_read_between_the_adapter_acknowledgements(monkeypatch):
+    serial = pytest.importorskip('serial')
+    servos = {can_id: SimulatedServo(can_id) for can_id in range(1, 7)}
+    port = FakeSlcanPort(servos)
+    monkeypatch.setattr(serial, 'serial_for_url', lambda *args, **kwargs: port)
+    bus = CanBus('slcan', 'fake', BITRATE, sleep_after_open=0)
+    drained = []
+    try:
+        for _ in range(5):
+            # A host tick sends two frames per drive; each gets a z line, then the reply.
+            for can_id in servos:
+                bus.send(can_id, mks_can.read_encoder(can_id))
+                bus.send(can_id, mks_can.set_mode(can_id))
+            deadline = time.monotonic() + 0.5
+            while port.in_waiting and time.monotonic() < deadline:
+                time.sleep(0.001)
+            time.sleep(0.02)
+            replies = []
+            # The host drains without waiting, as on every tick.
+            while (reply := bus.receive()) is not None:
+                replies.append(reply)
+            drained.append(len(replies))
+    finally:
+        bus.shutdown()
+    assert drained == [12] * 5 and bus.errors == 0
 
 
 def test_the_host_drives_mks_servos_over_can(make_node):
@@ -111,19 +238,21 @@ def test_the_host_drives_mks_servos_over_can(make_node):
     thread = threading.Thread(target=serve, args=(drives_bus, servos, stop), daemon=True)
     thread.start()
     try:
-        node, executor = make_node(interface=interface, channel=channel)
+        node, executor = make_node(interface=interface, channel=channel, drives=ARM_DRIVES)
         assert spin_until(executor, lambda: all(state == 'ready' for state in node.state))
         spin_for(executor, 0.1)
         # Real drives are not driven, and no joint states are published, until zeroed.
-        assert node.commanded is None
+        press_start(node)
+        assert node.commanded is None and not node.authorized
 
         assert zero(node).success
         assert spin_until(executor, lambda: node.commanded is not None)
         assert positions(node)['joint_1'] == pytest.approx(0.0)
 
-        command(node, joint_1=0.3, joint_4=0.2)
-        assert spin_until(executor, lambda: abs(positions(node)['joint_1'] - 0.3) < 1e-3
-                          and abs(positions(node)['joint_4'] - 0.2) < 1e-3)
+        press_start(node)
+        assert node.authorized, node.stop_reason
+        assert set(node.limits) == set(node.map.joints)
+        assert move(node, executor, joint_1=0.3, joint_4=0.2)
         # Wrist pitch turns both differential motors the same way.
         assert servos[4].axis == pytest.approx(servos[5].axis)
         assert servos[4].axis == pytest.approx(0.2 / (2 * math.pi) * mks_can.COUNTS_PER_REV,
@@ -135,12 +264,33 @@ def test_the_host_drives_mks_servos_over_can(make_node):
         drives_bus.shutdown()
 
 
+def test_a_real_bus_needs_a_urdf_limit_for_every_drive_joint(make_node, mock_drives):
+    channel, servos = mock_drives
+    sim, _ = make_node()
+    sim.on_description(String(data=URDF))
+    assert sim.description_valid and 'tool_grip' not in sim.limits
+    # Simulation runs the placeholder tool drive without a limit; real drives never hold or
+    # take a command until the URDF limits every joint they move.
+    node, executor = make_node(interface='virtual', channel=channel)
+    assert spin_until(executor, lambda: all(state == 'ready' for state in node.state))
+    assert zero(node).success
+    assert spin_until(executor, lambda: node.commanded is not None)
+    node.on_description(String(data=URDF))
+    assert not node.description_valid and 'tool_grip' in node.stop_reason
+    press_start(node)
+    command(node, joint_1=0.3)
+    spin_for(executor, 0.2)
+    assert not node.authorized
+    assert all(servo.target is None and servo.axis == 0 for servo in servos.values())
+
+
 def test_commands_before_zeroing_are_ignored(make_node):
     node, executor = make_node(zero_on_start=False)
     spin_for(executor, 0.1)
+    press_start(node)
     command(node, joint_1=0.3)
     spin_for(executor, 0.2)
-    assert node.commanded is None
+    assert not node.authorized and node.commanded is None
     assert all(servo.target is None and servo.axis == 0 for servo in node.bus.drives.values())
 
 
@@ -155,31 +305,45 @@ def test_zeroing_waits_for_the_commands_to_stop(make_node):
 def test_a_drive_that_stops_answering_stops_the_arm_until_it_is_zeroed_again(make_node):
     node, executor = make_node()
     assert spin_until(executor, lambda: node.commanded is not None)
+    press_start(node)
     elbow = node.bus.drives.pop(3)
-    assert spin_until(executor, lambda: node.lost[2])
-    assert node.commanded is None and not node.zeroed[2]
+
+    def commanding_until_lost():
+        # Teleop keeps commanding a move while the elbow is silent.
+        command(node, joint_1=1.0)
+        return node.lost[2]
+    assert spin_until(executor, commanding_until_lost)
+    assert node.commanded is None and not node.zeroed[2] and not node.authorized
     # Every other drive was told to stop where it is.
     assert all(servo.target is None for servo in node.bus.drives.values())
 
     node.bus.drives[3] = elbow
-    assert spin_until(executor, lambda: not node.lost[2] and node.state[2] == 'ready')
-    spin_for(executor, 0.1)
+    assert spin_until(executor, lambda: not node.lost[2] and not node.unconfirmed[2])
+    # The stop it missed while silent went out once it answered again.
+    assert not node.stopping and elbow.target is None
+    spin_for(executor, QUIET_BEFORE_ZERO_S)
     assert node.commanded is None
+    press_start(node)
+    assert not node.authorized
     assert zero(node).success
     assert spin_until(executor, lambda: node.commanded is not None)
+    press_start(node)
+    assert node.authorized
 
 
 def test_commands_that_stop_mid_move_stop_the_drives(make_node):
     node, executor = make_node()
     assert spin_until(executor, lambda: node.commanded is not None)
-    # One command toward a far target, then silence, as if teleop had exited mid-move.
-    node.on_command(JointState(name=['joint_1'], position=[100.0], velocity=[1.0]))
-    assert spin_until(executor, lambda: not node.velocities)
-    assert spin_until(executor, lambda: node.commanded is not None)
-    held = node.commanded['joint_1']
+    press_start(node)
+    # One command toward a far target, then silence while teleop stays enabled, as if its
+    # command publisher had died mid-move.
+    command(node, speed=0.5, joint_1=3.0)
+    assert spin_until(executor, enabled_until(node, lambda: node.stale))
+    assert not node.authorized
+    held = positions(node)['joint_1']
     spin_for(executor, 0.5)
-    assert 1.0 < held < 50.0
-    assert node.map.to_positions(node.counts)['joint_1'] == pytest.approx(held, abs=0.05)
+    assert 0.05 < held < 2.0
+    assert positions(node)['joint_1'] == pytest.approx(held, abs=1e-3)
 
 
 def test_nothing_moves_until_every_drive_confirms_its_heartbeat(make_node, monkeypatch):
@@ -199,15 +363,19 @@ def test_nothing_moves_until_every_drive_confirms_its_heartbeat(make_node, monke
     node.set_up(1)
     assert zero(node).success
     spin_for(executor, 0.2)
-    assert node.unconfirmed[1] == {mks_can.SET_HEARTBEAT} and node.commanded is None
+    press_start(node)
+    assert node.unconfirmed[1] == {mks_can.SET_HEARTBEAT} and not node.authorized
     # The setup is sent again, and the arm can then move.
-    assert spin_until(executor, lambda: node.commanded is not None)
+    assert spin_until(executor, lambda: not node.unconfirmed[1])
+    press_start(node)
+    assert node.authorized
     assert shoulder.heartbeat_ms == node.heartbeat_ms
 
 
 def test_a_target_the_interface_refused_is_sent_again(make_node, monkeypatch):
     node, executor = make_node()
     assert spin_until(executor, lambda: node.commanded is not None)
+    press_start(node)
     send, refused = node.bus.send, []
 
     def flaky(can_id, data):
@@ -216,46 +384,45 @@ def test_a_target_the_interface_refused_is_sent_again(make_node, monkeypatch):
             return False
         return send(can_id, data)
     monkeypatch.setattr(node.bus, 'send', flaky)
-    command(node, joint_1=0.3)
-    assert spin_until(executor, lambda: abs(positions(node)['joint_1'] - 0.3) < 1e-3)
+    assert move(node, executor, joint_1=0.3)
     assert refused == [1]
 
 
-def test_commands_without_a_speed_that_stop_also_stop_the_drives(make_node):
-    # A gearbox that lets the joint turn at 6 rpm, the slowest documented MKS SERVO42D
-    # setting, so a move well inside the joint limits outlasts the 0.5 s command timeout.
+def test_a_command_without_speeds_stops_the_drives(make_node):
     node, executor = make_node(max_rpm=6)
-    node.on_description(String(data=URDF))
-    assert spin_until(executor, lambda: node.commanded is not None and node.limits)
-    upper = node.limits['joint_1'][1]
-    # One position-only command, as a publisher that fills in no velocity sends, then silence.
-    node.on_command(JointState(name=['joint_1'], position=[upper]))
-    assert spin_until(executor, lambda: node.stale)
-    # Let the drives finish slowing down, then check that the arm holds where it stopped.
+    assert spin_until(executor, lambda: node.commanded is not None)
+    press_start(node)
+    command(node, joint_1=1.0)
     spin_for(executor, 0.1)
+    assert node.bus.drives[1].target is not None
+    # Positions alone, as a publisher that fills in no velocity sends, never move the arm on
+    # to the last target at whatever speed the drives were given.
+    targets = dict(node.commanded)
+    node.on_command(JointState(name=list(targets), position=list(targets.values())))
+    assert not node.authorized and node.rejected == 1
+    assert all(servo.target is None and servo.rpm == 0.0 for servo in node.bus.drives.values())
     stopped = positions(node)['joint_1']
-    spin_for(executor, 1.0)
-    assert positions(node)['joint_1'] == pytest.approx(stopped, abs=0.03)
-    # Without the stop it would have kept turning towards the limit at 36 deg/s.
-    assert stopped < upper - 1.0
+    spin_for(executor, 0.5)
+    assert positions(node)['joint_1'] == pytest.approx(stopped, abs=1e-3)
 
 
 def test_a_paused_host_tick_respects_joint_limit_and_drive_heartbeat(make_node):
     node, executor = make_node(max_rpm=6, command_timeout_s=10.0)
-    node.on_description(String(data=URDF))
-    assert spin_until(executor, lambda: node.commanded is not None and node.limits)
+    assert spin_until(executor, lambda: node.commanded is not None)
+    press_start(node)
     upper = node.limits['joint_1'][1]
-    node.on_command(JointState(name=['joint_1'], position=[upper - 0.01], velocity=[6.0]))
+    command(node, speed=6.0, joint_1=upper - 0.01)
     node.tick()
     motor = node.bus.drives[1]
-    expected = node.map.to_counts({**node.commanded, 'joint_1': upper})[0]
+    expected = node.map.to_counts(node.commanded)[0]
     assert motor.target == expected
+    assert expected < node.map.to_counts({**node.commanded, 'joint_1': upper})[0]
 
     # No wall-clock pause: a scheduler gap reaches the drive before encoder polling
     # can reset the heartbeat. The unrelated publisher timeout remains unarmed.
     node.last_tick -= 2.0
     node.tick()
-    assert not node.stale
+    assert not node.stale and not node.authorized
     assert (motor.heartbeat_stops, motor.rpm, motor.target) == (1, 0.0, None)
     assert 0.0 < motor.axis < expected
     node.tick()
@@ -265,51 +432,56 @@ def test_a_paused_host_tick_respects_joint_limit_and_drive_heartbeat(make_node):
 def test_the_stale_stop_happens_once_and_clears_when_commands_return(make_node):
     node, executor = make_node(max_rpm=6)
     assert spin_until(executor, lambda: node.commanded is not None)
+    press_start(node)
     stop_all, stops = node.stop_all, []
 
-    def counted():
-        stops.append(time.monotonic())
-        stop_all()
+    def counted(reason):
+        stops.append(reason)
+        stop_all(reason)
     node.stop_all = counted
     command(node, joint_1=0.5)
-    assert spin_until(executor, lambda: node.stale)
+    assert spin_until(executor, enabled_until(node, lambda: node.stale))
     spin_for(executor, 1.0)
     assert len(stops) == 1
     command(node, joint_1=0.5)
     assert not node.stale
+    # Moving again takes a fresh Start.
+    assert not node.authorized
 
 
-def test_explicit_stop_latches_and_rearms_only_after_valid_command(make_node):
+def test_an_empty_command_stops_the_drives_until_a_fresh_start(make_node):
     node, executor = make_node(max_rpm=6)
-    node.on_description(String(data=URDF))
-    assert spin_until(executor, lambda: node.commanded is not None and node.limits)
+    assert spin_until(executor, lambda: node.commanded is not None)
+    press_start(node)
     command(node, joint_1=1.0)
+    spin_for(executor, 0.1)
+    assert node.bus.drives[1].target is not None
     node.on_command(JointState())
-    assert node.safety_stop and node.stale and node.commanded is None
-    stopped_at = node.command_time
-    response = node.on_zero(Trigger.Request(), Trigger.Response())
+    assert not node.authorized and node.rejected == 1
+    assert all(servo.target is None and servo.rpm == 0.0 for servo in node.bus.drives.values())
+    response = zero(node)
     assert not response.success and 'still arriving' in response.message
-
+    # Neither an invalid nor a valid command moves the arm again without a fresh Start.
     node.on_command(JointState(name=['joint_1'], position=[math.nan]))
-    assert node.safety_stop and node.stale and node.commanded is None
-    assert node.command_time == stopped_at
-
     command(node, joint_1=0.3)
-    assert not node.safety_stop and not node.stale
-    assert node.commanded['joint_1'] == pytest.approx(0.3)
-    assert node.command_time > stopped_at
+    spin_for(executor, 0.1)
+    assert not node.authorized
+    assert all(servo.target is None and servo.rpm == 0.0 for servo in node.bus.drives.values())
+    press_start(node)
+    assert move(node, executor, joint_1=0.3)
 
 
 def test_silence_before_the_first_command_leaves_the_drives_holding(make_node):
     node, executor = make_node()
     assert spin_until(executor, lambda: node.commanded is not None)
+    press_start(node)
     held, stops, stop_all = dict(node.commanded), [], node.stop_all
 
-    def counted():
-        stops.append(time.monotonic())
-        stop_all()
+    def counted(reason):
+        stops.append(reason)
+        stop_all(reason)
     node.stop_all = counted
-    # Longer than command_timeout_s: an arm nobody has commanded yet keeps its hold target,
-    # and start-up never logs a stale-command warning.
-    spin_for(executor, 1.0)
-    assert stops == [] and node.commanded == held
+    # Longer than command_timeout_s: an enabled arm nobody has commanded yet keeps its hold
+    # target, and start-up never logs a stale-command warning.
+    spin_until(executor, enabled_until(node), 1.0)
+    assert stops == [] and node.authorized and node.commanded == held
