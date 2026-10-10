@@ -364,7 +364,9 @@ The diagnostics panel's `camera.doctor_view` entry shows the frame rate and the 
 from capture to arrival: mean, minimum, maximum and jitter.
 
 **Windows (Docker):** first install OpenCV for the bridge with
-`python -m pip install opencv-python`. Then start the ground station with the camera
+`python -m pip install opencv-python`. Python 3.13 or newer is recommended for the
+bridge: on Windows, older versions read the clock in 15.6 ms steps, which can add up
+to 15.6 ms to the measured delay. Then start the ground station with the camera
 port, from the repository root:
 
 ```powershell

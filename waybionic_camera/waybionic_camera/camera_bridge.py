@@ -54,6 +54,11 @@ def main():
     video_file = os.path.isfile(args.camera)
     number, sender, report = 0, None, time.monotonic()
     next_frame = report
+    resolution = time.get_clock_info('time').resolution
+    if resolution > 1e-3:
+        # Before Python 3.13, time.time_ns() on Windows only advances every 15.6 ms.
+        print(f'Warning: frame times are only precise to {1000 * resolution:.1f} ms with this '
+              'Python; use Python 3.13 or newer for the bridge', file=sys.stderr)
     print(f'Sending camera {args.camera} to {args.host}:{args.port} (Ctrl+C to stop)')
     try:
         while True:
