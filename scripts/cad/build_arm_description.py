@@ -70,6 +70,9 @@ DESCRIPTIONS = {
     'joint_4': 'wrist pitch (differential housing)', 'joint_5': 'wrist roll (output bevel)',
 }
 GEAR_LINKS = ('wrist_left_gear_link', 'wrist_right_gear_link')
+# Placeholder box around the jaws xbox_teleop draws at tool_link (36 mm across when open, 14 mm
+# thick, 30 mm long) as (centre, size), until the real tool is modelled.
+TOOL_BOX = ((0.0, 0.0, 0.015), (0.036, 0.014, 0.03))
 BEVELS = ('straight bevel pinion_iso-2', 'straight bevel pinion_iso-3', 'straight bevel pinion_iso-4')
 # Threaded screws and the enclosed cycloidal discs dominate the triangle count.
 COARSE_PARTS = ('m3-', 'discs-sweep', 'loose_disc')
@@ -623,7 +626,11 @@ def write_urdf(model, source, boxes):
             '    </visual>',
             *collision_lines(*boxes[link]),
             '  </link>']
-    lines += ['  <link name="tool_link"/>']
+    lines += [
+        '  <link name="tool_link">',
+        '    <!-- Placeholder around the RViz jaws until the real tool is modelled. -->',
+        *collision_lines(*TOOL_BOX),
+        '  </link>']
     for joint in model.joints:
         kind = 'continuous' if joint['mimic'] else 'revolute'
         note = DESCRIPTIONS.get(joint['name'], 'differential side gear, follows the output bevel')

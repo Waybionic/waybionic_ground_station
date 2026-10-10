@@ -9,6 +9,7 @@ from waybionic_teleop.collision import _intrusion, _overlap, _rotation, ArmColli
 from waybionic_teleop.gamepad import AXES, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
+from waybionic_teleop.xbox_teleop_node import JAW_OPEN_GAP, JAW_SIZE
 
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
         / 'waybionic_arm.urdf').read_text(encoding='utf-8')
@@ -59,12 +60,12 @@ def test_table_height_and_clearance_are_configurable():
 def test_a_urdf_without_collision_boxes_is_refused():
     with pytest.raises(ValueError, match='no collision box'):
         ArmCollision.from_urdf(URDF.replace('<collision>', '<!--').replace('</collision>', '-->'))
-    # Every link the checks rely on needs its box, including the upper arm.
-    upper_arm = URDF.index('<link name="upper_arm_link">')
-    start = URDF.index('<collision>', upper_arm)
-    end = URDF.index('</collision>', start) + len('</collision>')
-    with pytest.raises(ValueError, match='upper_arm_link'):
-        ArmCollision.from_urdf(URDF[:start] + URDF[end:])
+    # Every link the checks rely on needs its box, including the upper arm and the tool.
+    for link in ('upper_arm_link', 'tool_link'):
+        start = URDF.index('<collision>', URDF.index(f'<link name="{link}">'))
+        end = URDF.index('</collision>', start) + len('</collision>')
+        with pytest.raises(ValueError, match=link):
+            ArmCollision.from_urdf(URDF[:start] + URDF[end:])
 
 
 def test_teleop_backs_out_of_a_collision_but_never_goes_deeper(parameters, check):
@@ -110,14 +111,36 @@ def test_teleop_stops_before_the_forearm_reaches_the_table(parameters, check):
     assert teleop.targets['joint_3'] < elbow - 0.05
 
 
+def test_a_tool_pointing_down_stops_with_its_jaws_clear_of_the_table(parameters, check):
+    teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
+                       LIMITS, ArmKinematics.from_urdf(URDF), check)
+    # The tool points straight down in front of the base, its tip 175 mm above the table.
+    start = {'joint_1': 0.1, 'joint_2': 0.5, 'joint_3': 1.4, 'joint_4': math.pi - 1.9,
+             'joint_5': 0.0, 'tool_grip': 0.0}
+    for button in ('start', 'y', 'y'):
+        teleop.update(*sample(button), start, DT)
+        teleop.update(*sample(), start, DT)
+    assert teleop.active_group.name == 'cartesian'
+    floor = check.table_z + check.clearance
+    stopped = False
+    for _ in range(round(8.0 / DT)):
+        # Right stick down lowers the tool tip.
+        teleop.update(*sample(right_y=-1.0), dict(teleop.targets), DT)
+        assert jaw_bottom(check, teleop.targets) >= floor - 1e-12
+        if 'tool_link: table' in teleop.blocked:
+            stopped = True
+            assert jaw_bottom(check, teleop.command_targets) >= floor - 1e-12
+    assert stopped and jaw_bottom(check, teleop.targets) < floor + 0.001
+
+
 def test_teleop_refuses_a_step_that_presses_one_contact_deeper(parameters, check):
     teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
                        LIMITS, ArmKinematics.from_urdf(URDF), check)
-    # Folded flat onto the table. Lifting the elbow from here eases four of the five contacts
+    # Folded flat onto the table. Lifting the elbow from here eases five of the six contacts
     # by more than it costs, so a total would call it an escape, but the forearm itself is
     # pressed about 3 mm further into the table.
-    start = pose(90, 90, 15)
-    before, after = check.check(start), check.check(pose(90, 85, 15))
+    start = pose(90, 90, 5)
+    before, after = check.check(start), check.check(pose(90, 85, 5))
     assert set(after) == set(before) and sum(after.values()) < sum(before.values())
     assert after['forearm_link: table'] > before['forearm_link: table'] + 0.002
     for button in ('start', 'y'):
@@ -184,3 +207,12 @@ def separating_axis_depth(check, joints):
     poses = check.poses(joints)
     return _overlap(next(check.world_boxes(poses, 'forearm_link')),
                     next(check.world_boxes(poses, 'base_link')), check.clearance)
+
+
+def jaw_bottom(check, joints):
+    """Return the height of the lowest corner of the RViz jaws, fully open."""
+    rotation, origin = check.poses(joints)['tool_link']
+    reach = JAW_OPEN_GAP / 2 + JAW_SIZE[0]
+    corners = [(x, y, z) for x in (-reach, reach) for y in (-JAW_SIZE[1] / 2, JAW_SIZE[1] / 2)
+               for z in (0.0, JAW_SIZE[2])]
+    return min(origin[2] + sum(r * c for r, c in zip(rotation[2], corner)) for corner in corners)

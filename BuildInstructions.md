@@ -381,6 +381,8 @@ identities, wiring, zeroing and electrical safety still need hardware verificati
 Every group stops a move before any part of the arm comes within 10 mm of the
 table or folds into the arm's own base. The checks use a box around each link,
 which you can see by ticking **Collision Enabled** on RViz's RobotModel display.
+The tool's box is a placeholder around the RViz jaws, which reach 30 mm past
+`tool_link`, until the real tool is modelled; a longer tool needs a longer box.
 When a move stops, the diagnostics panel names the part, for example
 `At limit: forearm_link: table`. If the arm stands on a raised mount, set
 `table_height` in `waybionic_teleop/config/xbox_teleop.yaml` to the table's height
@@ -390,7 +392,7 @@ the ones that back out of it: a move that presses any contact further in is
 refused, even if it would ease another contact at the same time.
 
 The boxes are what makes any of this work. A `robot_description` without a
-collision box for the base, shoulder, upper arm, forearm, wrist or wrist roll
+collision box for the base, shoulder, upper arm, forearm, wrist, wrist roll or tool
 leaves teleop disabled, and the diagnostics panel names the missing links.
 A description reload while teleop is enabled disables teleop and holds the arm where
 it is, and the drives stop on any `robot_description` change, so Start has to be

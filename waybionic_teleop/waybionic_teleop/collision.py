@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 # The fixed base and the yaw stage, and what may never touch them.
 BODY = ('base_link', 'shoulder_link')
 FOLDING = ('forearm_link', 'wrist_pitch_link', 'wrist_left_gear_link', 'wrist_right_gear_link',
-           'wrist_roll_link')
+           'wrist_roll_link', 'tool_link')
 REQUIRED = BODY + ('upper_arm_link',) + FOLDING
 
 

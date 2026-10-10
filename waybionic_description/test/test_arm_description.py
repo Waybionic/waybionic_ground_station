@@ -1,11 +1,14 @@
 """Check the generated WayBionic arm description and its COLLADA meshes."""
 
+import ast
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
 import pytest
 
 PACKAGE = Path(__file__).resolve().parents[1]
+# The teleop node draws the placeholder jaws at tool_link in RViz.
+TELEOP_NODE = PACKAGE.parent / 'waybionic_teleop' / 'waybionic_teleop' / 'xbox_teleop_node.py'
 COLLADA = '{http://www.collada.org/2005/11/COLLADASchema}'
 CHAIN = [
     ('joint_1', 'base_link', 'shoulder_link', '0 0 1'),
@@ -83,3 +86,22 @@ def test_every_mesh_is_inside_its_collision_box(robot):
             # The box is written to 0.1 mm.
             assert center[axis] - size[axis] / 2 <= min(points) + 1e-4
             assert max(points) <= center[axis] + size[axis] / 2 + 1e-4
+
+
+def test_the_tool_box_encloses_the_placeholder_jaws(robot):
+    constants = {statement.targets[0].id: statement.value
+                 for statement in ast.parse(TELEOP_NODE.read_text(encoding='utf-8')).body
+                 if isinstance(statement, ast.Assign)
+                 and isinstance(statement.targets[0], ast.Name)}
+    width, thickness, length = ast.literal_eval(constants['JAW_SIZE'])
+    # Fully open, each jaw's outer face is half the gap plus its width from the tool axis.
+    reach = ast.literal_eval(constants['JAW_OPEN_GAP']) / 2 + width
+    jaws = ((-reach, reach), (-thickness / 2, thickness / 2), (0.0, length))
+    boxes = robot.find("link[@name='tool_link']").findall('collision')
+    assert len(boxes) == 1
+    center = [float(value) for value in boxes[0].find('origin').get('xyz').split()]
+    size = [float(value) for value in boxes[0].find('geometry/box').get('size').split()]
+    assert boxes[0].find('origin').get('rpy') == '0 0 0'
+    for axis, (low, high) in enumerate(jaws):
+        assert center[axis] - size[axis] / 2 <= low + 1e-9
+        assert high <= center[axis] + size[axis] / 2 + 1e-9

@@ -77,7 +77,13 @@
       <geometry><box size="0.07 0.0695 0.0815"/></geometry>
     </collision>
   </link>
-  <link name="tool_link"/>
+  <link name="tool_link">
+    <!-- Placeholder around the RViz jaws until the real tool is modelled. -->
+    <collision>
+      <origin xyz="0 0 0.015" rpy="0 0 0"/>
+      <geometry><box size="0.036 0.014 0.03"/></geometry>
+    </collision>
+  </link>
   <!-- base yaw -->
   <joint name="joint_1" type="revolute">
     <parent link="base_link"/>
