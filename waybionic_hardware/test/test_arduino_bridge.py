@@ -1,6 +1,6 @@
 """Minimal tests for Arduino bridge module."""
-import unittest
 from types import SimpleNamespace
+import unittest
 
 
 class TestArduinoBridge(unittest.TestCase):
@@ -12,7 +12,7 @@ class TestArduinoBridge(unittest.TestCase):
             from waybionic_hardware import arduino_bridge  # noqa: F401
             self.assertTrue(True)
         except ImportError:
-            self.fail("Failed to import arduino_bridge")
+            self.fail('Failed to import arduino_bridge')
 
     def test_joint_names_match_old_arm_model(self):
         """Joint states target the imported old-arm URDF joints."""
@@ -101,7 +101,6 @@ class TestArduinoBridge(unittest.TestCase):
 
     def test_arrived_after_stop_does_not_start_next_move(self):
         from std_msgs.msg import String
-        from waybionic_hardware.arduino_bridge import ArduinoBridge
 
         bridge = self.make_bridge()
         bridge.send_move = lambda target, command_kind: bridge.serial_port.writes.append(
@@ -145,8 +144,10 @@ class TestArduinoBridge(unittest.TestCase):
         bridge = self.make_bridge()
         bridge.faulted = True
         bridge.last_status = 'arduino-error'
-        bridge.diagnostics_publisher = SimpleNamespace(publish=lambda message: setattr(bridge, 'diagnostic', message))
-        bridge.status_publisher = SimpleNamespace(publish=lambda message: setattr(bridge, 'motion_status', message))
+        bridge.diagnostics_publisher = SimpleNamespace(
+            publish=lambda message: setattr(bridge, 'diagnostic', message))
+        bridge.status_publisher = SimpleNamespace(
+            publish=lambda message: setattr(bridge, 'motion_status', message))
         bridge.count_subscribers = lambda topic: 1
         bridge.port = '/dev/fake'
         bridge.baud = 115200
@@ -165,8 +166,10 @@ class TestArduinoBridge(unittest.TestCase):
         bridge = self.make_bridge()
         bridge.ready = False
         bridge.last_status = 'connected'
-        bridge.diagnostics_publisher = SimpleNamespace(publish=lambda message: setattr(bridge, 'diagnostic', message))
-        bridge.status_publisher = SimpleNamespace(publish=lambda message: setattr(bridge, 'motion_status', message))
+        bridge.diagnostics_publisher = SimpleNamespace(
+            publish=lambda message: setattr(bridge, 'diagnostic', message))
+        bridge.status_publisher = SimpleNamespace(
+            publish=lambda message: setattr(bridge, 'motion_status', message))
         bridge.count_subscribers = lambda topic: 1
         bridge.port = '/dev/fake'
         bridge.baud = 115200

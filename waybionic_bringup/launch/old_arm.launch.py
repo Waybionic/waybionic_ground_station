@@ -69,7 +69,14 @@ def generate_launch_description():
         launch_arguments={
             'model': LaunchConfiguration('model'),
             'rvizconfig': os.path.join(bringup, 'rviz', 'waybionic_old_arm.rviz'),
-            'use_joint_state_publisher_gui': LaunchConfiguration('use_joint_state_publisher_gui'),
+            'use_joint_state_publisher_gui': PythonExpression([
+                _PYTHON_QUOTE + 'true' + _PYTHON_QUOTE + ' if str(' + _PYTHON_QUOTE,
+                LaunchConfiguration('hardware_mode'),
+                _PYTHON_QUOTE + ').lower() != "arduino" and str(' + _PYTHON_QUOTE,
+                LaunchConfiguration('use_joint_state_publisher_gui'),
+                _PYTHON_QUOTE + ').lower() in ("true", "1") else '
+                + _PYTHON_QUOTE + 'false' + _PYTHON_QUOTE,
+            ]),
             'launch_rviz': LaunchConfiguration('launch_rviz'),
             'use_sim_time': LaunchConfiguration('use_sim_time'),
             'use_mock_diagnostics': LaunchConfiguration('use_mock_diagnostics'),

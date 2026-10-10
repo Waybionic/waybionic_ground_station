@@ -1,6 +1,6 @@
 """Minimal tests for motion test module."""
-import unittest
 from types import SimpleNamespace
+import unittest
 
 
 class TestMotionTest(unittest.TestCase):
@@ -12,7 +12,7 @@ class TestMotionTest(unittest.TestCase):
             from waybionic_motion_test import motion_test  # noqa: F401
             self.assertTrue(True)
         except ImportError:
-            self.fail("Failed to import motion_test")
+            self.fail('Failed to import motion_test')
 
     def test_joint_names_match_old_arm_model(self):
         """Joint states target the imported old-arm URDF joints."""

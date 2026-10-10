@@ -2,8 +2,8 @@ import math
 import threading
 import time
 
-import rclpy
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
+import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
@@ -294,14 +294,34 @@ class ArduinoBridge(Node):
         with self.state_lock:
             now = time.monotonic()
             if not self.dry_run and self.connected:
-                if not self.ready and self.last_response_monotonic is not None and now - self.last_response_monotonic > HANDSHAKE_TIMEOUT_SECONDS:
+                if (
+                    not self.ready
+                    and self.last_response_monotonic is not None
+                    and now - self.last_response_monotonic > HANDSHAKE_TIMEOUT_SECONDS
+                ):
                     self._latch_fault('handshake-timeout', 'Arduino handshake timed out.')
-                elif self.motion_active and self.last_response_monotonic is not None and now - self.last_response_monotonic > self.motion_duration + RESPONSE_TIMEOUT_SECONDS:
+                elif (
+                    self.motion_active
+                    and self.last_response_monotonic is not None
+                    and now - self.last_response_monotonic > (
+                        self.motion_duration + RESPONSE_TIMEOUT_SECONDS)
+                ):
                     self._latch_fault('serial-read-failed', 'Arduino response watchdog timed out.')
-                elif self.ready and not self.motion_active and self.last_response_monotonic is not None:
-                    if self.awaiting_probe and self.probe_sent_monotonic is not None and now - self.probe_sent_monotonic > HANDSHAKE_TIMEOUT_SECONDS:
+                elif (
+                    self.ready
+                    and not self.motion_active
+                    and self.last_response_monotonic is not None
+                ):
+                    if (
+                        self.awaiting_probe
+                        and self.probe_sent_monotonic is not None
+                        and now - self.probe_sent_monotonic > HANDSHAKE_TIMEOUT_SECONDS
+                    ):
                         self._latch_fault('idle-timeout', 'Arduino stopped responding while idle.')
-                    elif not self.awaiting_probe and now - self.last_response_monotonic > IDLE_RESPONSE_TIMEOUT_SECONDS:
+                    elif (
+                        not self.awaiting_probe
+                        and now - self.last_response_monotonic > IDLE_RESPONSE_TIMEOUT_SECONDS
+                    ):
                         self.awaiting_probe = True
                         self.probe_sent_monotonic = now
                         self.send_line('ID')
@@ -324,7 +344,11 @@ class ArduinoBridge(Node):
         message.position = model_radians_from_physical(estimated_current)
         self.joint_publisher.publish(message)
 
-        if self.dry_run and self.motion_active and time.monotonic() >= self.motion_started + self.motion_duration:
+        if (
+            self.dry_run
+            and self.motion_active
+            and time.monotonic() >= self.motion_started + self.motion_duration
+        ):
             self.process_serial_line('OK,ARRIVED')
 
     def publish_diagnostics(self):
