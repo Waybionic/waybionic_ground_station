@@ -8,7 +8,7 @@ These google docs are still editable and may be changed
 - [Camera's Mechanical Requirements](https://docs.google.com/document/d/15i2DtYXTZA4_sDSY5-uei4Io7vbqmeA7kBANB8NLVCQ/edit?tab=t.0)
 
 ## Current Best Source
-The [camera system design](https://github.com/Waybionic/waybionic_ground_station/blob/docs/camera-controller-handoff-gianna/docs/camera-research/doctor_camera_system_design.md) is so far the most up to date document surrounding the camera, constraints, and everything that mechanical and electrical has told us.
+The [camera system design](doctor_camera_system_design.md) is so far the most up to date document surrounding the camera, constraints, and everything that mechanical and electrical has told us.
 
 ## Current Recommendation (first testing)
 
@@ -27,7 +27,7 @@ Expected ROS Topics:
   - /doctor_view/left|right/camera_info - A topic that contains the calibration settings for the left and/or right cameras
   - /doctor_view/preview/image_view - A topic that gives the overall view for the operator.
 
-Latency Target: Should remain consistently >30-50ms.
+Latency Target: Should remain below 30 to 50ms.
 
 Unresolved Hardware Questions: 
   - Mechanical envelope for the camera.
