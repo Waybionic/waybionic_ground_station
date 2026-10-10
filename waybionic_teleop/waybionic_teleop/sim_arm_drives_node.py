@@ -175,6 +175,7 @@ class SimArmDrives(Node):
         can_id = self.map.drives[index].can_id
         self.unconfirmed[index] = set(SETUP)
         self.setup_time[index] = time.monotonic()
+        self.state[index] = 'starting'
         for data in (mks_can.set_mode(can_id),
                      mks_can.set_response(can_id, respond=True, active=True),
                      mks_can.enable(can_id),
@@ -422,7 +423,7 @@ class SimArmDrives(Node):
             return
         if self.lost[index]:
             # It may have been power-cycled, which loses its settings and its zero.
-            self.lost[index], self.state[index] = False, 'starting'
+            self.lost[index] = False
             self.set_up(index)
             self.get_logger().warning(
                 f'{self.map.drives[index].name} answers again. {self.zero_hint()}')
@@ -502,10 +503,15 @@ class SimArmDrives(Node):
             turns = '' if self.counts[index] is None else (
                 f'{self.counts[index] / mks_can.COUNTS_PER_REV:+.3f}')
             text = 'no reply' if silent else self.state[index]
+            # A drive is never driven before it confirms every setup frame.
+            pending = ', '.join(f'{code:02X}h' for code in sorted(self.unconfirmed[index]))
+            if not silent and pending:
+                text += f', setup {pending} unconfirmed'
             if not silent and not self.zeroed[index]:
                 text += ', not zeroed'
             level = (DiagnosticStatus.ERROR if silent or failed else
-                     DiagnosticStatus.OK if self.zeroed[index] else DiagnosticStatus.WARN)
+                     DiagnosticStatus.WARN if pending or not self.zeroed[index] else
+                     DiagnosticStatus.OK)
             statuses.append(status(
                 f'drive.{drive.name}', level, turns, 'rev',
                 f'CAN ID {drive.can_id}: {text}'

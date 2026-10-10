@@ -366,6 +366,43 @@ def test_a_stop_the_interface_refuses_is_sent_again_until_it_goes_out(node, monk
     assert node.authorized
 
 
+def test_drive_rows_show_a_setup_frame_until_the_drive_confirms_it(node, monkeypatch):
+    advance(node)
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+
+    def shoulder():
+        node.report()
+        return next(item for item in published[-1].status if item.name == 'drive.shoulder')
+
+    assert shoulder().level == DiagnosticStatus.OK
+    servo, heartbeats = node.bus.drives[2], []
+    answer = servo.receive
+
+    def heartbeat(data):
+        # The shoulder refuses its heartbeat setting once, then never answers it.
+        if data[0] != mks_can.SET_HEARTBEAT:
+            return answer(data)
+        heartbeats.append(data)
+        return [mks_can.frame(2, mks_can.SET_HEARTBEAT, [0])] if len(heartbeats) == 1 else []
+    monkeypatch.setattr(servo, 'receive', heartbeat)
+    node.set_up(1)
+    advance(node)
+    row = shoulder()
+    assert row.level == DiagnosticStatus.ERROR and 'setup 98h failed' in row.message
+    # The retry clears the failure, but a drive that never confirms is not reported ready.
+    node.setup_time[1] -= REPLY_TIMEOUT_S
+    advance(node)
+    row = shoulder()
+    assert len(heartbeats) == 2
+    assert row.level == DiagnosticStatus.WARN and 'setup 98h unconfirmed' in row.message
+    monkeypatch.setattr(servo, 'receive', answer)
+    node.setup_time[1] -= REPLY_TIMEOUT_S
+    advance(node)
+    row = shoulder()
+    assert row.level == DiagnosticStatus.OK and row.message.startswith('CAN ID 2: ready')
+
+
 @pytest.mark.parametrize('timeout', [0.0, -0.5, math.inf])
 def test_the_enable_timeout_must_be_positive_and_finite(monkeypatch, parameters, timeout):
     monkeypatch.setenv('ROS_AUTOMATIC_DISCOVERY_RANGE', 'OFF')
