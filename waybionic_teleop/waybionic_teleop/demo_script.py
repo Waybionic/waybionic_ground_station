@@ -1,9 +1,9 @@
 """
 The self-running controller demo: what to press, and when, to show the arm off on its own.
 
-The player sends controller samples to teleop the way an operator would, and reads teleop's
-state back from its diagnostics, so each run starts the same way whatever group, speed or pose
-the last operator left behind.
+The player sends controller samples to teleop the way an operator would, and reads teleop's and
+the drives' state back from their diagnostics, so each run starts the same way whatever group,
+speed or pose the last operator left behind.
 """
 
 from dataclasses import dataclass
@@ -51,11 +51,14 @@ CARTESIAN = [
 
 @dataclass
 class TeleopState:
-    """What the player knows about teleop: from its diagnostics, and the joint states."""
+    """What the player knows about teleop and the drives: from diagnostics and joint states."""
 
     enabled: bool = None
     group: str = None
     at_home: bool = False
+    # Every drive ready with a valid model (arm.command_gate WARN or OK); the gate open (OK).
+    drives_ready: bool = False
+    gate_open: bool = False
     # time.monotonic() of teleop's last report and of the last joint states.
     reported: float = -math.inf
     measured: float = -math.inf
@@ -97,9 +100,14 @@ class DemoPlayer:
     def script(self):
         yield from self.silence(SILENCE_S)
         yield from self.hold(0.5)
+        # Like an operator, press Start only once the drives' gate is waiting for it.
+        if not (yield from self.wait(
+                lambda: self.state.drives_ready and not self.state.gate_open, 2.0)):
+            yield from self.hold(2.0)
+            return
         yield from self.press('start')
-        if not (yield from self.wait(lambda: self.state.enabled, 2.0)):
-            # Teleop is not ready (for example no joint states yet): try again shortly.
+        if not (yield from self.wait(lambda: self.state.enabled and self.state.gate_open, 2.0)):
+            # Start was not taken (for example no joint states yet): try again shortly.
             yield from self.hold(2.0)
             return
         # Three presses reach the slowest speed from any level, then two give 50%.

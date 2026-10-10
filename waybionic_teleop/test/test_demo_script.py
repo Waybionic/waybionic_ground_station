@@ -30,6 +30,8 @@ def play(teleop, kinematics, measured, seconds):
     for tick in range(round(seconds * RATE)):
         if tick % round(REPORT_S * RATE) == 0:
             state.enabled, state.group = teleop.enabled, teleop.active_group.name
+            # Perfect drives: ready, with the command gate open exactly while teleop is enabled.
+            state.drives_ready, state.gate_open = True, teleop.enabled
         state.at_home = all(abs(measured[joint]) < 0.01 for joint in kinematics.joints)
         sample = player.step(state)
         # Like the teleop node: the last sample stays in force until the input times out.

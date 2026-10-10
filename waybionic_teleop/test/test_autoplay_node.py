@@ -16,6 +16,7 @@ from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
         / 'waybionic_arm.urdf').read_text(encoding='utf-8')
 JOINTS = ['joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5']
+DRIVES = ['base_yaw', 'shoulder', 'elbow', 'wrist_left', 'wrist_right', 'tool']
 RATE = 120.0
 # Teleop and the drives report twice a second.
 REPORT_TICKS = round(RATE / 2)
@@ -24,9 +25,17 @@ TELEOP = DiagnosticArray(status=[
     DiagnosticStatus(name='teleop.group', values=[KeyValue(key='value', value='base')])])
 
 
-def drives(interface):
-    return DiagnosticArray(status=[DiagnosticStatus(name='can.bus', values=[
-        KeyValue(key='value', value='0'), KeyValue(key='interface', value=interface)])])
+def row(name, level, value, **extra):
+    return DiagnosticStatus(name=name, level=level, values=[
+        KeyValue(key=key, value=item) for key, item in {'value': value, **extra}.items()])
+
+
+def drives(interface, gate=DiagnosticStatus.WARN, drive=DiagnosticStatus.OK):
+    """Report like the drive node: its bus, command gate (waiting for Start) and each drive."""
+    return DiagnosticArray(status=[
+        row('can.bus', DiagnosticStatus.OK, '0', interface=interface),
+        row('arm.command_gate', gate, 'enabled' if gate == DiagnosticStatus.OK else 'stopped'),
+        *(row(f'drive.{name}', drive, '+0.000') for name in DRIVES)])
 
 
 def joy(*buttons, **axes):
@@ -56,7 +65,8 @@ class Bench:
         node.joy_publisher.publish = lambda message: self.sent.append((clock.now, message))
         node.on_description(String(data=URDF))
 
-    def run(self, seconds, teleop=True, interface='sim', joints=True, operator=None):
+    def run(self, seconds, teleop=True, interface='sim', joints=True, operator=None,
+            **drive_levels):
         """Tick for this long; return what reached teleop's joy topic, with when it was sent."""
         start = len(self.sent)
         for tick in range(round(seconds * RATE)):
@@ -64,7 +74,7 @@ class Bench:
                 if teleop:
                     self.node.on_diagnostics(TELEOP)
                 if interface:
-                    self.node.on_diagnostics(drives(interface))
+                    self.node.on_diagnostics(drives(interface, **drive_levels))
             if joints:
                 self.node.on_joint_states(JointState(name=JOINTS, position=[0.0] * len(JOINTS)))
             if operator:
@@ -109,8 +119,31 @@ def test_the_demo_never_plays_on_real_drives(bench):
     assert bench.sent == [(bench.clock.now, stick)]
 
 
-def test_the_demo_waits_for_the_drives_to_report(bench):
-    assert bench.run(5.0, interface=None) == []
+@pytest.mark.parametrize('report', [
+    {'interface': None},
+    # A drive not set up or zeroed, or silent.
+    {'drive': DiagnosticStatus.WARN},
+    {'drive': DiagnosticStatus.ERROR},
+    # The drives have no valid robot description.
+    {'gate': DiagnosticStatus.ERROR},
+])
+def test_the_demo_waits_for_the_drives_to_be_ready(bench, report):
+    assert bench.run(5.0, **report) == []
+
+
+def test_start_waits_for_the_drives_gate_to_wait_for_it(bench):
+    # While the gate still passes commands, a Start would only disable teleop.
+    assert not pressed(bench.run(4.0, gate=DiagnosticStatus.OK), 'start')
+    assert pressed(bench.run(4.0), 'start')
+
+
+def test_the_demo_plays_on_only_once_the_drives_take_the_start(bench):
+    # Teleop reports enabled, but the drives' gate stays shut: the demo starts over.
+    sent = bench.run(6.0)
+    assert pressed(sent, 'start') and not pressed(sent, 'dpad_down')
+    assert pressed(bench.run(1.9), 'start')
+    # This time the gate opens, and the demo sets the speed.
+    assert pressed(bench.run(3.0, gate=DiagnosticStatus.OK), 'dpad_down')
 
 
 def test_the_demo_stops_while_another_node_publishes_joy(bench, context):

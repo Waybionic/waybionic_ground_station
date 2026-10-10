@@ -5,15 +5,16 @@ The real controller arrives on joy_operator and is passed on to teleop's joy top
 takes over joy as soon as teleop is ready, and again after idle_s seconds without a button,
 stick or trigger moving; the moment someone touches the controller, it stops, presses B so
 teleop is left disabled, and passes the controller through. It only plays while the drives
-report that they are simulated and no other node publishes joy, and sends nothing while
-teleop's state, the joint states or the drives' report are out of date, so teleop times out.
+report that they are simulated and ready and no other node publishes joy, presses Start only
+while the drives' command gate waits for it, and sends nothing while teleop's state, the joint
+states or the drives' report are out of date, so teleop times out.
 The demo draws the tool tip's path and a caption in RViz.
 """
 
 import math
 import time
 
-from diagnostic_msgs.msg import DiagnosticArray
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 from geometry_msgs.msg import Point
 import rclpy
 from rclpy.executors import ExternalShutdownException
@@ -43,6 +44,7 @@ class Autoplay(Node):
         self.state = TeleopState()
         self.joints = {}
         self.drive_interface, self.drives_reported = None, -math.inf
+        self.unready = []
         self.kinematics = None
         self.playing = False
         self.handover = None
@@ -74,6 +76,7 @@ class Autoplay(Node):
 
     def on_diagnostics(self, message):
         now = time.monotonic()
+        rows = {status.name: status for status in message.status}
         for status in message.status:
             values = {item.key: item.value for item in status.values}
             if status.name == 'teleop.state':
@@ -83,6 +86,17 @@ class Autoplay(Node):
                 self.state.group = values.get('value')
             elif status.name == 'can.bus':
                 self.drive_interface, self.drives_reported = values.get('interface'), now
+                self.on_drives(rows)
+
+    def on_drives(self, rows):
+        """Read the command gate and drive rows the drive node reports with its bus."""
+        gate = rows.get('arm.command_gate')
+        drives = [status for name, status in rows.items() if name.startswith('drive.')]
+        self.unready = [status.name for status in drives if status.level != DiagnosticStatus.OK]
+        if gate is None or gate.level == DiagnosticStatus.ERROR:
+            self.unready.insert(0, 'arm.command_gate')
+        self.state.drives_ready = bool(drives) and not self.unready
+        self.state.gate_open = gate is not None and gate.level == DiagnosticStatus.OK
 
     def on_operator(self, message):
         if operator_active(message.axes, message.buttons, self.deadzone):
@@ -103,6 +117,8 @@ class Autoplay(Node):
             return 'waiting for teleop, the joint states and the drives to report'
         if self.drive_interface != 'sim':
             return f'the drives are not simulated ({self.drive_interface})'
+        if not self.state.drives_ready:
+            return 'the drives are not ready: ' + (', '.join(self.unready) or 'no drive rows')
         if self.count_publishers(self.joy_publisher.topic_name) > 1:
             return 'another node publishes joy'
         return None
