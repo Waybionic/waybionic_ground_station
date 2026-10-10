@@ -160,7 +160,7 @@ def test_cartesian_next_setpoint_stays_at_the_tip_when_tilt_hits_a_limit(drives,
         tip, _ = arm.forward(teleop.targets)
         ahead, _ = arm.forward(teleop.command_targets)
         assert ahead == pytest.approx(tip, abs=1e-9)
-        assert all(lower - 1e-8 <= teleop.command_targets[joint] <= upper + 1e-8
+        assert all(lower <= teleop.command_targets[joint] <= upper
                    for joint, (lower, upper) in LIMITS.items())
         moves = mapping.synchronized(teleop.command_targets, mapping.to_counts(teleop.targets),
                                      period, drives['max_rpm'])

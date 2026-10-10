@@ -31,17 +31,25 @@ def _is(vector, expected):
     return all(abs(a - b) <= TOLERANCE for a, b in zip(vector, expected))
 
 
-def _within(value, bounds):
+def _within(value, bounds, tolerance=TOLERANCE):
     lower, upper = bounds or (-math.inf, math.inf)
-    return lower - TOLERANCE <= value <= upper + TOLERANCE
+    return lower - tolerance <= value <= upper + tolerance
 
 
-def nearest_within(angle, reference, bounds):
+def _clamp(value, bounds):
+    lower, upper = bounds or (-math.inf, math.inf)
+    return min(max(value, lower), upper)
+
+
+def nearest_within(angle, reference, bounds, tolerance=TOLERANCE):
     """Return the turn of angle nearest reference that lies within bounds, or None."""
     base = reference + math.remainder(angle - reference, 2 * math.pi)
     options = [base + turn * 2 * math.pi for turn in (0, -1, 1)]
-    options = [value for value in options if _within(value, bounds)]
-    return min(options, key=lambda value: abs(value - reference)) if options else None
+    options = [value for value in options if _within(value, bounds, tolerance)]
+    if not options:
+        return None
+    # The tolerance absorbs solver noise; the drives reject any target past the limit.
+    return _clamp(min(options, key=lambda value: abs(value - reference)), bounds)
 
 
 def joint_limits(urdf, joints, required=True):
@@ -146,7 +154,7 @@ class ArmKinematics:
         cos, sin = math.cos(yaw), math.sin(yaw)
         return (cos * reach - sin * self.offset, sin * reach + cos * self.offset, height), pitch
 
-    def inverse(self, position, pitch, roll, reference, limits=None):
+    def inverse(self, position, pitch, roll, reference, limits=None, tolerance=TOLERANCE):
         """Return the joints nearest reference that put the tip at position, or None."""
         limits = limits or {}
         x, y, z = position
@@ -168,7 +176,7 @@ class ArmKinematics:
                     self.fore * math.sin(b), self.upper + self.fore * math.cos(b))
                 candidate = {}
                 for name, value in zip(self.joints, (yaw, a, b, pitch - a - b, roll)):
-                    value = nearest_within(value, reference[name], limits.get(name))
+                    value = nearest_within(value, reference[name], limits.get(name), tolerance)
                     if value is None:
                         break
                     candidate[name] = value
@@ -200,18 +208,19 @@ class ArmKinematics:
         start, pitch = self.forward(joints)
         yaw, roll = self.joints[0], self.joints[4]
 
-        def solve(fraction, bounds):
+        def solve(fraction, bounds, tolerance=TOLERANCE):
             new_pitch = pitch + pitch_rate * dt * fraction
             target = [p + v * dt * fraction for p, v in zip(start, velocity)]
             arm = {name: value for name, value in bounds.items() if name != roll}
-            result = self.inverse(target, new_pitch, joints[roll], joints, arm)
+            result = self.inverse(target, new_pitch, joints[roll], joints, arm, tolerance)
             if result is None:
                 return None
             # Turning the yaw also turns the tool about its own axis by cos(pitch) of that turn.
             result[roll] = (joints[roll] + roll_rate * dt * fraction
                             - math.cos((pitch + new_pitch) / 2.0) * (result[yaw] - joints[yaw]))
-            if not _within(result[roll], bounds.get(roll)):
+            if not _within(result[roll], bounds.get(roll), tolerance):
                 return None
+            result[roll] = _clamp(result[roll], bounds.get(roll))
             if bounds:
                 for name, (lower, upper) in limits.items():
                     if name not in joints:
@@ -240,7 +249,8 @@ class ArmKinematics:
         low, high, best = 0.0, fraction, None
         for _ in range(40):
             middle = (low + high) / 2.0
-            found = solve(middle, bounds)
+            # Exact limits: clamping a step back from the tolerance would bend the line.
+            found = solve(middle, bounds, 0.0)
             if found is not None and fastest(found) <= max_rate * (1.0 + 1e-6):
                 low, best = middle, found
             else:

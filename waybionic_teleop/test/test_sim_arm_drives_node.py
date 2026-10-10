@@ -14,7 +14,10 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, String
 
 from waybionic_teleop import joy_udp_receiver, mks_can, sim_arm_drives_node, xbox_teleop_node
+from waybionic_teleop.gamepad import AXES, BUTTONS
+from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 from waybionic_teleop.sim_arm_drives_node import REPLY_TIMEOUT_S, SimArmDrives
+from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
         / 'waybionic_arm.urdf').read_text(encoding='utf-8')
@@ -28,6 +31,9 @@ POSE = {'joint_1': 0.8, 'joint_2': -0.8, 'joint_3': 0.8,
         'joint_4': 0.8, 'joint_5': 0.25, 'tool_grip': 0.8}
 RATES = {'joint_1': 0.2, 'joint_2': -0.2, 'joint_3': 0.2,
          'joint_4': 0.2, 'joint_5': 0.05, 'tool_grip': 0.2}
+# Tool pointing straight down in front of the base, where straight cuts start.
+DOWN = {'joint_1': 0.1, 'joint_2': 0.5, 'joint_3': 1.4, 'joint_4': math.pi - 1.9,
+        'joint_5': 0.0, 'tool_grip': 0.0}
 
 SHUTDOWN_NODES = [
     (xbox_teleop_node, 'XboxTeleop'),
@@ -283,6 +289,34 @@ def test_six_drive_host_pause_drops_pending_targets_until_fresh_start(node):
     advance(node, 2.0)
     assert all(drive.heartbeat_stops == 2 for drive in node.bus.drives.values())
     assert_stopped(node)
+
+
+def test_a_cartesian_tilt_into_a_joint_limit_keeps_the_drives_enabled(node, parameters):
+    for drive, count in zip(node.map.drives, node.map.to_counts(DOWN)):
+        node.bus.drives[drive.can_id].axis = float(count)
+    ready(node)
+    arm = ArmKinematics.from_urdf(URDF)
+    teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
+                       joint_limits(URDF, arm.joints), arm)
+    teleop.enable(node.map.to_positions(node.counts), [0.0] * len(AXES))
+    teleop.group = [group.name for group in teleop.groups].index('cartesian')
+    tilt_up = [int(name == 'dpad_right') for name in BUTTONS]
+    at_limit = 0
+    for _ in range(600):
+        teleop.update([0.0] * len(AXES), tilt_up, {}, node.period)
+        targets = teleop.command_targets
+        node.on_enabled(Bool(data=True))
+        node.on_command(JointState(name=list(targets), position=list(targets.values()),
+                                   velocity=[teleop.velocities[joint] for joint in targets]))
+        advance(node)
+        assert node.authorized, node.stop_reason
+        at_limit += 'joint_3' in teleop.blocked
+        if at_limit == 20:
+            break
+    else:
+        pytest.fail('the Cartesian tilt never reached the joint_3 limit')
+    assert node.rejected == 0
+    assert node.commanded['joint_3'] == pytest.approx(node.limits['joint_3'][1], abs=1e-9)
 
 
 @pytest.mark.parametrize('module, class_name', SHUTDOWN_NODES)
