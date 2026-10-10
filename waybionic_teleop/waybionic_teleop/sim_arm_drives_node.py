@@ -106,6 +106,8 @@ class SimArmDrives(Node):
             self.bus = CanBus(self.interface, channel, self.bitrate)
             self.bus_label = f'{self.interface} {channel}'
         self.counts = [None] * len(drives)
+        # Host time since each drive's last encoder reading, which bounds how far it can turn.
+        self.since_count = [0.0] * len(drives)
         self.heard = [None] * len(drives)
         self.unanswered = [0] * len(drives)
         # Counted in polls rather than seconds, so a host that stalls does not trip it.
@@ -279,6 +281,7 @@ class SimArmDrives(Node):
         # The old motion must consume the entire elapsed host time before any new frame
         # can reset its heartbeat. A pause requires a released and newly pressed Start.
         self.bus.step(dt)
+        self.since_count = [elapsed + dt for elapsed in self.since_count]
         if self.interface == 'sim':
             for index, drive in enumerate(self.map.drives):
                 # A simulated drive taken off the bus, as if unplugged, reports nothing.
@@ -322,16 +325,21 @@ class SimArmDrives(Node):
 
     def check_replies(self):
         now = time.monotonic()
-        for index, drive in enumerate(self.map.drives):
+        for index in range(len(self.map.drives)):
             if self.unconfirmed[index] and now - self.setup_time[index] > REPLY_TIMEOUT_S:
                 # A lost setup frame or reply: ask again rather than move without it.
                 self.set_up(index)
             if (self.heard[index] is None or self.lost[index]
                     or self.unanswered[index] <= self.max_unanswered):
                 continue
-            self.lost[index], self.zeroed[index] = True, False
-            self.stop_all(f'{drive.name} stopped answering')
-            self.get_logger().error(f'{drive.name} stopped answering; every drive is stopped')
+            self.lose(index, 'stopped answering')
+
+    def lose(self, index, reason):
+        """Treat a drive as power-cycled: every drive stops until the arm is zeroed again."""
+        name = self.map.drives[index].name
+        self.lost[index], self.zeroed[index] = True, False
+        self.stop_all(f'{name} {reason}')
+        self.get_logger().error(f'{name} {reason}; every drive is stopped')
 
     def check_following(self):
         for index, (sent, count) in enumerate(zip(self.sent, self.counts)):
@@ -410,9 +418,17 @@ class SimArmDrives(Node):
             self.get_logger().warning(
                 f'{self.map.drives[index].name} answers again. {self.zero_hint()}')
         failed = None
+        jump = None
         try:
             if code == mks_can.READ_ENCODER:
-                self.counts[index] = mks_can.encoder_value(arguments)
+                count, previous = mks_can.encoder_value(arguments), self.counts[index]
+                # The farthest the drive can turn since its last reading, with a period of
+                # slack for a late reply; a longer step means its encoder count restarted.
+                most = self.max_rpm / 60.0 * mks_can.COUNTS_PER_REV * (
+                    self.since_count[index] + 2 * self.period)
+                if previous is not None and abs(count - previous) > most:
+                    jump = count - previous
+                self.counts[index], self.since_count[index] = count, 0.0
             elif code == mks_can.ABSOLUTE_AXIS and arguments:
                 self.state[index] = mks_can.RUN_STATUS.get(arguments[0], f'status {arguments[0]}')
                 if arguments[0] in RUN_FAULTS:
@@ -431,6 +447,9 @@ class SimArmDrives(Node):
             self.get_logger().warning(str(error), throttle_duration_sec=2.0)
             return
         self.heard[index], self.unanswered[index] = now, 0
+        if jump is not None:
+            # A drive that browned out and restarted answers well before it counts as silent.
+            self.lose(index, f'encoder jumped {jump:+d} counts')
         # Only stop frames go out while disarmed, and a released motor refuses those too.
         if failed and self.authorized:
             self.fault(index, failed)

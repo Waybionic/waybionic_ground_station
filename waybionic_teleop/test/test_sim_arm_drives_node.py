@@ -18,6 +18,7 @@ from waybionic_teleop import joy_udp_receiver, mks_can, sim_arm_drives_node, xbo
 from waybionic_teleop.gamepad import AXES, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 from waybionic_teleop.sim_arm_drives_node import REPLY_TIMEOUT_S, SimArmDrives
+from waybionic_teleop.sim_drives import SimulatedServo
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
@@ -312,6 +313,28 @@ def test_a_drive_that_stops_following_its_targets_stops_every_drive(node, monkey
     assert behind[-6:] == [0, 1, 2, 3, 4, 5] and len(behind) == 20
     assert not node.zeroed[0] and 'base_yaw' in node.stop_reason
     assert all(servo.target is None and servo.rpm == 0.0 for servo in node.bus.drives.values())
+
+
+def test_a_drive_that_restarts_between_polls_is_set_up_and_zeroed_again(node):
+    start = dict.fromkeys(node.map.joints, 0.0)
+    start['joint_2'] = 1.2
+    for drive, count in zip(node.map.drives, node.map.to_counts(start)):
+        node.bus.drives[drive.can_id].axis = float(count)
+    ready(node)
+    advance(node)
+    # The shoulder browns out and restarts between two polls: its count starts again from
+    # zero and its settings are gone, long before 60 unanswered polls would show it.
+    restarted = node.bus.drives[2] = SimulatedServo(2)
+    advance(node)
+    assert not node.authorized and not node.zeroed[1]
+    assert node.stop_reason.startswith('shoulder encoder jumped')
+    assert all(servo.target is None and servo.rpm == 0.0 for servo in node.bus.drives.values())
+    # Its next reply has it set up again, but the arm moves only after a new zero.
+    advance(node)
+    assert restarted.enabled and restarted.heartbeat_ms == node.heartbeat_ms
+    node.on_enabled(Bool(data=False))
+    node.on_enabled(Bool(data=True))
+    assert not node.authorized
 
 
 @pytest.mark.parametrize('timeout', [0.0, -0.5, math.inf])
