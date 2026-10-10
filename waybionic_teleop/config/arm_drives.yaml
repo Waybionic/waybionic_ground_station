@@ -7,9 +7,16 @@ sim_arm_drives:
     rate_hz: 120.0
     # MKS default is 500 kbit/s; 1 Mbit/s keeps six drives at 120 Hz near 40% bus load.
     bitrate: 1000000
-    acc: 240
+    # Teleop ramps the speed. A steep drive ramp keeps the drives in step with each other: a
+    # gentle one gives every drive the same rpm/s, so the one that must change most falls behind.
+    acc: 255
     max_rpm: 300
     heartbeat_ms: 500
+    # Teleop republishes its enable every tick; stop the drives if it goes quiet this long (the
+    # same as xbox_teleop's input_timeout_s).
+    enable_timeout_s: 0.5
+    # The placeholder grip has no URDF joint yet; every modeled arm joint must have a limit.
+    unmodeled_joints: [tool_grip]
     drives: [base_yaw, shoulder, elbow, wrist_left, wrist_right, tool]
     base_yaw:
       can_id: 1
