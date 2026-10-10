@@ -68,6 +68,16 @@ def test_a_urdf_without_collision_boxes_is_refused():
             ArmCollision.from_urdf(URDF[:start] + URDF[end:])
 
 
+@pytest.mark.parametrize('extra, roots', [
+    ('<link name="stray_link"/>', 2),
+    ('<joint name="loop" type="fixed"><parent link="tool_link"/>'
+     '<child link="base_link"/></joint>', 0),
+])
+def test_a_urdf_without_exactly_one_root_link_is_refused(extra, roots):
+    with pytest.raises(ValueError, match=f'one root link, not {roots}'):
+        ArmCollision.from_urdf(URDF.replace('</robot>', extra + '</robot>'))
+
+
 def test_teleop_backs_out_of_a_collision_but_never_goes_deeper(parameters, check):
     teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
                        LIMITS, ArmKinematics.from_urdf(URDF), check)

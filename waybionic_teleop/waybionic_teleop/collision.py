@@ -94,6 +94,8 @@ class ArmCollision:
             children.add(joint.find('child').get('link'))
         roots = [link.get('name') for link in robot.findall('link')
                  if link.get('name') not in children]
+        if len(roots) != 1:
+            raise ValueError(f'robot_description needs one root link, not {len(roots)}')
         checker = cls(boxes, joints, roots[0], table_z, clearance)
         checker.poses({})
         return checker
