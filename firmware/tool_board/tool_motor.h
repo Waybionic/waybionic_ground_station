@@ -72,6 +72,16 @@ public:
   uint8_t update(uint32_t now_ms, uint8_t * out)
   {
     stepper_.run();
+    const float speed = stepper_.speed();
+    const long position = stepper_.currentPosition();
+    if ((speed > 0 && position >= config_.max_steps) ||
+      (speed < 0 && position <= config_.min_steps))
+    {
+      // AccelStepper's ramp can carry a motor a few steps past a target at a limit.
+      const long target = stepper_.targetPosition();
+      stepper_.setCurrentPosition(position);
+      stepper_.moveTo(target);
+    }
     if (moving_ && heartbeat_ms_ && now_ms - last_frame_ms_ > heartbeat_ms_) {
       // The host went quiet: stop at once, like an MKS drive's heartbeat protection.
       hold();

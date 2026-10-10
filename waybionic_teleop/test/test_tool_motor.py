@@ -17,6 +17,7 @@ EMERGENCY_STOP = 0xF7
 # Drives one ToolMotor (3200 steps per turn, one turn of travel either way) from stdin:
 #   frame HEX    hand it a frame        wait MS   let time pass, then update once
 #   run N        update up to N times   state     print the fake stepper
+#   coast N      let the stepper run N steps past its target, as AccelStepper's ramp can
 # Each command prints the reply in hex, or - for none.
 HARNESS = r"""
 #include <cstdio>
@@ -30,9 +31,11 @@ struct FakeStepper
   float max_speed = 0.0f;
   float acceleration = 0.0f;
   bool braking = false;
+  long coast = 0;
+  int heading = 0;
   void moveTo(long goal) {target = goal;}
   // Runs at full speed until it reaches the target, and stops like AccelStepper::stop().
-  float speed() {return position < target ? max_speed : position > target ? -max_speed : 0.0f;}
+  float speed() {return (coasting() ? heading : toward()) * max_speed;}
   void stop()
   {
     braking = true;
@@ -44,15 +47,23 @@ struct FakeStepper
   }
   bool run()
   {
-    position += position < target ? 1 : position > target ? -1 : 0;
+    if (coasting()) {
+      position += heading;
+      --coast;
+    } else if (toward()) {
+      heading = toward();
+      position += heading;
+    }
     return position != target;
   }
-  void setCurrentPosition(long value) {position = target = value;}
+  void setCurrentPosition(long value) {position = target = value; coast = 0;}
   long currentPosition() {return position;}
   long targetPosition() {return target;}
   long distanceToGo() {return target - position;}
   void setMaxSpeed(float value) {max_speed = value;}
   void setAcceleration(float value) {acceleration = value;}
+  int toward() const {return position < target ? 1 : position > target ? -1 : 0;}
+  bool coasting() const {return coast && heading && toward() != heading;}
 };
 
 static void print(const uint8_t * data, uint8_t length)
@@ -105,6 +116,11 @@ int main()
         length = motor.update(now, out);
       }
       print(out, length);
+    } else if (std::strcmp(command, "coast") == 0) {
+      if (std::scanf("%ld", &stepper.coast) != 1) {
+        return 1;
+      }
+      std::printf("-\n");
     } else {
       std::printf("%ld %ld %.0f %.0f %d %d\n", stepper.position, stepper.target,
                   stepper.max_speed, stepper.acceleration, stepper.braking, motor.enabled());
@@ -220,6 +236,14 @@ def test_a_gentler_move_brakes_harder_rather_than_pass_the_travel_limit(program)
     out = motor(program, *READY, mks_can.absolute_axis(ID, TURN, 60, 255), 'run 1000',
                 mks_can.absolute_axis(ID, 0, 60, 1), 'state')
     assert state(out[5])['acceleration'] == 4183.0
+
+
+def test_a_ramp_that_would_run_on_past_the_travel_limit_stops_at_it(program):
+    out = motor(program, *READY, 'coast 3', mks_can.absolute_axis(ID, TURN, 60, 200),
+                'run 5000', 'run 3', 'state')
+    assert out[4] == status(mks_can.ABSOLUTE_AXIS, 2)
+    stopped = state(out[6])
+    assert stopped['position'] == stopped['target'] == 3200
 
 
 def test_the_emergency_stop_holds_at_once_and_says_so(program):
