@@ -34,26 +34,34 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)")
     -fno-exceptions -fno-rtti -nostdinc++ -Werror)
 endif()
 
-# Host-only simulation pieces.
-add_library(waybionic_can_sim STATIC
-  sim/SocketCanTransport.cpp
-)
-target_link_libraries(waybionic_can_sim PUBLIC waybionic_can_common)
+# Host-only simulation pieces. SocketCAN is Linux-only, so a macOS ground station builds the
+# common code, slcan_sim and unit tests without it.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  add_library(waybionic_can_sim STATIC
+    sim/SocketCanTransport.cpp
+  )
+  target_link_libraries(waybionic_can_sim PUBLIC waybionic_can_common)
 
-add_executable(gateway sim/gateway_main.cpp)
-target_link_libraries(gateway waybionic_can_sim)
+  add_executable(gateway sim/gateway_main.cpp)
+  target_link_libraries(gateway waybionic_can_sim)
 
-add_executable(receiver sim/receiver_main.cpp)
-target_link_libraries(receiver waybionic_can_sim)
+  add_executable(receiver sim/receiver_main.cpp)
+  target_link_libraries(receiver waybionic_can_sim)
 
-add_executable(slcan_sim sim/slcan_sim_main.cpp)
-target_link_libraries(slcan_sim waybionic_can_common)
+  install(TARGETS gateway receiver DESTINATION lib/${PROJECT_NAME})
+  install(PROGRAMS scripts/run_four_node_demo.sh DESTINATION lib/${PROJECT_NAME})
+endif()
+
+if(UNIX)
+  add_executable(slcan_sim sim/slcan_sim_main.cpp)
+  target_link_libraries(slcan_sim waybionic_can_common)
+  install(TARGETS slcan_sim DESTINATION lib/${PROJECT_NAME})
+endif()
 
 add_executable(mks_frame_tool sim/mks_frame_tool.cpp)
 target_link_libraries(mks_frame_tool waybionic_can_common)
 
-install(TARGETS gateway receiver slcan_sim mks_frame_tool DESTINATION lib/${PROJECT_NAME})
-install(PROGRAMS scripts/run_four_node_demo.sh DESTINATION lib/${PROJECT_NAME})
+install(TARGETS mks_frame_tool DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
@@ -64,19 +72,21 @@ if(BUILD_TESTING)
   foreach(test_name ${UNIT_TESTS})
     ament_add_gtest(${test_name} tests/unit/${test_name}.cpp)
     if(TARGET ${test_name})
-      target_link_libraries(${test_name} waybionic_can_sim)
+      target_link_libraries(${test_name} waybionic_can_common)
     endif()
   endforeach()
 
   # Skips itself when the vcan interface is missing (for example inside Docker CI).
-  ament_add_gtest(test_vcan_four_node tests/integration/test_vcan_four_node.cpp TIMEOUT 240)
-  if(TARGET test_vcan_four_node)
-    target_link_libraries(test_vcan_four_node waybionic_can_sim)
-    target_compile_definitions(test_vcan_four_node PRIVATE
-      GATEWAY_EXE="$<TARGET_FILE:gateway>"
-      RECEIVER_EXE="$<TARGET_FILE:receiver>"
-    )
-    add_dependencies(test_vcan_four_node gateway receiver)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    ament_add_gtest(test_vcan_four_node tests/integration/test_vcan_four_node.cpp TIMEOUT 240)
+    if(TARGET test_vcan_four_node)
+      target_link_libraries(test_vcan_four_node waybionic_can_sim)
+      target_compile_definitions(test_vcan_four_node PRIVATE
+        GATEWAY_EXE="$<TARGET_FILE:gateway>"
+        RECEIVER_EXE="$<TARGET_FILE:receiver>"
+      )
+      add_dependencies(test_vcan_four_node gateway receiver)
+    endif()
   endif()
 endif()
 

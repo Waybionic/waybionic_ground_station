@@ -72,7 +72,7 @@ bool absoluteAxis(
   const uint16_t can_id, const int32_t axis, const int32_t speed_rpm, const int32_t acc,
   Frame & out)
 {
-  if (axis < -kMaxAxis || axis > kMaxAxis) {
+  if (axis < kMinAxis || axis > kMaxAxis) {
     return false;
   }
   if (speed_rpm < 0 || speed_rpm > kMaxSpeedRpm || acc < 0 || acc > 255) {

@@ -134,18 +134,19 @@ TEST_F(SlcanTest, OpenFailsWhenTheControllerCannotStart)
 TEST_F(SlcanTest, TransmitSendsTheExactFrame)
 {
   openLikePythonCan();
-  EXPECT_EQ(feed("t00123132\r"), "z\r");
+  // Successful sends are silent; only refusals are answered.
+  EXPECT_EQ(feed("t00123132\r"), "");
   ASSERT_EQ(can.sent.size(), 1u);
   EXPECT_EQ(can.sent[0].id, 1u);
   EXPECT_EQ(can.sent[0].dlc, 2u);
   EXPECT_EQ(can.sent[0].data[0], 0x31);
   EXPECT_EQ(can.sent[0].data[1], 0x32);
   // python-can formats IDs and data in upper case; lower case is accepted too.
-  EXPECT_EQ(feed("t7ff8f502580200400092\r"), "z\r");
+  EXPECT_EQ(feed("t7ff8f502580200400092\r"), "");
   EXPECT_EQ(can.sent[1].id, 0x7FF);
   EXPECT_EQ(can.sent[1].dlc, 8u);
   EXPECT_EQ(can.sent[1].data[7], 0x92);
-  EXPECT_EQ(feed("t0010\r"), "z\r");
+  EXPECT_EQ(feed("t0010\r"), "");
   EXPECT_EQ(can.sent[2].dlc, 0u);
 }
 
@@ -232,6 +233,47 @@ TEST_F(SlcanTest, LineFeedsAreIgnoredAndOverlongLinesRejected)
   EXPECT_EQ(feed("V\r\n"), "V0100\r");
   EXPECT_EQ(feed(std::string(40, 'A') + "\r"), "\a");
   EXPECT_EQ(feed("V\r"), "V0100\r");  // recovers on the next line
+}
+
+TEST_F(SlcanTest, RefusedLinesAreCounted)
+{
+  EXPECT_EQ(feed("t00123132\r"), "\a");  // still closed
+  EXPECT_EQ(feed("x\r"), "\a");
+  EXPECT_EQ(feed("V\r"), "V0100\r");
+  EXPECT_EQ(bridge.refusedLines(), 2u);
+}
+
+TEST_F(SlcanTest, StatusGoesOnlyToTheHostAndOnlyWhileOpen)
+{
+  CarrierStatus status;
+  bridge.reportStatus(status);
+  EXPECT_EQ(out.take(), "");
+
+  openLikePythonCan();
+  EXPECT_EQ(feed("x\r"), "\a");
+  status.estop_wired = true;
+  status.supply_wired = true;
+  status.supply_millivolts = 24000;
+  status.can_errors = 70000;  // saturates at FFFF
+  status.failed_writes = 3;
+  bridge.reportStatus(status);
+  EXPECT_EQ(out.take(), "t7F0800055DC0FFFF0301\r");
+  status = CarrierStatus{};
+  status.estop_wired = true;
+  status.estop_pressed = true;
+  bridge.reportStatus(status);
+  EXPECT_EQ(out.take(), "t7F080103000000000001\r");
+  EXPECT_TRUE(can.sent.empty());
+}
+
+TEST_F(SlcanTest, UnknownSafetySignalsCannotLookHealthyOrMeasured)
+{
+  openLikePythonCan();
+  CarrierStatus status;
+  status.estop_pressed = true;       // invalid without estop_wired
+  status.supply_millivolts = 24000;  // invalid without supply_wired
+  bridge.reportStatus(status);
+  EXPECT_EQ(out.take(), "t7F080000000000000000\r");
 }
 
 TEST(SlcanFormat, RoundTripsEveryLength)

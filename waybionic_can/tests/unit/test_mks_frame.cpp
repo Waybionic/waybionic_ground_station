@@ -92,10 +92,9 @@ TEST(MksFrame, AbsoluteAxisRejectsOutOfRangeArguments)
   EXPECT_FALSE(mks::absoluteAxis(1, 0x800000, 100, 2, frame));
   EXPECT_FALSE(mks::absoluteAxis(1, 0, 3001, 2, frame));
   EXPECT_FALSE(mks::absoluteAxis(1, 0, 100, 256, frame));
-  EXPECT_FALSE(mks::absoluteAxis(1, -0x800000, 100, 2, frame));
   EXPECT_FALSE(mks::absoluteAxis(1, 0, -1, 2, frame));
   EXPECT_TRUE(mks::absoluteAxis(1, mks::kMaxAxis, mks::kMaxSpeedRpm, 255, frame));
-  EXPECT_TRUE(mks::absoluteAxis(1, -mks::kMaxAxis, 0, 0, frame));
+  EXPECT_TRUE(mks::absoluteAxis(1, mks::kMinAxis, 0, 0, frame));
 }
 
 TEST(MksFrame, FormatMatchesCandump)
@@ -121,7 +120,9 @@ TEST(MksFrame, BuildRejectsNonStandardIdsAndTooManyArguments)
 
 TEST(MksFrame, AbsoluteAxisRoundTrip)
 {
-  for (const int32_t axis : {0, 1, -1, 0x4000, -0x4000, mks::kMaxAxis, -mks::kMaxAxis}) {
+  for (const int32_t axis : {
+      0, 1, -1, 0x4000, -0x4000, mks::kMaxAxis, mks::kMinAxis})
+  {
     Frame frame;
     ASSERT_TRUE(mks::absoluteAxis(7, axis, 1234, 200, frame));
     mks::Message message;

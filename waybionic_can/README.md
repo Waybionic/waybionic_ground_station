@@ -1,6 +1,13 @@
 # waybionic_can
 
-This package holds the MKS SERVO42D/57D CAN code for the arm in two forms: a host-side simulation of the four-Arduino bench over Linux SocketCAN (`vcan0`), and the **Arduino firmware for the real bus** (UNO R4 built-in CAN + TJA1051T transceiver), in [`arduino/`](arduino/README.md). Both use the same protocol and node logic files.
+This package provides hardware-independent MKS CAN framing, gateway/node simulations, test
+tools, and UNO R4 firmware for the WayBionic arm. The real carrier is an UNO R4 WiFi connected
+through a TJA1051T transceiver to five MKS drives (IDs 1-5). The laptop reaches that bus over a
+1,000,000-baud USB SLCAN link; the CAN bus itself runs at 1,000,000 bit/s. Those two rates are
+configured independently.
+
+The four-node Arduino/SocketCAN bench and software actuators remain simulation tools. They do
+not demonstrate that a real drive, E-stop input, or voltage input has been validated.
 
 ```text
 Laptop --stdin / USB serial--> gateway
@@ -11,7 +18,8 @@ Laptop --stdin / USB serial--> gateway
    SoftwareActuator         SoftwareActuator         SoftwareActuator
 ```
 
-For the real-drive bring-up (wiring, safety rules, first-drive procedure, frame logs, SLCAN bridge), see **[arduino/README.md](arduino/README.md)**.
+For firmware details, see **[arduino/README.md](arduino/README.md)**. For the supervised
+five-drive session, use the **[hardware bring-up checklist](docs/HARDWARE_BRINGUP_CHECKLIST.md)**.
 
 ## Layout
 
@@ -37,13 +45,18 @@ The portable code lives in the Arduino library `arduino/libraries/WaybionicCan/s
 | `sim/mks_frame_tool.cpp` | `mks_frame_tool`: stdin front end to MksFrame, used by the cross-check | no |
 | `tests/unit/` | gtest, no vcan needed (includes an in-memory four-node bus) | |
 | `tests/integration/` | Real processes on vcan0; skipped if the interface is missing | |
-| `tests/cross_check/` | Scripts comparing against PR #24 `mks_can.py`, and python-can against `slcan_sim` | |
+| `tests/cross_check/` | Scripts comparing against the merged teleop `mks_can.py`, and python-can against `slcan_sim` | |
+| `docs/HARDWARE_BRINGUP_CHECKLIST.md` | Supervised five-drive setup, test, evidence, and results template | |
 
 `lib/common/` uses only C headers (`<stdint.h>`, `<stddef.h>`, `<stdio.h>`, `<string.h>`, `<stdarg.h>`). It has no STL, exceptions, RTTI or heap use. The `waybionic_can_embedded_check` target compiles it with `-fno-exceptions -fno-rtti -nostdinc++ -Werror` to keep it that way.
 
 ## Protocol source
 
-PR #24 (`feature/xbox-teleop`) is the source of truth. `waybionic_teleop/mks_can.py` defines the frames, and `waybionic_teleop/sim_drives.py` defines the drive's replies. The C++ tests repeat the `test_mks_can.py` manual vectors byte for byte.
+The merged Xbox teleop implementation (`waybionic_teleop/mks_can.py`, from PR #28) defines the
+shared command subset, and `sim_drives.py` defines simulated replies. The C++ tests repeat its
+manual vectors byte for byte. PR #31 / `feature/real-arm` extends the host with drive-ID,
+bitrate, zeroing, and emergency-stop frames; this package does not duplicate those host-owned
+commands.
 
 - The frame's CAN ID is the motor ID, and data is `code, big-endian arguments, checksum`. The checksum is `(CAN ID + sum(body)) & 0xFF`. Replies use the same layout and the same ID.
 - The implemented commands are 31h READ_ENCODER, 82h SET_MODE, 8Ch SET_RESPONSE, 98h SET_HEARTBEAT, F3h ENABLE and F5h ABSOLUTE_AXIS.
@@ -77,15 +90,19 @@ colcon test --packages-select waybionic_can --event-handlers console_direct+
 colcon test-result --verbose
 ```
 
-To run a single binary directly, use `build/waybionic_can/test_mks_frame`, `test_node_logic`, `test_gateway_logic`, `test_bringup_console`, `test_slcan_bridge`, `test_bus_load` or `test_vcan_four_node`. The integration test uses `$WAYBIONIC_CAN_IFACE` (default `vcan0`). The Docker CI has no vcan interface, so it runs only the unit tests.
+To run a single binary directly, use `build/waybionic_can/test_mks_frame`,
+`test_node_logic`, `test_gateway_logic`, `test_bringup_console`, `test_slcan_bridge`,
+`test_bus_load` or, on Linux, `test_vcan_four_node`. The integration test uses
+`$WAYBIONIC_CAN_IFACE` (default `vcan0`) and skips if that interface is missing. SocketCAN
+executables and the vcan test are Linux-only; common logic and unit tests also build on macOS.
 
 Two extra checks need files or packages outside this package, so they aren't colcon tests:
 
 ```bash
-# C++ framing vs PR #24 mks_can.py on ~80k edge and random cases (mks_can.py is not on main yet)
-git show origin/feature/xbox-teleop:waybionic_teleop/waybionic_teleop/mks_can.py > /tmp/mks_can.py
+# C++ framing vs the merged Python implementation on ~80k edge and random cases
 python3 src/waybionic_can/tests/cross_check/cross_check_mks.py \
-  --mks-can /tmp/mks_can.py --tool build/waybionic_can/mks_frame_tool
+  --mks-can src/waybionic_teleop/waybionic_teleop/mks_can.py \
+  --tool build/waybionic_can/mks_frame_tool
 
 # python-can's real slcan driver against the SLCAN bridge code (needs python-can and pyserial)
 python3 src/waybionic_can/tests/cross_check/slcan_python_can_check.py --sim build/waybionic_can/slcan_sim
@@ -127,9 +144,35 @@ Here is what an exchange looks like. Receivers 1 and 3 log `ignored (addressed t
 [gateway] RX 002#F301F6 node 2 ENABLE reply status=1 (ok) latency=1ms
 ```
 
-## TODO
+## Test coverage
 
-- **F7h emergency stop, set CAN ID, set bitrate:** `mks_can.py` does not define them and no MKS manual is in the repo, so they are not implemented. The two `EmergencyStopIsPending` tests are skipped, and the Arduino `estop` command sends nothing, until the layouts and replies are taken from the MKS manual.
-- **Broadcast ID 0 and other MKS commands:** not in PR #24, so not implemented.
+- `test_mks_frame`: checks request/reply bytes, checksum rejection, signed 24/48-bit limits,
+  argument counts, and formatting.
+- `test_node_logic`: checks address filtering, command validation, response policy, actuator
+  state, completion reports, and heartbeat stops.
+- `test_gateway_logic`: checks request/reply matching, timeouts, node recovery, and the
+  in-memory multi-node bus.
+- `test_bringup_console`: checks command parsing, motion gates, status/error output, and the
+  documented startup vectors.
+- `test_slcan_bridge`: checks SLCAN parsing, bitrate/open state, rejected-line accounting,
+  forwarding, and carrier status serialization without putting status on CAN.
+- `test_bus_load`: checks classic-CAN lower/worst-case bit estimates and reporting windows.
+- `test_vcan_four_node`: launches real gateway/receiver processes over Linux `vcan`.
+- `cross_check_mks.py`: compares C++ frames with Python over edge and randomized cases.
+- `slcan_python_can_check.py`: drives the shared bridge through a pseudo-terminal using
+  python-can and ignores the host-only carrier status frames.
+
+## Hardware status and TODOs
+
+- **F7h emergency stop, set CAN ID, set bitrate:** intentionally absent from this package's
+  bench console and shared C++ subset. The Arduino `estop` command sends nothing. PR #31 /
+  `feature/real-arm` implements these in the host from MKS CAN manual V1.0.9.
+- **Broadcast ID 0 and other MKS commands:** not implemented in the C++ bench subset.
 - **Physical receiver actuator:** the bench receivers use `SoftwareActuator`. A hobby-servo `IActuator` would need a defined mapping from MKS axis counts to angles and of what READ_ENCODER reports.
-- **Hardware:** upload and powered bench testing (all four sketches already compile for UNO R4 WiFi in Arduino IDE; nothing has been uploaded yet). Powered motion needs Yassin or Mujtaba present. Also the agreed bitrate (500 kbit/s factory vs 1 Mbit/s in the simulator config) and real CAN IDs. The IDs match the placeholders in `waybionic_teleop/config/arm_drives.yaml` and are not yet confirmed by Electrical. See [arduino/README.md](arduino/README.md#todo).
+- **Carrier telemetry hardware:** status ID `0x7F0` reports unknown E-stop/supply plus CAN error
+  counters today. Electrical must provide sensing pins, polarity, divider/isolation, scaling,
+  and valid voltage limits before `readBenchTelemetry()` can sample hardware. Unknown is kept
+  distinct from released/healthy.
+- **Hardware:** flash, five-drive ID/bitrate setup, encoder checks, zeroing, motion, physical
+  E-stop, 500 ms heartbeat timing, load/error capture, photos, and video remain untested. Use
+  the [checklist](docs/HARDWARE_BRINGUP_CHECKLIST.md) with Yassin or Mujtaba present.

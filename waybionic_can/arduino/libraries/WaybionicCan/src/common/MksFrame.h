@@ -15,6 +15,7 @@ namespace mks
 
 constexpr int32_t kCountsPerRev = 0x4000;
 constexpr int32_t kMaxSpeedRpm = 3000;
+constexpr int32_t kMinAxis = -0x800000;
 constexpr int32_t kMaxAxis = 0x7FFFFF;
 constexpr uint8_t kMaxArguments = 6;  // 8 data bytes minus code and checksum
 
@@ -24,8 +25,8 @@ constexpr uint8_t kSetResponse = 0x8C;
 constexpr uint8_t kSetHeartbeat = 0x98;
 constexpr uint8_t kEnable = 0xF3;
 constexpr uint8_t kAbsoluteAxis = 0xF5;
-// TODO(MKS manual): F7h emergency stop is not defined by mks_can.py or its tests. Add it here
-// only once its argument layout and reply are taken from the manual.
+// F7h emergency stop is intentionally host-owned in feature/real-arm. Add it to this shared
+// bench subset only if the console/node simulation needs the same confirmed contract.
 
 constexpr uint8_t kModeSrVfoc = 0x05;
 

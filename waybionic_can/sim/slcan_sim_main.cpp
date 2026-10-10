@@ -153,6 +153,7 @@ int main(int argc, char ** argv)
   SimBus bus;
   FdOutput output(master);
   waybionic::SlcanBridge bridge(bus, bus, output);
+  uint32_t last_status = 0;
 
   while (g_running) {
     pollfd fd{master, POLLIN, 0};
@@ -182,6 +183,11 @@ int main(int argc, char ** argv)
       }
     }
     bridge.pollCan();
+    // Match carrier_bridge.ino: status at 10 Hz, with hardware-dependent fields unknown.
+    if (now - last_status >= 100) {
+      last_status = now;
+      bridge.reportStatus(waybionic::CarrierStatus{});
+    }
   }
   close(master);
   return 0;
