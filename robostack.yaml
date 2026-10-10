@@ -7,6 +7,7 @@ channels:
 
 dependencies:
   - ros-jazzy-ros-base
+  - ros-jazzy-rmw-cyclonedds-cpp
   - ros-jazzy-rviz2
   - ros-jazzy-rviz-imu-plugin
   - ros-jazzy-xacro
