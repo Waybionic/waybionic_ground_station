@@ -15,7 +15,7 @@ from rclpy._rclpy_pybind11 import RCLError
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
-from sensor_msgs.msg import JointState, Joy
+from sensor_msgs.msg import JointState, Joy, JoyFeedback
 from std_msgs.msg import Bool, String
 from visualization_msgs.msg import Marker, MarkerArray
 
@@ -26,6 +26,24 @@ from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
 JAW_SIZE = (0.006, 0.014, 0.03)
 JAW_OPEN_GAP = 0.024
+# One short rumble each time a move is stopped at a limit.
+RUMBLE_INTENSITY = 0.6
+RUMBLE_S = 0.25
+# A stick wavering at the deadzone edge against a limit would otherwise rumble every other tick.
+RUMBLE_REFRACTORY_S = 1.0
+
+
+def stop_reason(blocked):
+    """Name what stopped a move, one word per line for the RViz label."""
+    return '\n'.join('OUT-OF-REACH' if item == 'reach'
+                     else 'STOPPED-' + item.replace(': ', '-').replace(' ', '-')
+                     for item in blocked[:2])
+
+
+def drive_stop_reason(reason):
+    """Name why the drives stopped the arm, one word per line for the RViz label."""
+    words = reason.split(':')[0].split()
+    return 'DRIVES-STOPPED' + ('\n' + '-'.join(words) if words else '')
 
 
 def status(name, level, value, unit, message):
@@ -63,9 +81,20 @@ class XboxTeleop(Node):
         self.create_subscription(JointState, 'joint_states', self.on_joint_states, 10)
         self.command_publisher = self.create_publisher(JointState, 'joint_commands', 10)
         self.enable_publisher = self.create_publisher(Bool, 'teleop_enabled', latched)
+        # game_controller_node rumbles a local controller; joy_udp_receiver passes it on.
+        self.feedback_publisher = self.create_publisher(JoyFeedback, 'joy/set_feedback', 10)
+        self.rumble_until = None
+        self.rumble_started = -math.inf
+        self.rumble_due = False
+        self.was_blocked = False
+        # Set once the drives accept this enable, so an older stopped row is not a new stop.
+        self.gate_open = False
+        self.drive_stop = ''
         self.marker_publisher = self.create_publisher(MarkerArray, 'waybionic/teleop/markers', 10)
-        self.diagnostics_publisher = self.create_publisher(
-            DiagnosticArray, params.get('diagnostics_topic', '/diagnostics'), 10)
+        diagnostics_topic = params.get('diagnostics_topic', '/diagnostics')
+        self.diagnostics_publisher = self.create_publisher(DiagnosticArray, diagnostics_topic, 10)
+        # The drives report their command gate here, including stops that teleop did not make.
+        self.create_subscription(DiagnosticArray, diagnostics_topic, self.on_diagnostics, 10)
         self.last_tick = self.report_time = time.monotonic()
         self.create_timer(1.0 / float(params['rate_hz']), self.tick)
         self.create_timer(0.5, self.report)
@@ -128,6 +157,15 @@ class XboxTeleop(Node):
                 self.measured[name] = position
                 self.measured_at[name] = now
 
+    def on_diagnostics(self, message):
+        for row in message.status:
+            if row.name != 'arm.command_gate' or self.teleop is None or not self.teleop.enabled:
+                continue
+            if any(item.key == 'value' and item.value == 'enabled' for item in row.values):
+                self.gate_open = True
+            elif self.gate_open:
+                self.gate_open, self.drive_stop, self.rumble_due = False, row.message, True
+
     def recent_measurement(self, now):
         return {joint: position for joint, position in self.measured.items()
                 if now - self.measured_at[joint] <= self.timeout}
@@ -166,11 +204,30 @@ class XboxTeleop(Node):
         self.publish_enabled(self.teleop.enabled and fresh)
         if updated:
             self.publish_command()
+        self.feel_limits(now)
         if self.ticks % 3 == 0:
             self.publish_markers(fresh)
 
     def publish_enabled(self, enabled):
         self.enable_publisher.publish(Bool(data=enabled))
+
+    def feel_limits(self, now):
+        enabled = self.teleop.enabled
+        if not enabled:
+            self.gate_open, self.drive_stop = False, ''
+        blocked = enabled and bool(self.teleop.blocked)
+        self.rumble_due = enabled and (self.rumble_due or (blocked and not self.was_blocked))
+        self.was_blocked = blocked
+        if self.rumble_due and now - self.rumble_started >= RUMBLE_REFRACTORY_S:
+            self.rumble(RUMBLE_INTENSITY)
+            self.rumble_started, self.rumble_until, self.rumble_due = now, now + RUMBLE_S, False
+        elif self.rumble_until is not None and now >= self.rumble_until:
+            self.rumble(0.0)
+            self.rumble_until = None
+
+    def rumble(self, intensity):
+        self.feedback_publisher.publish(
+            JoyFeedback(type=JoyFeedback.TYPE_RUMBLE, id=0, intensity=intensity))
 
     def publish_command(self):
         targets = self.teleop.command_targets
@@ -186,6 +243,10 @@ class XboxTeleop(Node):
         teleop = self.teleop
         if teleop.enabled:
             state = 'ENABLED'
+            if self.drive_stop:
+                state += '\n' + drive_stop_reason(self.drive_stop)
+            elif teleop.blocked:
+                state += '\n' + stop_reason(teleop.blocked)
         else:
             state = 'DISABLED\nPRESS-MENU' if fresh else 'NO-CONTROLLER'
         return f'{teleop.active_group.name.upper()}\n{self.speed_percent():.0f}%\n{state}'
@@ -218,7 +279,8 @@ class XboxTeleop(Node):
         label.scale.z = 0.04
         enabled = self.teleop.enabled and fresh
         label.color.r, label.color.g, label.color.b, label.color.a = (
-            (0.5, 1.0, 0.5, 1.0) if enabled else (1.0, 0.8, 0.3, 1.0))
+            (1.0, 0.35, 0.3, 1.0) if enabled and (self.teleop.blocked or self.drive_stop)
+            else (0.5, 1.0, 0.5, 1.0) if enabled else (1.0, 0.8, 0.3, 1.0))
         markers.markers.append(label)
         incision = self.teleop.incision if self.teleop.active_group.mode == 'incision' else None
         point = Marker(ns='incision', id=0, type=Marker.SPHERE,

@@ -322,6 +322,15 @@ Press **Ctrl+C** in each window to stop.
 **Linux (native ROS):** with the controller plugged in, run
 `ros2 launch waybionic_bringup ground_station.launch.py teleop:=true`.
 
+**Linux (Docker):** plug the controller in by USB first, then run
+`./scripts/linux-gui.sh --controller`. This starts teleop in the
+[Linux GUI](#linux-gui-demo) container. The script gives the container only the game
+controllers listed as `/dev/input/by-id/*-event-joystick`, not all of `/dev/input`:
+access to keyboards, mice and touchpads would let any process in the container read
+what you type in other windows. The devices are fixed when the container starts, so
+after unplugging or reconnecting the controller, stop the container and start it again.
+Bluetooth controllers are not listed in `/dev/input/by-id`; connect the controller by USB.
+
 | Input | Action |
 | --- | --- |
 | Start (Xbox Menu button, three lines) | Enable or disable; the arm starts disabled |
@@ -352,6 +361,13 @@ drives stop. A host pause past the 500 ms drive heartbeat also stops the simulat
 In both cases teleop must be disabled and Start released and pressed again before motion
 resumes. The diagnostics panel shows the command gate, teleop state, each joint, each
 drive's last CAN frame and the simulated bus load.
+
+When a move stops at a limit, the controller rumbles briefly, at most once a second. The
+RViz label also turns red and names the cause, for example `STOPPED-joint_3` or
+`OUT-OF-REACH`. If the drives stop the arm while teleop is still enabled, for example after
+rejecting a target or losing encoder feedback, the label shows `DRIVES-STOPPED` and the
+drives' reason, and the controller rumbles once; press B, then Start, to continue. Rumble
+works with a controller plugged into the ground station and through the Windows bridge.
 
 When the bridge reports that the controller disconnected, every control is released once,
 so the arm slows to a stop. After 0.5 s without controller input, teleop disables and holds
