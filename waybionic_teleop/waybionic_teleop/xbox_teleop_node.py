@@ -21,6 +21,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 
 from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
+from waybionic_teleop.safety_interface import EMERGENCY_STOP_TOPIC
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
 JAW_SIZE = (0.006, 0.014, 0.03)
@@ -42,6 +43,10 @@ class XboxTeleop(Node):
                   for name in self.list_parameters([], 0).names}
         self.config = config_from_parameters(params)
         self.timeout = float(params['input_timeout_s'])
+        self.require_emergency_stop_status = bool(
+            params.get('require_emergency_stop_status', False))
+        self.emergency_stop_pressed = False
+        self.emergency_stop_time = None
         self.tool_frame = params['tool_frame']
         self.base_frame = params['base_frame']
         self.teleop = None
@@ -56,6 +61,7 @@ class XboxTeleop(Node):
         self.create_subscription(String, 'robot_description', self.load, latched)
         self.create_subscription(Joy, 'joy', self.on_joy, 10)
         self.create_subscription(JointState, 'joint_states', self.on_joint_states, 10)
+        self.create_subscription(Bool, EMERGENCY_STOP_TOPIC, self.on_emergency_stop, latched)
         self.command_publisher = self.create_publisher(JointState, 'joint_commands', 10)
         self.enable_publisher = self.create_publisher(Bool, 'teleop_enabled', latched)
         self.marker_publisher = self.create_publisher(MarkerArray, 'waybionic/teleop/markers', 10)
@@ -119,6 +125,37 @@ class XboxTeleop(Node):
                 self.measured[name] = position
                 self.measured_at[name] = now
 
+    def on_emergency_stop(self, message):
+        self.emergency_stop_pressed = bool(message.data)
+        self.emergency_stop_time = time.monotonic()
+        if message.data and self.teleop is not None:
+            self.teleop.held = self.current_held_buttons(self.fresh(self.emergency_stop_time))
+            self.teleop.disable(
+                self.recent_measurement(self.emergency_stop_time),
+                'Emergency stop pressed; release it and press Start to enable', warning=True)
+            self.publish_enabled(False)
+            self.publish_command()
+
+    def current_held_buttons(self, fresh):
+        if not fresh or self.joy is None:
+            return set()
+        return {name for name, index in BUTTON.items() if self.joy.buttons[index]}
+
+    def emergency_stop_is_pressed(self, now):
+        if self.emergency_stop_pressed:
+            return True
+        return self.require_emergency_stop_status and (
+            self.emergency_stop_time is None
+            or now - self.emergency_stop_time > self.timeout
+        )
+
+    def emergency_stop_block(self, now):
+        if self.emergency_stop_is_pressed(now):
+            if not self.emergency_stop_pressed:
+                return 'Emergency stop status missing or stale; treated as pressed'
+            return 'Emergency stop pressed; release it and press Start to enable'
+        return ''
+
     def recent_measurement(self, now):
         return {joint: position for joint, position in self.measured.items()
                 if now - self.measured_at[joint] <= self.timeout}
@@ -151,6 +188,16 @@ class XboxTeleop(Node):
                                 'Controller lost; press Start (Menu) to enable', warning=True)
             self.publish_enabled(False)
             self.publish_command()
+        safety_block = self.emergency_stop_block(now)
+        if safety_block:
+            if self.teleop.enabled:
+                self.teleop.disable(self.recent_measurement(now), safety_block, warning=True)
+                self.publish_command()
+            else:
+                self.teleop.note, self.teleop.warning = safety_block, True
+            self.teleop.held = self.current_held_buttons(fresh)
+            self.publish_enabled(False)
+            return
         axes, buttons = (self.joy.axes, self.joy.buttons) if fresh else ((), ())
         updated = self.teleop.update(axes, buttons, self.recent_measurement(now), dt)
         self.publish_enabled(self.teleop.enabled and fresh)

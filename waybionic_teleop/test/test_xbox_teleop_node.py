@@ -8,7 +8,7 @@ import pytest
 import rclpy
 from rclpy.parameter import Parameter
 from sensor_msgs.msg import JointState, Joy
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 
 from waybionic_teleop.gamepad import AXES, BUTTONS
 from waybionic_teleop.xbox_teleop_node import XboxTeleop
@@ -108,6 +108,50 @@ def test_stale_joint_feedback_cannot_be_used_to_enable(node):
     tick(node)
     tick(node, 'start')
     assert node.teleop.enabled
+
+
+def test_emergency_stop_disables_immediately_and_requires_a_fresh_start(node, monkeypatch):
+    enabled, commands = [], []
+    monkeypatch.setattr(node.enable_publisher, 'publish', enabled.append)
+    monkeypatch.setattr(node.command_publisher, 'publish', commands.append)
+    ready(node)
+
+    node.on_emergency_stop(Bool(data=True))
+    assert not node.teleop.enabled
+    assert enabled[-1].data is False and not any(commands[-1].velocity)
+
+    tick(node, 'start')
+    assert not node.teleop.enabled and 'pressed' in node.teleop.note
+    node.on_emergency_stop(Bool(data=False))
+    tick(node, 'start')
+    assert not node.teleop.enabled
+    tick(node)
+    tick(node, 'start')
+    assert node.teleop.enabled
+
+
+def test_required_emergency_stop_status_fails_closed_when_missing_or_stale(node):
+    now = time.monotonic()
+    assert not node.emergency_stop_is_pressed(now)
+    node.require_emergency_stop_status = True
+    assert node.emergency_stop_is_pressed(now)
+    node.load(String(data=URDF))
+    pose = dict.fromkeys(node.teleop.limits, 0.1)
+    node.on_joint_states(JointState(name=list(pose), position=list(pose.values())))
+    tick(node, 'start')
+    assert not node.teleop.enabled and 'treated as pressed' in node.teleop.note
+
+    node.on_emergency_stop(Bool(data=False))
+    assert not node.emergency_stop_is_pressed(time.monotonic())
+    tick(node)
+    tick(node, 'start')
+    assert node.teleop.enabled
+
+    node.emergency_stop_time = time.monotonic() - node.timeout - 0.01
+    assert node.emergency_stop_is_pressed(time.monotonic())
+    tick(node, left_x=1.0)
+    assert not node.teleop.enabled and node.teleop.warning
+    assert 'treated as pressed' in node.teleop.note
 
 
 def test_bad_description_and_mismatched_joint_map_fail_closed(node):

@@ -5,6 +5,7 @@ xbox_teleop:
     # Two updates per 60 Hz display frame keep motion in RViz free of judder.
     rate_hz: 120.0
     input_timeout_s: 0.5
+    require_emergency_stop_status: false
     deadzone: 0.15
     max_speed_deg_s: 60.0
     max_accel_deg_s2: 480.0
