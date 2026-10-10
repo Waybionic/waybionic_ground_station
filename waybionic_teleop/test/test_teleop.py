@@ -191,6 +191,16 @@ def test_holding_lb_keeps_only_the_strongest_direction(arm, cartesian):
     assert end[1:] == pytest.approx(start[1:], abs=1e-12)
 
 
+def test_a_diagonal_moves_the_tip_no_faster_than_one_axis(arm, cartesian):
+    for _ in range(round(0.5 / DT)):
+        start = arm.forward(cartesian.targets)[0]
+        cartesian.update(*sample(left_x=1.0, left_y=1.0, right_y=1.0), DOWN, DT)
+    # 25 mm/s at the initial speed level, shared evenly by x, y and z.
+    assert cartesian.linear == pytest.approx((cartesian.linear_speed / math.sqrt(3),) * 3)
+    assert math.dist(arm.forward(cartesian.targets)[0], start) == pytest.approx(
+        cartesian.linear_speed * DT)
+
+
 def test_the_dpad_tilts_the_tool_about_its_tip(arm, cartesian):
     start, pitch = arm.forward(cartesian.targets)
     for _ in range(round(0.5 / DT)):

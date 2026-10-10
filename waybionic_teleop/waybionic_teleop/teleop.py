@@ -283,6 +283,10 @@ class ArmTeleop:
         if config.buttons['lock'] in self.held:
             dominant = max(range(3), key=lambda index: abs(linear[index]))
             linear = [value if index == dominant else 0.0 for index, value in enumerate(linear)]
+        length = math.hypot(*linear)
+        if length > 1.0:
+            # A diagonal must not move the tip faster than the top speed along one axis.
+            linear = [value / length for value in linear]
         # Ramp the tip velocity as one vector, so speeding up or slowing down never bends the line.
         change = [self.linear_speed * goal - current for goal, current in zip(linear, self.linear)]
         size, most = math.sqrt(sum(value * value for value in change)), config.linear_accel * dt
