@@ -19,14 +19,19 @@ class FrameStats:
             self.frames.popleft()
 
     def summary(self, now_s):
-        """Return fps and delay in ms (mean, min, max and jitter), or None without frames."""
+        """
+        Return fps, delay in ms (mean, min, max and jitter) and ms since the last frame.
+
+        Return None without frames.
+        """
         while self.frames and now_s - self.frames[0][1] > self.window:
             self.frames.popleft()
         if not self.frames:
             return None
         delays = [1000.0 * (received - captured) for captured, received in self.frames]
         mean = sum(delays) / len(delays)
-        span = self.frames[-1][1] - self.frames[0][1]
+        # The span runs to now, so the rate falls as soon as the frames stop.
+        span = now_s - self.frames[0][1]
         return {
             'fps': (len(self.frames) - 1) / span if span > 0 else 0.0,
             'mean_ms': mean,
@@ -34,4 +39,5 @@ class FrameStats:
             'max_ms': max(delays),
             # Jitter is how much the delay varies from frame to frame.
             'jitter_ms': math.sqrt(sum((delay - mean) ** 2 for delay in delays) / len(delays)),
+            'since_last_ms': 1000.0 * (now_s - self.frames[-1][1]),
         }

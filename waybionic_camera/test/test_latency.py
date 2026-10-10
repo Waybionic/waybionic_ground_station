@@ -25,3 +25,16 @@ def test_old_frames_leave_the_window():
     stats.add(11.6, 11.62)
     assert stats.summary(11.7)['max_ms'] == pytest.approx(20.0)
     assert stats.summary(13.0) is None
+
+
+def test_the_rate_falls_as_soon_as_the_frames_stop():
+    stats = FrameStats(window_s=5.0)
+    for index in range(91):
+        stats.add(100.0 + index / 30.0, 100.002 + index / 30.0)
+    # The last frame arrived at 103.002, three seconds after the first.
+    current = stats.summary(103.002)
+    assert current['fps'] == pytest.approx(30.0)
+    assert current['since_last_ms'] == pytest.approx(0.0, abs=1e-6)
+    stopped = stats.summary(104.002)
+    assert stopped['fps'] == pytest.approx(90 / 4.0)
+    assert stopped['since_last_ms'] == pytest.approx(1000.0)

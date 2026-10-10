@@ -29,6 +29,8 @@ class LatencyMonitor(Node):
         self.name = self.declare_parameter('name', 'camera.doctor_view').value
         self.max_delay = float(self.declare_parameter('max_delay_ms', 100.0).value)
         self.min_fps = float(self.declare_parameter('min_fps', 25.0).value)
+        # Three frame periods at 25 fps: no frame for longer means the feed has stopped.
+        self.max_gap = float(self.declare_parameter('max_gap_ms', 120.0).value)
         diagnostics = self.declare_parameter('diagnostics_topic', '/diagnostics').value
         log_path = self.declare_parameter('log_csv', '').value
         self.topic = self.resolve_topic_name(topic)
@@ -66,13 +68,20 @@ class LatencyMonitor(Node):
         if summary is None:
             level, value, text = DiagnosticStatus.STALE, '', f'No frames on {self.topic}'
         else:
+            problems = []
+            if summary['since_last_ms'] > self.max_gap:
+                problems.append(f'No frame for {summary["since_last_ms"]:.0f} ms')
+            # A frame cannot arrive before it was captured unless the two clocks disagree.
+            if summary['min_ms'] < 0.0:
+                problems.append('Negative delay: possible clock skew')
             slow = summary['fps'] < self.min_fps or summary['mean_ms'] > self.max_delay
-            level = DiagnosticStatus.WARN if slow else DiagnosticStatus.OK
+            level = DiagnosticStatus.WARN if problems or slow else DiagnosticStatus.OK
             value = f'{summary["mean_ms"]:.0f}'
             size = f' at {self.size[0]}x{self.size[1]}' if self.size else ''
-            text = (f'{summary["fps"]:.1f} fps, delay {summary["mean_ms"]:.0f} ms (min '
-                    f'{summary["min_ms"]:.0f}, max {summary["max_ms"]:.0f}, jitter '
-                    f'{summary["jitter_ms"]:.1f}){size}')
+            text = '; '.join(problems + [
+                f'{summary["fps"]:.1f} fps, delay {summary["mean_ms"]:.0f} ms (min '
+                f'{summary["min_ms"]:.0f}, max {summary["max_ms"]:.0f}, jitter '
+                f'{summary["jitter_ms"]:.1f}){size}'])
         values = [KeyValue(key='value', value=value), KeyValue(key='unit', value='ms'),
                   KeyValue(key='frames', value=str(self.stats.total))]
         if summary is not None:
