@@ -321,9 +321,14 @@ Press **Ctrl+C** in each window to stop.
 **Linux (native ROS):** with the controller plugged in, run
 `ros2 launch waybionic_bringup ground_station.launch.py teleop:=true`.
 
-**Linux (Docker):** with the controller plugged in, run
+**Linux (Docker):** plug the controller in by USB first, then run
 `./scripts/linux-gui.sh --controller`. This starts teleop in the
-[Linux GUI](#linux-gui-demo) container, which reads the host's controllers.
+[Linux GUI](#linux-gui-demo) container. The script gives the container only the game
+controllers listed as `/dev/input/by-id/*-event-joystick`, not all of `/dev/input`:
+access to keyboards, mice and touchpads would let any process in the container read
+what you type in other windows. The devices are fixed when the container starts, so
+after unplugging or reconnecting the controller, stop the container and start it again.
+Bluetooth controllers are not listed in `/dev/input/by-id`; connect the controller by USB.
 
 | Input | Action |
 | --- | --- |
