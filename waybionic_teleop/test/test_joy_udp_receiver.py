@@ -61,3 +61,31 @@ def test_a_lost_controller_releases_every_control_once_then_goes_quiet(receiver,
     assert released.header.frame_id == centred.header.frame_id
     send(gamepad.pack(7, STICK, START))
     assert len(joys) == 4 and list(joys[-1].buttons) == START
+
+
+def test_old_and_repeated_packets_are_dropped(receiver, joys, send):
+    send(gamepad.pack(10, STICK, START))
+    send(gamepad.pack(10, *NEUTRAL))
+    send(gamepad.pack(9, *NEUTRAL))
+    assert receiver.sequence == 10 and len(joys) == 1 and list(joys[-1].buttons) == START
+    send(gamepad.pack(11, *NEUTRAL))
+    assert len(joys) == 2 and not any(joys[-1].buttons)
+
+
+def test_a_restarted_bridge_is_accepted_after_the_timeout(receiver, joys, send):
+    send(gamepad.pack(500, STICK, START))
+    send(gamepad.pack(1, *NEUTRAL))
+    assert receiver.sequence == 500 and len(joys) == 1
+    # The bridge was quiet for longer than the timeout, so its count may restart.
+    receiver.last_packet -= receiver.timeout + 0.01
+    send(gamepad.pack(1, *NEUTRAL))
+    assert receiver.sequence == 1 and len(joys) == 2
+
+
+def test_oversize_packets_are_rejected(receiver, joys, send):
+    packet = gamepad.pack(1, STICK, START)
+    send(packet + b'\x00')
+    send(packet + bytes(100))
+    assert receiver.rejected == 2 and not joys
+    send(packet)
+    assert len(joys) == 1

@@ -10,11 +10,21 @@ from rclpy.parameter import Parameter
 from sensor_msgs.msg import JointState, Joy
 from std_msgs.msg import String
 
+from waybionic_teleop import xbox_teleop_node
 from waybionic_teleop.gamepad import AXES, BUTTONS
 from waybionic_teleop.xbox_teleop_node import XboxTeleop
 
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
         / 'waybionic_arm.urdf').read_text(encoding='utf-8')
+
+
+class Clock:
+
+    def __init__(self):
+        self.now = 1000.0
+
+    def monotonic(self):
+        return self.now
 
 
 @pytest.fixture
@@ -92,6 +102,40 @@ def test_a_late_tick_moves_the_targets_at_most_two_periods(node):
     tick(node, left_x=1.0, elapsed=0.1)
     assert node.teleop.targets['joint_1'] - before == pytest.approx(
         2 * node.config.period * speed)
+
+
+def test_a_silent_controller_disables_and_holds_the_measured_pose(node, monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(xbox_teleop_node, 'time', clock)
+    enabled, commands = [], []
+    monkeypatch.setattr(node.enable_publisher, 'publish', enabled.append)
+    monkeypatch.setattr(node.command_publisher, 'publish', commands.append)
+    node.load(String(data=URDF))
+    pose = dict.fromkeys(node.teleop.limits, 0.1)
+    node.last_tick, period = clock.now, node.config.period
+
+    def step(message=None):
+        clock.now += period
+        node.on_joint_states(JointState(name=list(pose), position=list(pose.values())))
+        if message is not None:
+            node.on_joy(message)
+        node.tick()
+
+    step(joy())
+    step(joy('start'))
+    for _ in range(10):
+        step(joy(left_x=1.0))
+    assert node.teleop.enabled and node.teleop.velocities['joint_1'] > 0
+    last_input = clock.now
+    # The drives trail the moving target.
+    pose['joint_1'] = 0.12
+    while node.teleop.enabled:
+        step()
+        assert clock.now - last_input <= node.timeout + period + 1e-9
+    assert enabled[-1].data is False
+    hold = commands[-1]
+    assert dict(zip(hold.name, hold.position)) == pytest.approx(pose)
+    assert not any(hold.velocity)
 
 
 @pytest.mark.parametrize('bad', [
