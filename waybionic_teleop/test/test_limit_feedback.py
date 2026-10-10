@@ -2,7 +2,7 @@
 
 import pytest
 
-from waybionic_teleop.xbox_teleop_node import stop_reason
+from waybionic_teleop.xbox_teleop_node import drive_stop_reason, stop_reason
 
 
 @pytest.mark.parametrize('blocked, label', [
@@ -14,3 +14,13 @@ from waybionic_teleop.xbox_teleop_node import stop_reason
 def test_stop_reasons_are_single_words_per_line(blocked, label):
     assert stop_reason(blocked) == label
     assert ' ' not in stop_reason(blocked)
+
+
+@pytest.mark.parametrize('reason, label', [
+    ('Drive encoder feedback stale', 'DRIVES-STOPPED\nDrive-encoder-feedback-stale'),
+    ('Cannot synchronize drives: elbow: axis 9000000 is outside int24',
+     'DRIVES-STOPPED\nCannot-synchronize-drives'),
+    ('', 'DRIVES-STOPPED'),
+])
+def test_drive_stops_keep_the_reason_without_details_or_spaces(reason, label):
+    assert drive_stop_reason(reason) == label

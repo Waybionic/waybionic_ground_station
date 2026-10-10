@@ -358,10 +358,12 @@ In both cases teleop must be disabled and Start released and pressed again befor
 resumes. The diagnostics panel shows the command gate, teleop state, each joint, each
 drive's last CAN frame and the simulated bus load.
 
-When a move stops at a limit, the controller rumbles briefly. The RViz label also
-turns red and names the cause, for example `STOPPED-joint_3` or `OUT-OF-REACH`. Rumble
-works with a controller plugged into the ground station and through the Windows
-bridge.
+When a move stops at a limit, the controller rumbles briefly, at most once a second. The
+RViz label also turns red and names the cause, for example `STOPPED-joint_3` or
+`OUT-OF-REACH`. If the drives stop the arm while teleop is still enabled, for example after
+rejecting a target or losing encoder feedback, the label shows `DRIVES-STOPPED` and the
+drives' reason, and the controller rumbles once; press B, then Start, to continue. Rumble
+works with a controller plugged into the ground station and through the Windows bridge.
 
 When the bridge reports that the controller disconnected, every control is released once,
 so the arm slows to a stop. After 0.5 s without controller input, teleop disables and holds
