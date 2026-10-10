@@ -236,6 +236,43 @@ def test_stale_encoder_feedback_stops_before_sending_another_position(node):
     assert node.authorized and node.bus.drives[1].target is not None
 
 
+def test_the_drives_stop_when_teleop_stops_republishing_its_enable(node):
+    ready(node)
+    node.on_command(command(node, joint_1=1.0))
+    node.enabled_at -= node.enable_timeout + 0.01
+    # Teleop republishes the enable every tick, which keeps the drives armed.
+    node.on_enabled(Bool(data=True))
+    advance(node)
+    assert node.authorized and node.bus.drives[1].target is not None
+    # Without it, as when teleop dies while enabled, the drives stop and need a fresh Start.
+    node.enabled_at -= node.enable_timeout + 0.01
+    advance(node)
+    assert_stopped(node)
+    node.on_enabled(Bool(data=True))
+    node.on_command(command(node, joint_1=1.0))
+    advance(node)
+    assert_stopped(node)
+    node.on_enabled(Bool(data=False))
+    node.on_enabled(Bool(data=True))
+    node.on_command(command(node, joint_1=1.0))
+    advance(node)
+    assert node.authorized and node.bus.drives[1].target is not None
+
+
+@pytest.mark.parametrize('timeout', [0.0, -0.5, math.inf])
+def test_the_enable_timeout_must_be_positive_and_finite(monkeypatch, parameters, timeout):
+    monkeypatch.setenv('ROS_AUTOMATIC_DISCOVERY_RANGE', 'OFF')
+    context = rclpy.Context()
+    rclpy.init(context=context)
+    params = {**parameters('arm_drives.yaml', 'sim_arm_drives'), 'enable_timeout_s': timeout}
+    try:
+        with pytest.raises(ValueError, match='enable timeout'):
+            SimArmDrives(context=context, parameter_overrides=[
+                Parameter(name, value=value) for name, value in params.items()])
+    finally:
+        rclpy.try_shutdown(context=context)
+
+
 def test_zero_speed_f5_stops_six_drives_and_negative_targets_rearm(node):
     ready(node)
     node.max_rpm = 5

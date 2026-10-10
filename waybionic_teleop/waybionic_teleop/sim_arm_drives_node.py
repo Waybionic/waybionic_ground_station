@@ -46,10 +46,12 @@ class SimArmDrives(Node):
         rate_hz = float(params['rate_hz'])
         self.bitrate = int(params['bitrate'])
         heartbeat_ms = int(params['heartbeat_ms'])
+        self.enable_timeout = float(params['enable_timeout_s'])
         if (not 0 <= self.acc <= 255 or not 1 <= self.max_rpm <= mks_can.MAX_SPEED_RPM
                 or not math.isfinite(rate_hz) or rate_hz <= 0 or self.bitrate <= 0
-                or not 1 <= heartbeat_ms <= 0xFFFFFFFF):
-            raise ValueError('invalid simulated drive rate, acceleration, speed or heartbeat')
+                or not 1 <= heartbeat_ms <= 0xFFFFFFFF or not 0 < self.enable_timeout < math.inf):
+            raise ValueError('invalid simulated drive rate, acceleration, speed, heartbeat or '
+                             'enable timeout')
         self.period = 1.0 / rate_hz
         self.heartbeat_s = heartbeat_ms / 1000.0
         unmodeled = set(params['unmodeled_joints'])
@@ -72,6 +74,7 @@ class SimArmDrives(Node):
         self.limits = {}
         self.description_valid = False
         self.authorized = False
+        self.enabled_at = -math.inf
         self.awaiting_release = True
         self.stop_reason = 'Waiting for robot_description and a released Start button'
         self.rejected = 0
@@ -116,14 +119,16 @@ class SimArmDrives(Node):
         return all(heard is not None and now - heard <= REPLY_TIMEOUT_S for heard in self.heard)
 
     def on_enabled(self, message):
+        now = time.monotonic()
         if not message.data:
             self.disarm('Teleop disabled')
             self.awaiting_release = False
         elif (not self.awaiting_release and self.description_valid and None not in self.counts
-              and self.feedback_fresh(time.monotonic())):
+              and self.feedback_fresh(now)):
             if not self.authorized:
                 self.commanded = self.map.to_positions(self.counts)
             self.authorized = True
+            self.enabled_at = now
             self.stop_reason = ''
 
     def disarm(self, reason, require_release=False):
@@ -180,6 +185,9 @@ class SimArmDrives(Node):
         else:
             if self.authorized and not self.feedback_fresh(now):
                 self.disarm('Drive encoder feedback stale', require_release=True)
+            # Teleop republishes its enable every tick, so silence means it stopped or died.
+            if self.authorized and now - self.enabled_at > self.enable_timeout:
+                self.disarm('Teleop enable timed out', require_release=True)
             if self.authorized and self.commanded is not None:
                 self.send_targets()
         for drive in self.map.drives:
