@@ -56,15 +56,17 @@ class Bench:
         node.joy_publisher.publish = lambda message: self.sent.append((clock.now, message))
         node.on_description(String(data=URDF))
 
-    def run(self, seconds, interface='sim', operator=None):
+    def run(self, seconds, teleop=True, interface='sim', joints=True, operator=None):
         """Tick for this long; return what reached teleop's joy topic, with when it was sent."""
         start = len(self.sent)
         for tick in range(round(seconds * RATE)):
             if tick % REPORT_TICKS == 0:
-                self.node.on_diagnostics(TELEOP)
+                if teleop:
+                    self.node.on_diagnostics(TELEOP)
                 if interface:
                     self.node.on_diagnostics(drives(interface))
-            self.node.on_joint_states(JointState(name=JOINTS, position=[0.0] * len(JOINTS)))
+            if joints:
+                self.node.on_joint_states(JointState(name=JOINTS, position=[0.0] * len(JOINTS)))
             if operator:
                 self.node.on_operator(operator)
             self.node.tick()
@@ -141,11 +143,12 @@ def test_taking_over_leaves_teleop_disabled(bench):
     assert not bench.node.playing
 
 
-def test_the_demo_sends_nothing_on_a_stale_drive_report_then_starts_over(bench):
+@pytest.mark.parametrize('quiet', ['teleop', 'joints', 'interface'])
+def test_the_demo_sends_nothing_on_stale_reports_then_starts_over(bench, quiet):
     assert pressed(bench.run(4.0), 'start')
     silent_from = bench.clock.now
     # Teleop times out once nothing more is sent.
-    assert all(at <= silent_from + STALE_S + 1e-6 for at, _ in bench.run(3.0, interface=None))
+    assert all(at <= silent_from + STALE_S + 1e-6 for at, _ in bench.run(3.0, **{quiet: None}))
     resumed = bench.clock.now
     sent = bench.run(3.0)
     assert sent[0][0] >= resumed + SILENCE_S - 1e-6

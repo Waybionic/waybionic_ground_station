@@ -56,6 +56,13 @@ class TeleopState:
     enabled: bool = None
     group: str = None
     at_home: bool = False
+    # time.monotonic() of teleop's last report and of the last joint states.
+    reported: float = -math.inf
+    measured: float = -math.inf
+
+    def fresh(self, now):
+        """Return True while teleop's report and the joint states are both recent."""
+        return now - min(self.reported, self.measured) <= STALE_S
 
 
 def operator_active(axes, buttons, deadzone):

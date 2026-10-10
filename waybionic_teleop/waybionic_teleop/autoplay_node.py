@@ -5,9 +5,9 @@ The real controller arrives on joy_operator and is passed on to teleop's joy top
 takes over joy as soon as teleop is ready, and again after idle_s seconds without a button,
 stick or trigger moving; the moment someone touches the controller, it stops, presses B so
 teleop is left disabled, and passes the controller through. It only plays while the drives
-report that they are simulated and no other node publishes joy, and sends nothing while the
-drives' report is out of date, so teleop times out. The demo draws the tool tip's path and a
-caption in RViz.
+report that they are simulated and no other node publishes joy, and sends nothing while
+teleop's state, the joint states or the drives' report are out of date, so teleop times out.
+The demo draws the tool tip's path and a caption in RViz.
 """
 
 import math
@@ -70,6 +70,7 @@ class Autoplay(Node):
 
     def on_joint_states(self, message):
         self.joints.update(zip(message.name, message.position))
+        self.state.measured = time.monotonic()
 
     def on_diagnostics(self, message):
         now = time.monotonic()
@@ -77,6 +78,7 @@ class Autoplay(Node):
             values = {item.key: item.value for item in status.values}
             if status.name == 'teleop.state':
                 self.state.enabled = values.get('value') == 'enabled'
+                self.state.reported = now
             elif status.name == 'teleop.group':
                 self.state.group = values.get('value')
             elif status.name == 'can.bus':
@@ -96,7 +98,7 @@ class Autoplay(Node):
 
     def blocked(self, now):
         """Return why the demo cannot play now, or None when it can."""
-        if (self.kinematics is None or self.state.enabled is None or not self.joints
+        if (self.kinematics is None or not self.state.fresh(now)
                 or now - self.drives_reported > STALE_S):
             return 'waiting for teleop, the joint states and the drives to report'
         if self.drive_interface != 'sim':
