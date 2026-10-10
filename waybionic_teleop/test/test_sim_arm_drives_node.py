@@ -6,6 +6,7 @@ from pathlib import Path
 import time
 from unittest.mock import MagicMock
 
+from diagnostic_msgs.msg import DiagnosticStatus
 import pytest
 import rclpy
 from rclpy._rclpy_pybind11 import RCLError
@@ -17,6 +18,7 @@ from waybionic_teleop import joy_udp_receiver, mks_can, sim_arm_drives_node, xbo
 from waybionic_teleop.gamepad import AXES, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 from waybionic_teleop.sim_arm_drives_node import REPLY_TIMEOUT_S, SimArmDrives
+from waybionic_teleop.sim_drives import SimulatedServo
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
@@ -257,6 +259,148 @@ def test_the_drives_stop_when_teleop_stops_republishing_its_enable(node):
     node.on_command(command(node, joint_1=1.0))
     advance(node)
     assert node.authorized and node.bus.drives[1].target is not None
+
+
+@pytest.mark.parametrize('status', [0, 3])
+def test_a_drive_that_fails_its_move_stops_every_drive_until_zeroed(node, monkeypatch, status):
+    ready(node)
+    node.on_command(command(node, joint_1=0.3, joint_2=0.3))
+    advance(node)
+    shoulder = node.bus.drives[2]
+    assert shoulder.target is not None
+    # Stall protection releases the shoulder, or it reaches an end limit: it stops moving and
+    # its F5 replies report the failure, while the other drives could follow on.
+    answer = shoulder.receive
+
+    def failing(data):
+        if data[0] != mks_can.ABSOLUTE_AXIS:
+            return answer(data)
+        shoulder.target, shoulder.rpm = None, 0.0
+        return [mks_can.frame(2, mks_can.ABSOLUTE_AXIS, [status])]
+    monkeypatch.setattr(shoulder, 'receive', failing)
+    node.on_command(command(node, joint_1=0.31, joint_2=0.31))
+    advance(node)
+    assert not node.authorized and not node.zeroed[1] and 'shoulder' in node.stop_reason
+    assert all(servo.target is None and servo.rpm == 0.0 for servo in node.bus.drives.values())
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+    node.report()
+    levels = {item.name: item.level for item in published[-1].status}
+    assert levels['drive.shoulder'] == DiagnosticStatus.ERROR
+    # A fresh Start alone does not resume: the arm must be zeroed again first.
+    node.on_enabled(Bool(data=False))
+    node.on_enabled(Bool(data=True))
+    assert not node.authorized
+
+
+def test_a_drive_that_stops_following_its_targets_stops_every_drive(node, monkeypatch):
+    ready(node)
+    node.following_error, node.following_ticks = 400, 5
+    base = node.bus.drives[1]
+    # The base accepts every move, but its encoder no longer turns.
+    monkeypatch.setattr(base, 'step', lambda dt: [])
+    behind = []
+    for tick in range(1, 100):
+        node.on_enabled(Bool(data=True))
+        node.on_command(command(node, velocities={'joint_1': 1.2},
+                                joint_1=1.2 * tick * node.period))
+        advance(node)
+        behind.append(node.behind[0])
+        if not node.authorized:
+            break
+    # Each target is 26 counts past the last, so the base first falls more than 400 counts
+    # behind on the 16th tick, and the fifth such tick in a row stops the arm.
+    assert behind[-6:] == [0, 1, 2, 3, 4, 5] and len(behind) == 20
+    assert not node.zeroed[0] and 'base_yaw' in node.stop_reason
+    assert all(servo.target is None and servo.rpm == 0.0 for servo in node.bus.drives.values())
+
+
+def test_a_drive_that_restarts_between_polls_is_set_up_and_zeroed_again(node):
+    start = dict.fromkeys(node.map.joints, 0.0)
+    start['joint_2'] = 1.2
+    for drive, count in zip(node.map.drives, node.map.to_counts(start)):
+        node.bus.drives[drive.can_id].axis = float(count)
+    ready(node)
+    advance(node)
+    # The shoulder browns out and restarts between two polls: its count starts again from
+    # zero and its settings are gone, long before 60 unanswered polls would show it.
+    restarted = node.bus.drives[2] = SimulatedServo(2)
+    advance(node)
+    assert not node.authorized and not node.zeroed[1]
+    assert node.stop_reason.startswith('shoulder encoder jumped')
+    assert all(servo.target is None and servo.rpm == 0.0 for servo in node.bus.drives.values())
+    # Its next reply has it set up again, but the arm moves only after a new zero.
+    advance(node)
+    assert restarted.enabled and restarted.heartbeat_ms == node.heartbeat_ms
+    node.on_enabled(Bool(data=False))
+    node.on_enabled(Bool(data=True))
+    assert not node.authorized
+
+
+def test_a_stop_the_interface_refuses_is_sent_again_until_it_goes_out(node, monkeypatch):
+    ready(node)
+    node.on_command(command(node, joint_1=1.0))
+    advance(node)
+    base = node.bus.drives[1]
+    assert base.target is not None
+    send, refusing = node.bus.send, [True]
+
+    def full(can_id, data):
+        # The adapter's transmit queue has no room for the stop frame.
+        if refusing[0] and data == mks_can.stop(can_id, 0):
+            return False
+        return send(can_id, data)
+    monkeypatch.setattr(node.bus, 'send', full)
+    node.on_enabled(Bool(data=False))
+    for _ in range(3):
+        advance(node)
+        assert base.target is not None and node.stopping == {0}
+    # The encoder polls still reach the drive, so its own heartbeat never stops it.
+    assert base.heartbeat_stops == 0
+    node.on_enabled(Bool(data=True))
+    assert not node.authorized
+    refusing[0] = False
+    advance(node)
+    assert not node.stopping and base.target is None and base.rpm == 0.0
+    node.on_enabled(Bool(data=True))
+    assert node.authorized
+
+
+def test_drive_rows_show_a_setup_frame_until_the_drive_confirms_it(node, monkeypatch):
+    advance(node)
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+
+    def shoulder():
+        node.report()
+        return next(item for item in published[-1].status if item.name == 'drive.shoulder')
+
+    assert shoulder().level == DiagnosticStatus.OK
+    servo, heartbeats = node.bus.drives[2], []
+    answer = servo.receive
+
+    def heartbeat(data):
+        # The shoulder refuses its heartbeat setting once, then never answers it.
+        if data[0] != mks_can.SET_HEARTBEAT:
+            return answer(data)
+        heartbeats.append(data)
+        return [mks_can.frame(2, mks_can.SET_HEARTBEAT, [0])] if len(heartbeats) == 1 else []
+    monkeypatch.setattr(servo, 'receive', heartbeat)
+    node.set_up(1)
+    advance(node)
+    row = shoulder()
+    assert row.level == DiagnosticStatus.ERROR and 'setup 98h failed' in row.message
+    # The retry clears the failure, but a drive that never confirms is not reported ready.
+    node.setup_time[1] -= REPLY_TIMEOUT_S
+    advance(node)
+    row = shoulder()
+    assert len(heartbeats) == 2
+    assert row.level == DiagnosticStatus.WARN and 'setup 98h unconfirmed' in row.message
+    monkeypatch.setattr(servo, 'receive', answer)
+    node.setup_time[1] -= REPLY_TIMEOUT_S
+    advance(node)
+    row = shoulder()
+    assert row.level == DiagnosticStatus.OK and row.message.startswith('CAN ID 2: ready')
 
 
 @pytest.mark.parametrize('timeout', [0.0, -0.5, math.inf])
