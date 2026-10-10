@@ -15,6 +15,7 @@ import launch_testing.actions
 import pytest
 import rclpy
 from sensor_msgs.msg import JointState
+from visualization_msgs.msg import Marker, MarkerArray
 
 from waybionic_teleop import gamepad, mks_can
 
@@ -44,10 +45,14 @@ class TestTeleop(unittest.TestCase):
     def test_controller_moves_the_arm(self):
         rclpy.init()
         node = rclpy.create_node('teleop_test')
-        joints, diagnostics = {}, {}
+        joints, diagnostics, markers = {}, {}, {}
         node.create_subscription(
             JointState, '/joint_states',
             lambda message: joints.update(zip(message.name, message.position)), 10)
+        node.create_subscription(
+            MarkerArray, '/waybionic/teleop/markers',
+            lambda message: markers.update(
+                ((part.ns, part.id), part) for part in message.markers), 10)
         node.create_subscription(
             DiagnosticArray, '/diagnostics',
             lambda message: diagnostics.update(
@@ -84,6 +89,14 @@ class TestTeleop(unittest.TestCase):
             self.assertEqual(diagnostics['arm.command_gate'].level, DiagnosticStatus.WARN,
                              'the drives never loaded the robot description')
             hold(1.0, left_x=1.0)
+            hold(0.2)
+            self.assertEqual({key for key in markers if key[0] == 'tool_static'},
+                             {('tool_static', index) for index in range(4)})
+            self.assertEqual({key for key in markers if key[0] == 'tool'},
+                             {('tool', 0), ('tool', 1)})
+            self.assertEqual(markers['tool', 0].type, Marker.MESH_RESOURCE)
+            self.assertIn('left_claw.stl', markers['tool', 0].mesh_resource)
+            open_left_x = markers['tool', 0].pose.position.x
             self.assertAlmostEqual(joints['joint_1'], 0.0, places=3, msg='moved while disabled')
             hold(0.2, 'start')
             hold(1.0, left_x=1.0)
@@ -95,6 +108,7 @@ class TestTeleop(unittest.TestCase):
             self.assertGreater(joints['joint_4'], 0.2)
             hold(1.5, right_trigger=-1.0)
             self.assertGreater(joints['left_claw'], 0.2)
+            self.assertGreater(markers['tool', 0].pose.position.x, open_left_x)
             self.assertAlmostEqual(joints['right_claw'], 0.0, places=2)
             hold(0.2, 'x')
             hold(1.5, right_trigger=-1.0)

@@ -20,11 +20,17 @@ It is an integration worksheet, not a specification for the physical tool board.
 ## Simulation-only assumptions
 
 The current `tool_drives.yaml` uses normalized claw closure from 0 (open) to 1
-(closed), a 0.25-unit/s limit and 66 motor steps per normalized unit. That step
-count is only a stand-in based on the demo's 120-degree motor rotation at 200
-full steps/revolution; it is **not** steps per degree of claw motion. Motor signs
+(closed), a 0.25-unit/s limit and 320 microsteps per normalized unit. That step
+count is an arbitrary simulation stand-in: Biomedical clarified that its 200
+steps correspond to the full joystick-axis sweep, not a measured claw angle.
+It is **not** steps per degree of claw motion. Motor signs
 are configurable and their present values are unverified. No CAN or A4988
 commands are sent. Do not use these values as hardware limits.
+
+Six supplied STL parts are now used as RViz mesh markers. Their observed bounds
+are plausible in millimetres, so they are displayed at scale 0.001. The
+mounting transform, relative placement and 8 mm preview travel remain guesses
+until Biomedical supplies a corrected assembly and physical measurements.
 
 ## Measurements and decisions to obtain from Biomedical
 
@@ -51,8 +57,10 @@ has its own target, estimated feedback, limit state and diagnostic entry. The ar
 drive map is square (one independent joint coordinate per drive), so it cannot simply
 be extended with four tool motors for two claw joints.
 
-This four-motor path is simulation only. Do not send its targets to the Arduino
-or assume its A4988 wiring is a CAN interface.
+This four-motor path is simulation only. It encodes the same F5h target frames
+as tool board PR #32 for CAN IDs 7 to 10, but does not transmit them to a
+physical bus. PR #32 uses 3200 microsteps and 16384 MKS counts per motor turn.
+Do not transmit provisional targets before physical calibration is confirmed.
 
 ## Tool-board interface for the CAN bring-up group
 

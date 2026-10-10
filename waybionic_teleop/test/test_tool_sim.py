@@ -46,6 +46,6 @@ def test_invalid_command_does_not_change_existing_targets(simulator):
 
 def test_pair_disagreement_is_visible_in_feedback(simulator):
     """A motor that falls behind produces a nonzero claw-pair error."""
-    simulator.counts['left_1'] = 33
+    simulator.counts['left_1'] = 160
     _, disagreement, _ = simulator.feedback()
     assert disagreement['left_claw'] == pytest.approx(0.5)

@@ -11,6 +11,8 @@ from rclpy.node import Node
 
 from sensor_msgs.msg import JointState
 
+from waybionic_teleop import mks_can
+from waybionic_teleop.tool_board_frames import move_frames
 from waybionic_teleop.tool_sim import SimulatedTool, tool_map_from_parameters
 
 
@@ -34,6 +36,7 @@ class SimToolMotors(Node):
         params = {name: self.get_parameter(name).value
                   for name in self.list_parameters([], 0).names}
         self.sim = SimulatedTool(tool_map_from_parameters(params))
+        self.last_frames = move_frames(self.sim.targets, self.sim.speeds)
         self.tolerance = float(params['pair_tolerance'])
         self.rejected = 0
         self.last_tick = time.monotonic()
@@ -61,6 +64,7 @@ class SimToolMotors(Node):
             return
         try:
             self.sim.command(positions)
+            self.last_frames = move_frames(self.sim.targets, self.sim.speeds)
         except ValueError:
             self.rejected += 1
 
@@ -97,7 +101,9 @@ class SimToolMotors(Node):
                     f'tool.motor.{motor.name}', DiagnosticStatus.OK,
                     counts[motor.name], 'steps', 'simulated',
                     target_steps=self.sim.targets[motor.name],
-                    direction=motor.direction))
+                    direction=motor.direction,
+                    can_id=self.last_frames[motor.name][0],
+                    last_command=mks_can.hex_frame(*self.last_frames[motor.name])))
         statuses.append(status('tool.commands', DiagnosticStatus.OK,
                                self.rejected, 'rejected', 'simulation only'))
         message = DiagnosticArray(status=statuses)

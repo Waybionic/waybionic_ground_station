@@ -1,7 +1,7 @@
 # Simulation-only normalized claw calibration. These numbers are NOT Biomedical
 # measurements and must be replaced before describing physical travel or commands.
-# The 66-step span is based only on the conference sketch's 120-degree motor demo
-# with its assumed 200 full steps per revolution; it is not claw steps per degree.
+# The 320-microstep span is an arbitrary simulation stand-in. Biomedical's 200-step
+# joystick sweep is not a measurement of claw travel or steps per claw degree.
 sim_tool_motors:
   ros__parameters:
     rate_hz: 120.0
@@ -22,17 +22,17 @@ sim_tool_motors:
     # Direction signs are provisional and can change with winding and wiring.
     left_1:
       direction: 1
-      steps_per_unit: 66.0
+      steps_per_unit: 320.0
       reference_steps: 0
     left_2:
       direction: -1
-      steps_per_unit: 66.0
+      steps_per_unit: 320.0
       reference_steps: 0
     right_1:
       direction: 1
-      steps_per_unit: 66.0
+      steps_per_unit: 320.0
       reference_steps: 0
     right_2:
       direction: -1
-      steps_per_unit: 66.0
+      steps_per_unit: 320.0
       reference_steps: 0
