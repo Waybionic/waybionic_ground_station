@@ -169,9 +169,10 @@ docker image inspect ghcr.io/waybionic/waybionic_ground_station:jazzy --format '
 
 After a successful push-to-main build on both native runners, CI publishes
 one x86-64/ARM64 image index from the digests returned by the tested image
-pushes. It tags the index as `ghcr.io/waybionic/waybionic_ground_station:jazzy`
-and with the commit's short hash. Pull requests build and test with read-only
-tokens and do not publish.
+pushes. It tags the index with the commit's short hash, and also as
+`ghcr.io/waybionic/waybionic_ground_station:jazzy` if that commit is still the
+newest on main. Publish builds don't reuse the registry cache. Pull requests
+build and test with read-only tokens and do not publish.
 
 Tags are mutable. For a reproducible run, record the image index digest
 shown by:
