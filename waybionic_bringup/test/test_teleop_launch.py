@@ -113,6 +113,11 @@ class TestTeleop(unittest.TestCase):
     def test_pushing_into_a_limit_rumbles_the_controller(self):
         rclpy.init()
         node = rclpy.create_node('rumble_test')
+        diagnostics = {}
+        node.create_subscription(
+            DiagnosticArray, '/diagnostics',
+            lambda message: diagnostics.update(
+                (status.name, status) for status in message.status), 10)
         sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sender.setblocking(False)
         # Ahead of the other test's packets, which the receiver may still remember.
@@ -132,18 +137,40 @@ class TestTeleop(unittest.TestCase):
                 except BlockingIOError:
                     pass
 
+        def group():
+            # Only a report sent after the last press counts.
+            diagnostics.pop('teleop.group', None)
+            deadline = time.monotonic() + 5.0
+            while 'teleop.group' not in diagnostics and time.monotonic() < deadline:
+                hold(0.05)
+            self.assertIn('teleop.group', diagnostics, 'teleop stopped reporting its group')
+            return diagnostics['teleop.group'].values[0].value
+
         try:
-            hold(0.5)
-            # The other test leaves teleop enabled, so Start alone would disable it.
+            deadline = time.monotonic() + 30.0
+            while time.monotonic() < deadline and not (
+                    'teleop.group' in diagnostics
+                    and diagnostics['teleop.input'].level == DiagnosticStatus.OK):
+                hold(0.1)
+            # Whatever ran before, start disabled in the upper group.
             hold(0.2, 'b')
+            for _ in range(3):
+                if group() == 'upper':
+                    break
+                hold(0.2, 'y')
+            else:
+                self.fail('Y never selected the upper group')
             hold(0.2, 'start')
-            # The upper group's left stick bends the elbow until it stops at its limit.
-            hold(4.0, left_y=1.0)
+            # The upper group's left stick bends the elbow until it stops at a limit.
+            deadline = time.monotonic() + 10.0
+            while not rumbles and time.monotonic() < deadline:
+                hold(0.1, left_y=1.0)
             hold(0.5)
             self.assertTrue(rumbles, 'the controller never rumbled')
             self.assertGreater(rumbles[0], 0.0)
             self.assertEqual(rumbles[-1], 0.0)
         finally:
+            hold(0.2, 'b')
             sender.close()
             node.destroy_node()
             rclpy.shutdown()
