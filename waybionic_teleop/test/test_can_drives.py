@@ -171,3 +171,14 @@ def test_stale_commands_hold_the_last_target(make_node):
     node.on_command(JointState(name=['joint_1'], position=[0.0], velocity=[1.0]))
     assert node.velocities == {'joint_1': 1.0}
     assert spin_until(executor, lambda: not node.velocities)
+
+
+@pytest.mark.parametrize('interface', ['sim', 'virtual'])
+def test_the_bus_report_names_the_interface(make_node, interface):
+    # The autoplay demo only plays when this says sim.
+    node, _ = make_node(interface=interface, channel=uuid.uuid4().hex)
+    reports = []
+    node.diagnostics_publisher.publish = reports.append
+    node.report()
+    bus = next(status for status in reports[0].status if status.name == 'can.bus')
+    assert {item.key: item.value for item in bus.values}['interface'] == interface

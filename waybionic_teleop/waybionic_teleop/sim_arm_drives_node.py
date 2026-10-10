@@ -277,7 +277,8 @@ class SimArmDrives(Node):
         statuses = [status(
             'can.bus', level, f'{frames:.0f}', 'frames/s',
             f'{load:.0f}% worst-case load at {self.bitrate // 1000} kbit/s ({self.bus_label})',
-            load_percent=f'{load:.1f}', errors=errors, rejected_commands=self.rejected)]
+            load_percent=f'{load:.1f}', errors=errors, rejected_commands=self.rejected,
+            interface=self.interface)]
         if not all(self.zeroed):
             statuses.append(status('arm.zero', DiagnosticStatus.WARN, 'no', '',
                                    f'Not zeroed. {self.zero_hint()}'))

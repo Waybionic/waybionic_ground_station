@@ -13,6 +13,8 @@ from waybionic_teleop.gamepad import AXES, BUTTONS
 
 # Longer than teleop's input timeout, so teleop disables itself however it was left.
 SILENCE_S = 1.0
+# Teleop and the drives report twice a second; anything older than this is out of date.
+STALE_S = 1.0
 # Edges of the square at 25 mm/s (50% speed): about 41 mm each.
 EDGE_S = 1.7
 LINES = 'STRAIGHT\nLINES'

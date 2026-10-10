@@ -4,7 +4,9 @@ Play the controller demo whenever nobody is using the controller.
 The real controller arrives on joy_operator and is passed on to teleop's joy topic. The demo
 takes over joy as soon as teleop is ready, and again after idle_s seconds without a button,
 stick or trigger moving; the moment someone touches the controller, it stops and passes the
-controller through. The demo draws the tool tip's path and a caption in RViz.
+controller through. It only plays while the drives report that they are simulated and no
+other node publishes joy, and sends nothing while the drives' report is out of date, so
+teleop times out. The demo draws the tool tip's path and a caption in RViz.
 """
 
 import math
@@ -20,7 +22,8 @@ from sensor_msgs.msg import JointState, Joy
 from std_msgs.msg import String
 from visualization_msgs.msg import Marker, MarkerArray
 
-from waybionic_teleop.demo_script import DemoPlayer, operator_active, PIVOT, TeleopState
+from waybionic_teleop.demo_script import (
+    DemoPlayer, operator_active, PIVOT, STALE_S, TeleopState)
 from waybionic_teleop.kinematics import ArmKinematics
 
 HOME_TOLERANCE_RAD = 0.01
@@ -29,8 +32,8 @@ HOME_TOLERANCE_RAD = 0.01
 class Autoplay(Node):
     """Switch teleop's controller input between the operator and the scripted demo."""
 
-    def __init__(self):
-        super().__init__('autoplay')
+    def __init__(self, **kwargs):
+        super().__init__('autoplay', **kwargs)
         self.idle = float(self.declare_parameter('idle_s', 30.0).value)
         self.deadzone = float(self.declare_parameter('deadzone', 0.15).value)
         rate = float(self.declare_parameter('rate_hz', 120.0).value)
@@ -38,8 +41,10 @@ class Autoplay(Node):
         self.player = DemoPlayer(rate)
         self.state = TeleopState()
         self.joints = {}
+        self.drive_interface, self.drives_reported = None, -math.inf
         self.kinematics = None
         self.playing = False
+        self.reason = None
         # Nobody has used the controller yet, so the demo starts as soon as teleop is ready.
         self.last_used = -math.inf
         self.ticks = 0
@@ -65,12 +70,15 @@ class Autoplay(Node):
         self.joints.update(zip(message.name, message.position))
 
     def on_diagnostics(self, message):
+        now = time.monotonic()
         for status in message.status:
-            value = next((item.value for item in status.values if item.key == 'value'), None)
+            values = {item.key: item.value for item in status.values}
             if status.name == 'teleop.state':
-                self.state.enabled = value == 'enabled'
+                self.state.enabled = values.get('value') == 'enabled'
             elif status.name == 'teleop.group':
-                self.state.group = value
+                self.state.group = values.get('value')
+            elif status.name == 'can.bus':
+                self.drive_interface, self.drives_reported = values.get('interface'), now
 
     def on_operator(self, message):
         if operator_active(message.axes, message.buttons, self.deadzone):
@@ -82,10 +90,31 @@ class Autoplay(Node):
         if not self.playing:
             self.joy_publisher.publish(message)
 
+    def blocked(self, now):
+        """Return why the demo cannot play now, or None when it can."""
+        if (self.kinematics is None or self.state.enabled is None or not self.joints
+                or now - self.drives_reported > STALE_S):
+            return 'waiting for teleop, the joint states and the drives to report'
+        if self.drive_interface != 'sim':
+            return f'the drives are not simulated ({self.drive_interface})'
+        if self.count_publishers(self.joy_publisher.topic_name) > 1:
+            return 'another node publishes joy'
+        return None
+
     def tick(self):
+        now = time.monotonic()
+        reason = self.blocked(now)
+        if reason != self.reason:
+            self.reason = reason
+            if reason:
+                self.get_logger().info(f'Demo on hold: {reason}')
+                # Send nothing, so teleop times out; the script starts over once all is well.
+                self.player.restart()
+                self.draw()
+        if reason:
+            return
         if not self.playing:
-            if (time.monotonic() - self.last_used < self.idle or self.state.enabled is None
-                    or self.kinematics is None or not self.joints):
+            if now - self.last_used < self.idle:
                 return
             self.playing = True
             self.player.restart()
