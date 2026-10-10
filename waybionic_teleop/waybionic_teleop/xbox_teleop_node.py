@@ -16,12 +16,16 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState, Joy
-from std_msgs.msg import Bool, String
+from std_msgs.msg import Bool, Float32, String
 from visualization_msgs.msg import Marker, MarkerArray
 
 from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
-from waybionic_teleop.safety_interface import EMERGENCY_STOP_TOPIC
+from waybionic_teleop.safety_interface import (
+    EMERGENCY_STOP_TOPIC,
+    MOTOR_SUPPLY_VOLTAGE_TOPIC,
+)
+from waybionic_teleop.safety_interlock import EmergencyStopInterlock
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
 JAW_SIZE = (0.006, 0.014, 0.03)
@@ -43,10 +47,10 @@ class XboxTeleop(Node):
                   for name in self.list_parameters([], 0).names}
         self.config = config_from_parameters(params)
         self.timeout = float(params['input_timeout_s'])
-        self.require_emergency_stop_status = bool(
-            params.get('require_emergency_stop_status', False))
-        self.emergency_stop_pressed = False
-        self.emergency_stop_time = None
+        self.emergency_stop_interlock = EmergencyStopInterlock(
+            self.timeout, params.get('require_emergency_stop_status', False))
+        self.motor_supply_voltage = None
+        self.motor_supply_voltage_time = None
         self.tool_frame = params['tool_frame']
         self.base_frame = params['base_frame']
         self.teleop = None
@@ -62,6 +66,8 @@ class XboxTeleop(Node):
         self.create_subscription(Joy, 'joy', self.on_joy, 10)
         self.create_subscription(JointState, 'joint_states', self.on_joint_states, 10)
         self.create_subscription(Bool, EMERGENCY_STOP_TOPIC, self.on_emergency_stop, latched)
+        self.create_subscription(Float32, MOTOR_SUPPLY_VOLTAGE_TOPIC,
+                                 self.on_motor_supply_voltage, 10)
         self.command_publisher = self.create_publisher(JointState, 'joint_commands', 10)
         self.enable_publisher = self.create_publisher(Bool, 'teleop_enabled', latched)
         self.marker_publisher = self.create_publisher(MarkerArray, 'waybionic/teleop/markers', 10)
@@ -126,15 +132,20 @@ class XboxTeleop(Node):
                 self.measured_at[name] = now
 
     def on_emergency_stop(self, message):
-        self.emergency_stop_pressed = bool(message.data)
-        self.emergency_stop_time = time.monotonic()
+        now = time.monotonic()
+        self.emergency_stop_interlock.update(message.data, now)
         if message.data and self.teleop is not None:
-            self.teleop.held = self.current_held_buttons(self.fresh(self.emergency_stop_time))
+            self.teleop.held = self.current_held_buttons(self.fresh(now))
             self.teleop.disable(
-                self.recent_measurement(self.emergency_stop_time),
+                self.recent_measurement(now),
                 'Emergency stop pressed; release it and press Start to enable', warning=True)
             self.publish_enabled(False)
             self.publish_command()
+
+    def on_motor_supply_voltage(self, message):
+        if math.isfinite(message.data):
+            self.motor_supply_voltage = float(message.data)
+            self.motor_supply_voltage_time = time.monotonic()
 
     def current_held_buttons(self, fresh):
         if not fresh or self.joy is None:
@@ -142,19 +153,10 @@ class XboxTeleop(Node):
         return {name for name, index in BUTTON.items() if self.joy.buttons[index]}
 
     def emergency_stop_is_pressed(self, now):
-        if self.emergency_stop_pressed:
-            return True
-        return self.require_emergency_stop_status and (
-            self.emergency_stop_time is None
-            or now - self.emergency_stop_time > self.timeout
-        )
+        return self.emergency_stop_interlock.is_pressed(now)
 
     def emergency_stop_block(self, now):
-        if self.emergency_stop_is_pressed(now):
-            if not self.emergency_stop_pressed:
-                return 'Emergency stop status missing or stale; treated as pressed'
-            return 'Emergency stop pressed; release it and press Start to enable'
-        return ''
+        return self.emergency_stop_interlock.block_reason(now)
 
     def recent_measurement(self, now):
         return {joint: position for joint, position in self.measured.items()
@@ -218,14 +220,22 @@ class XboxTeleop(Node):
         message.header.stamp = self.get_clock().now().to_msg()
         self.command_publisher.publish(message)
 
-    def summary(self, fresh):
+    def summary(self, fresh, now):
         # RViz text markers misplace words separated by spaces, so use one word per line.
         teleop = self.teleop
         if teleop.enabled:
             state = 'ENABLED'
         else:
             state = 'DISABLED\nPRESS-MENU' if fresh else 'NO-CONTROLLER'
-        return f'{teleop.active_group.name.upper()}\n{self.speed_percent():.0f}%\n{state}'
+        estop = self.emergency_stop_interlock.display_state(now)
+        if self.motor_supply_voltage_time is None:
+            voltage = 'UNKNOWN'
+        elif now - self.motor_supply_voltage_time > self.timeout:
+            voltage = 'STALE'
+        else:
+            voltage = f'{self.motor_supply_voltage:.1f}V-PROVISIONAL'
+        return (f'{teleop.active_group.name.upper()}\n{self.speed_percent():.0f}%\n{state}'
+                f'\nESTOP-{estop}\nSUPPLY-{voltage}')
 
     def speed_percent(self):
         return 100.0 * self.config.speed_levels[self.teleop.level]
@@ -248,7 +258,7 @@ class XboxTeleop(Node):
             jaw.color.r, jaw.color.g, jaw.color.b, jaw.color.a = 0.3, 0.75, 1.0, 0.9
             markers.markers.append(jaw)
         label = Marker(ns='status', id=0, type=Marker.TEXT_VIEW_FACING, action=Marker.ADD,
-                       text=self.summary(fresh))
+                       text=self.summary(fresh, time.monotonic()))
         label.header.frame_id = self.base_frame
         label.pose.position.x, label.pose.position.y, label.pose.position.z = 0.3, -0.3, 0.1
         label.pose.orientation.w = 1.0

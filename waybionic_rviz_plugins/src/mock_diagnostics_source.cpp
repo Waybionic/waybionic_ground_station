@@ -61,6 +61,8 @@ std::vector<DiagnosticMessage> MockDiagnosticsSource::normalMessages(const rclcp
   return {
     {"board.temperature", DiagnosticStatus::Ok, secondsAgo(now, 0.4), formatNumber(42.0 + pulse, 1), "C", std::nullopt},
     {"motor.current", DiagnosticStatus::Ok, secondsAgo(now, 0.5), formatNumber(0.8 + pulse * 0.05, 2), "A", std::nullopt},
+    {"safety.emergency_stop", DiagnosticStatus::Ok, secondsAgo(now, 0.1), "released", "", std::nullopt},
+    {"power.motor_supply_voltage", DiagnosticStatus::Ok, secondsAgo(now, 0.1), "24.0", "V", "Provisional placeholder; no thresholds applied"},
     {"imu.roll", DiagnosticStatus::Ok, secondsAgo(now, 0.2), formatNumber(1.2 + pulse * 0.1, 1), "deg", std::nullopt},
     {"imu.pitch", DiagnosticStatus::Ok, secondsAgo(now, 0.2), formatNumber(-0.4 + pulse * 0.1, 1), "deg", std::nullopt},
     {"imu.yaw", DiagnosticStatus::Ok, secondsAgo(now, 0.2), formatNumber(12.9 + pulse * 0.2, 1), "deg", std::nullopt},
@@ -80,6 +82,8 @@ std::vector<DiagnosticMessage> MockDiagnosticsSource::faultMessages(const rclcpp
       "High temperature detected",
     },
     {"motor.current", DiagnosticStatus::Ok, secondsAgo(now, 0.5), "0.80", "A", std::nullopt},
+    {"safety.emergency_stop", DiagnosticStatus::Ok, secondsAgo(now, 0.1), "released", "", std::nullopt},
+    {"power.motor_supply_voltage", DiagnosticStatus::Ok, secondsAgo(now, 0.1), "24.0", "V", "Provisional placeholder; no thresholds applied"},
     {"imu.roll", DiagnosticStatus::Ok, secondsAgo(now, 0.2), "1.2", "deg", std::nullopt},
     {"imu.pitch", DiagnosticStatus::Ok, secondsAgo(now, 0.2), "-0.4", "deg", std::nullopt},
     {"imu.yaw", DiagnosticStatus::Ok, secondsAgo(now, 0.2), "12.9", "deg", std::nullopt},

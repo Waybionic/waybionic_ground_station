@@ -104,6 +104,7 @@ if(BUILD_TESTING)
   # can run headless.
   ament_add_gtest(test_ros_diagnostics_source
     test/test_ros_diagnostics_source.cpp
+    src/mock_diagnostics_source.cpp
     src/ros_diagnostics_source.cpp
     TIMEOUT 300
   )

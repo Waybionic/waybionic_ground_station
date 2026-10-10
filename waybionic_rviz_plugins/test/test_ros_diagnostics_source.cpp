@@ -21,6 +21,7 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include "waybionic_rviz_plugins/diagnostics_contract.hpp"
+#include "waybionic_rviz_plugins/mock_diagnostics_source.hpp"
 #include "waybionic_rviz_plugins/ros_diagnostics_source.hpp"
 
 namespace waybionic_rviz_plugins
@@ -52,6 +53,38 @@ diagnostic_msgs::msg::DiagnosticArray makeArray(const unsigned char level, const
   diagnostic_msgs::msg::DiagnosticArray array;
   array.status.push_back(status);
   return array;
+}
+
+TEST(MockDiagnosticsSourceTest, IncludesSafetyAndProvisionalVoltageInBothModes)
+{
+  MockDiagnosticsSource source;
+  rclcpp::Clock clock(RCL_SYSTEM_TIME);
+  for (const auto mode : {MockDiagnosticsState::Normal, MockDiagnosticsState::Fault}) {
+    source.setMode(mode);
+    const auto messages = source.messages(clock.now());
+    bool found_estop = false;
+    bool found_voltage = false;
+    for (const auto & message : messages) {
+      if (message.signal_name == "safety.emergency_stop") {
+        found_estop = true;
+        EXPECT_EQ(message.status, DiagnosticStatus::Ok);
+        ASSERT_TRUE(message.value.has_value());
+        EXPECT_EQ(*message.value, "released");
+      }
+      if (message.signal_name == "power.motor_supply_voltage") {
+        found_voltage = true;
+        EXPECT_EQ(message.status, DiagnosticStatus::Ok);
+        ASSERT_TRUE(message.value.has_value());
+        EXPECT_EQ(*message.value, "24.0");
+        ASSERT_TRUE(message.unit.has_value());
+        EXPECT_EQ(*message.unit, "V");
+        ASSERT_TRUE(message.alert_message.has_value());
+        EXPECT_NE(message.alert_message->find("Provisional"), std::string::npos);
+      }
+    }
+    EXPECT_TRUE(found_estop);
+    EXPECT_TRUE(found_voltage);
+  }
 }
 
 template<typename Predicate>

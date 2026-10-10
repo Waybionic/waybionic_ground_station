@@ -8,7 +8,7 @@ import pytest
 import rclpy
 from rclpy.parameter import Parameter
 from sensor_msgs.msg import JointState, Joy
-from std_msgs.msg import Bool, String
+from std_msgs.msg import Bool, Float32, String
 
 from waybionic_teleop.gamepad import AXES, BUTTONS
 from waybionic_teleop.xbox_teleop_node import XboxTeleop
@@ -133,7 +133,7 @@ def test_emergency_stop_disables_immediately_and_requires_a_fresh_start(node, mo
 def test_required_emergency_stop_status_fails_closed_when_missing_or_stale(node):
     now = time.monotonic()
     assert not node.emergency_stop_is_pressed(now)
-    node.require_emergency_stop_status = True
+    node.emergency_stop_interlock.required = True
     assert node.emergency_stop_is_pressed(now)
     node.load(String(data=URDF))
     pose = dict.fromkeys(node.teleop.limits, 0.1)
@@ -147,11 +147,33 @@ def test_required_emergency_stop_status_fails_closed_when_missing_or_stale(node)
     tick(node, 'start')
     assert node.teleop.enabled
 
-    node.emergency_stop_time = time.monotonic() - node.timeout - 0.01
+    node.emergency_stop_interlock.last_report_at = time.monotonic() - node.timeout - 0.01
     assert node.emergency_stop_is_pressed(time.monotonic())
     tick(node, left_x=1.0)
     assert not node.teleop.enabled and node.teleop.warning
     assert 'treated as pressed' in node.teleop.note
+
+
+def test_rviz_label_shows_safety_and_provisional_voltage(node):
+    node.load(String(data=URDF))
+    now = time.monotonic()
+    assert 'ESTOP-UNKNOWN' in node.summary(False, now)
+    assert 'SUPPLY-UNKNOWN' in node.summary(False, now)
+
+    node.on_emergency_stop(Bool(data=False))
+    node.on_motor_supply_voltage(Float32(data=24.0))
+    summary = node.summary(False, time.monotonic())
+    assert 'ESTOP-RELEASED' in summary
+    assert 'SUPPLY-24.0V-PROVISIONAL' in summary
+
+    node.on_emergency_stop(Bool(data=True))
+    assert 'ESTOP-PRESSED' in node.summary(False, time.monotonic())
+    node.on_emergency_stop(Bool(data=False))
+    node.emergency_stop_interlock.last_report_at -= node.timeout + 0.01
+    node.motor_supply_voltage_time -= node.timeout + 0.01
+    summary = node.summary(False, time.monotonic())
+    assert 'ESTOP-STALE' in summary
+    assert 'SUPPLY-STALE' in summary
 
 
 def test_bad_description_and_mismatched_joint_map_fail_closed(node):
