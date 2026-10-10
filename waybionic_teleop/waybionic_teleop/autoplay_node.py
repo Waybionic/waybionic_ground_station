@@ -3,10 +3,11 @@ Play the controller demo whenever nobody is using the controller.
 
 The real controller arrives on joy_operator and is passed on to teleop's joy topic. The demo
 takes over joy as soon as teleop is ready, and again after idle_s seconds without a button,
-stick or trigger moving; the moment someone touches the controller, it stops and passes the
-controller through. It only plays while the drives report that they are simulated and no
-other node publishes joy, and sends nothing while the drives' report is out of date, so
-teleop times out. The demo draws the tool tip's path and a caption in RViz.
+stick or trigger moving; the moment someone touches the controller, it stops, presses B so
+teleop is left disabled, and passes the controller through. It only plays while the drives
+report that they are simulated and no other node publishes joy, and sends nothing while the
+drives' report is out of date, so teleop times out. The demo draws the tool tip's path and a
+caption in RViz.
 """
 
 import math
@@ -44,6 +45,7 @@ class Autoplay(Node):
         self.drive_interface, self.drives_reported = None, -math.inf
         self.kinematics = None
         self.playing = False
+        self.handover = None
         self.reason = None
         # Nobody has used the controller yet, so the demo starts as soon as teleop is ready.
         self.last_used = -math.inf
@@ -85,9 +87,11 @@ class Autoplay(Node):
             self.last_used = time.monotonic()
             if self.playing:
                 self.playing = False
+                # The demo's Start left teleop enabled; B disables it before handing over.
+                self.handover = self.player.press('b')
                 self.draw()
-                self.get_logger().info('Controller in use: demo stopped')
-        if not self.playing:
+                self.get_logger().info('Controller in use: demo stopped; press Start to drive')
+        if not self.playing and self.handover is None:
             self.joy_publisher.publish(message)
 
     def blocked(self, now):
@@ -103,6 +107,12 @@ class Autoplay(Node):
 
     def tick(self):
         now = time.monotonic()
+        if self.handover is not None:
+            sample = next(self.handover, None)
+            if sample is None:
+                self.handover = None
+            self.send(sample)
+            return
         reason = self.blocked(now)
         if reason != self.reason:
             self.reason = reason
@@ -121,14 +131,17 @@ class Autoplay(Node):
             self.get_logger().info('Controller idle: demo playing')
         self.state.at_home = all(abs(self.joints.get(joint, math.inf)) < HOME_TOLERANCE_RAD
                                  for joint in self.kinematics.joints)
-        sample = self.player.step(self.state)
-        if sample is not None:
-            message = Joy(axes=sample[0], buttons=sample[1])
-            message.header.stamp = self.get_clock().now().to_msg()
-            self.joy_publisher.publish(message)
+        self.send(self.player.step(self.state))
         self.ticks += 1
         if self.ticks % 4 == 0:
             self.draw()
+
+    def send(self, sample):
+        if sample is None:
+            return
+        message = Joy(axes=sample[0], buttons=sample[1])
+        message.header.stamp = self.get_clock().now().to_msg()
+        self.joy_publisher.publish(message)
 
     def draw(self):
         caption = self.player.caption if self.playing else None

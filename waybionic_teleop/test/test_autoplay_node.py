@@ -1,4 +1,4 @@
-"""The autoplay node plays only on fresh reports from simulated drives."""
+"""The autoplay node plays only on fresh reports from simulated drives, and hands over safely."""
 
 from pathlib import Path
 import time
@@ -56,7 +56,7 @@ class Bench:
         node.joy_publisher.publish = lambda message: self.sent.append((clock.now, message))
         node.on_description(String(data=URDF))
 
-    def run(self, seconds, interface='sim'):
+    def run(self, seconds, interface='sim', operator=None):
         """Tick for this long; return what reached teleop's joy topic, with when it was sent."""
         start = len(self.sent)
         for tick in range(round(seconds * RATE)):
@@ -65,6 +65,8 @@ class Bench:
                 if interface:
                     self.node.on_diagnostics(drives(interface))
             self.node.on_joint_states(JointState(name=JOINTS, position=[0.0] * len(JOINTS)))
+            if operator:
+                self.node.on_operator(operator)
             self.node.tick()
             self.clock.now += 1.0 / RATE
         return self.sent[start:]
@@ -120,6 +122,23 @@ def test_the_demo_stops_while_another_node_publishes_joy(bench, context):
         assert bench.run(5.0) == []
     finally:
         other.destroy_node()
+
+
+def test_taking_over_leaves_teleop_disabled(bench):
+    assert pressed(bench.run(3.0), 'start')
+    stick = joy(left_x=1.0)
+    sent = [message for _, message in bench.run(1.0, operator=stick)]
+    # Teleop is still enabled from the demo's Start: B first, then a neutral sample, and only
+    # then the operator's own input.
+    kinds = ['b' if message.buttons[BUTTON['b']] else 'operator' if message is stick
+             else 'neutral' for message in sent]
+    assert [kind for index, kind in enumerate(kinds)
+            if index == 0 or kind != kinds[index - 1]] == ['b', 'neutral', 'operator']
+    ours = [message for message in sent if message is not stick]
+    assert not any(any(message.axes) for message in ours)
+    assert {tuple(message.buttons) for message in ours} == {
+        tuple(joy('b').buttons), tuple(joy().buttons)}
+    assert not bench.node.playing
 
 
 def test_the_demo_sends_nothing_on_a_stale_drive_report_then_starts_over(bench):

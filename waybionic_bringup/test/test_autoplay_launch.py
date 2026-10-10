@@ -56,6 +56,19 @@ class TestAutoplay(unittest.TestCase):
                 rclpy.spin_once(node, timeout_sec=0.05)
             return done()
 
+        def operate(seconds, *buttons, done=lambda: False, **axes):
+            """Hold the controller like this until done() or the time is up."""
+            message = Joy(axes=[axes.get(name, 0.0) for name in gamepad.AXES],
+                          buttons=[int(name in buttons) for name in gamepad.BUTTONS])
+            deadline = time.monotonic() + seconds
+            while not done() and time.monotonic() < deadline:
+                operator.publish(message)
+                rclpy.spin_once(node, timeout_sec=0.02)
+            return done()
+
+        def disabled():
+            return values.get('teleop.state') == 'disabled'
+
         try:
             # The demo enables teleop, lifts the arm in the upper group, then goes Cartesian.
             self.assertTrue(spin_until(
@@ -64,18 +77,17 @@ class TestAutoplay(unittest.TestCase):
                 f'the demo never reached the Cartesian group: {values}')
             self.assertGreater(joints['joint_2'], 0.5)
 
-            # B on the controller reaches teleop, and the demo stays out of the way.
-            buttons = [int(name == 'b') for name in gamepad.BUTTONS]
-            end = time.monotonic() + 0.3
-            while time.monotonic() < end:
-                operator.publish(Joy(axes=[0.0] * len(gamepad.AXES), buttons=buttons))
-                rclpy.spin_once(node, timeout_sec=0.02)
-            self.assertTrue(spin_until(lambda: values.get('teleop.state') == 'disabled', 2.0))
+            # Bumping a stick stops the demo and leaves teleop disabled, so the arm stays put.
+            self.assertTrue(operate(2.0, done=disabled, left_x=1.0))
             pose = dict(joints)
-            spin_until(lambda: False, 3.0)
-            self.assertEqual(values.get('teleop.state'), 'disabled')
+            operate(2.0, left_x=1.0)
+            self.assertTrue(disabled())
             for joint in ('joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5'):
                 self.assertAlmostEqual(joints[joint], pose[joint], places=3)
+
+            # Start then hands the arm to the operator.
+            operate(0.2, 'start')
+            self.assertTrue(operate(2.0, done=lambda: values.get('teleop.state') == 'enabled'))
         finally:
             node.destroy_node()
             rclpy.shutdown()
