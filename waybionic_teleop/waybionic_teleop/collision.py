@@ -134,7 +134,13 @@ class ArmCollision:
         return list(self.check(positions))
 
     def check(self, positions):
-        """Return {collision: depth}: each contact, and how far into it the arm reaches in m."""
+        """
+        Return {collision: intrusion}: each contact, and how far into it the arm reaches.
+
+        Against the table that is the depth in m. Inside the base or shoulder it is the volume
+        in m^3 of the link's box within the obstacle's box grown by the clearance, which, unlike
+        a depth, grows whichever way the link pushes further in.
+        """
         poses = self.poses(positions)
         found = {}
         for link in self.boxes:
@@ -146,12 +152,68 @@ class ArmCollision:
                 found[f'{link}: table'] = self.table_z + self.clearance - lowest
         for link in FOLDING:
             for body in BODY:
-                deepest = max((_overlap(box, obstacle, self.clearance)
-                               for box in self.world_boxes(poses, link)
-                               for obstacle in self.world_boxes(poses, body)), default=0.0)
-                if deepest > 0.0:
-                    found[f'{link}: {body}'] = deepest
+                volume = sum(_intrusion(box, obstacle, self.clearance)
+                             for box in self.world_boxes(poses, link)
+                             for obstacle in self.world_boxes(poses, body)
+                             if _overlap(box, obstacle, self.clearance) > 0.0)
+                if volume > 0.0:
+                    found[f'{link}: {body}'] = volume
         return found
+
+
+def _intrusion(a, b, margin):
+    """Return the volume of box a inside box b grown by margin on every side."""
+    (center_a, axes_a, half_a), (center_b, axes_b, half_b) = a, b
+    # Work relative to b's centre, which keeps the volume sums well conditioned.
+    offset = tuple(ca - cb for ca, cb in zip(center_a, center_b))
+    faces = []
+    for i in range(3):
+        j, k = (i + 1) % 3, (i + 2) % 3
+        for side in (-1.0, 1.0):
+            loop = []
+            for along_j, along_k in ((-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)):
+                signs = [0.0] * 3
+                signs[i], signs[j], signs[k] = side, along_j, along_k
+                loop.append(tuple(o + sum(s * h * u[n] for s, h, u in zip(signs, half_a, axes_a))
+                                  for n, o in enumerate(offset)))
+            # Each face runs counterclockwise seen from outside the box.
+            faces.append(loop if side > 0.0 else loop[::-1])
+    for axis, half in zip(axes_b, half_b):
+        for normal in (axis, tuple(-value for value in axis)):
+            faces = _clip(faces, normal, half + margin)
+    return sum(_dot(face[0], _cross(p, q)) for face in faces
+               for p, q in zip(face[1:], face[2:])) / 6.0
+
+
+def _clip(faces, normal, limit):
+    """Cut a convex polyhedron, given as outward faces, down to normal . point <= limit."""
+    distances = [_dot(normal, point) - limit for face in faces for point in face]
+    if not distances or max(distances) <= 0.0:
+        return faces
+    if min(distances) >= 0.0:
+        return []
+    kept, cut = [], []
+    for face in faces:
+        loop = []
+        for start, end in zip(face, face[1:] + face[:1]):
+            a, b = _dot(normal, start) - limit, _dot(normal, end) - limit
+            if a <= 0.0:
+                loop.append(start)
+            if a == 0.0:
+                cut.append(start)
+            if a < 0.0 < b or b < 0.0 < a:
+                point = tuple(s + a / (a - b) * (e - s) for s, e in zip(start, end))
+                loop.append(point)
+                cut.append(point)
+        if len(loop) >= 3:
+            kept.append(loop)
+    # Close the cut with a face on the plane, counterclockwise about the normal.
+    middle = tuple(sum(values) / len(cut) for values in zip(*cut))
+    first = _cross(normal, (1.0, 0.0, 0.0) if abs(normal[0]) < 0.9 else (0.0, 1.0, 0.0))
+    second = _cross(normal, first)
+    kept.append(sorted(cut, key=lambda point: math.atan2(
+        _dot(second, point) - _dot(second, middle), _dot(first, point) - _dot(first, middle))))
+    return kept
 
 
 def _overlap(a, b, margin):

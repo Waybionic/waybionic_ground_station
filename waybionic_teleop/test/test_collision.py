@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from waybionic_teleop.collision import ArmCollision
+from waybionic_teleop.collision import _intrusion, _overlap, _rotation, ArmCollision
 from waybionic_teleop.gamepad import AXES, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
@@ -129,6 +129,44 @@ def test_teleop_refuses_a_step_that_presses_one_contact_deeper(parameters, check
     assert teleop.blocked == ['forearm_link: table']
 
 
+def test_the_intrusion_is_the_volume_inside_the_grown_obstacle():
+    square = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+    obstacle = ((0.0, 0.0, 0.0), square, (0.1, 0.1, 0.1))
+    # 30 mm into one face of the obstacle grown by 10 mm, and flush with three others.
+    side = ((0.13, 0.0, 0.01), square, (0.05, 0.11, 0.1))
+    assert _intrusion(side, obstacle, 0.01) == pytest.approx(0.03 * 0.22 * 0.2)
+    turn = _rotation((0.0, 0.0, 1.0), 0.3)
+    inside = ((0.0, 0.02, 0.0), tuple(zip(*turn)), (0.01, 0.02, 0.03))
+    assert _intrusion(inside, obstacle, 0.01) == pytest.approx(8 * 0.01 * 0.02 * 0.03)
+    assert _intrusion(((0.5, 0.0, 0.0), square, (0.1, 0.1, 0.1)), obstacle, 0.01) == 0.0
+
+
+def test_teleop_refuses_to_slide_the_forearm_further_into_the_side_of_the_base(
+        parameters, check):
+    teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
+                       LIMITS, ArmKinematics.from_urdf(URDF), check)
+    # Folded back past today's joint limits, the end of the forearm reaches into the side of
+    # the base. Turning the base towards zero slides it further in along that side, while its
+    # overlap across the side, the smallest of the separating-axis overlaps, shrinks.
+    start, turned = pose(-130, 40, 0, math.radians(15)), pose(-130, 40, 0, math.radians(14.5))
+    assert check.hits(start) == check.hits(turned) == ['forearm_link: base_link']
+    assert separating_axis_depth(check, turned) < separating_axis_depth(check, start)
+    assert (check.check(turned)['forearm_link: base_link']
+            > check.check(start)['forearm_link: base_link'])
+    teleop.update(*sample('start'), start, DT)
+    teleop.update(*sample(), start, DT)
+    for _ in range(round(0.5 / DT)):
+        teleop.update(*sample(left_x=-1.0), dict(teleop.targets), DT)
+    assert teleop.targets['joint_1'] == start['joint_1']
+    assert teleop.blocked == ['forearm_link: base_link']
+    # Raising the shoulder backs it out.
+    for _ in range(round(0.5 / DT)):
+        teleop.update(*sample(left_y=1.0), dict(teleop.targets), DT)
+    assert teleop.targets['joint_2'] > start['joint_2'] + 0.1
+    assert (check.check(teleop.targets).get('forearm_link: base_link', 0.0)
+            < check.check(start)['forearm_link: base_link'])
+
+
 def test_the_check_reports_a_depth_for_every_collision_it_names(check):
     depths = check.check(pose(-135, -165, 0))
     assert list(depths) == check.hits(pose(-135, -165, 0))
@@ -139,3 +177,10 @@ def test_the_check_reports_a_depth_for_every_collision_it_names(check):
 
 def sample(*pressed, **axes):
     return [axes.get(name, 0.0) for name in AXES], [int(name in pressed) for name in BUTTONS]
+
+
+def separating_axis_depth(check, joints):
+    """Return the forearm's smallest overlap with the base across the separating axes."""
+    poses = check.poses(joints)
+    return _overlap(next(check.world_boxes(poses, 'forearm_link')),
+                    next(check.world_boxes(poses, 'base_link')), check.clearance)
