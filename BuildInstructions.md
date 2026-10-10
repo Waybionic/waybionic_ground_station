@@ -322,11 +322,20 @@ Press **Ctrl+C** in each window to stop.
 **Linux (native ROS):** with the controller plugged in, run
 `ros2 launch waybionic_bringup ground_station.launch.py teleop:=true`.
 
+**Linux (Docker):** plug the controller in by USB first, then run
+`./scripts/linux-gui.sh --controller`. This starts teleop in the
+[Linux GUI](#linux-gui-demo) container. The script gives the container only the game
+controllers listed as `/dev/input/by-id/*-event-joystick`, not all of `/dev/input`:
+access to keyboards, mice and touchpads would let any process in the container read
+what you type in other windows. The devices are fixed when the container starts, so
+after unplugging or reconnecting the controller, stop the container and start it again.
+Bluetooth controllers are not listed in `/dev/input/by-id`; connect the controller by USB.
+
 | Input | Action |
 | --- | --- |
 | Start (Xbox Menu button, three lines) | Enable or disable; the arm starts disabled |
 | B | Stop and hold the current pose |
-| Y | Switch group: base (joints 1-3), upper (joints 2-5) or Cartesian (tool tip) |
+| Y | Switch group: base (joints 1-3), upper (joints 2-5), Cartesian (tool tip) or incision |
 | Base group: left stick | Base yaw (left/right) and shoulder (up/down) |
 | Base group: right stick up/down | Elbow |
 | Upper group: left stick | Shoulder (left/right) and elbow (up/down) |
@@ -335,9 +344,12 @@ Press **Ctrl+C** in each window to stop.
 | Cartesian group: right stick | Tool roll (left/right) and tool tip up/down |
 | Cartesian group: LB (hold) | Move along one axis only: the stick direction pushed furthest |
 | Cartesian group: D-pad left/right | Tilt the tool about its tip; the tip stays still |
+| Incision group: left stick up/down | Insert or withdraw the tool along its own axis |
+| Incision group: right stick up/down | Tilt the tool about the incision point |
+| Incision group: right stick left/right | Tool roll |
 | RT / LT | Close / open the placeholder end effector |
-| D-pad up/down | Speed: 10, 25, 50 or 100% of 60 deg/s, or of 50 mm/s and 30 deg/s of tilt in the Cartesian group |
-| A (hold) | Return to the zero pose |
+| D-pad up/down | Speed: 10, 25, 50 or 100% of 60 deg/s, or of 50 mm/s and 30 deg/s of tilt in the Cartesian and incision groups |
+| A (hold) | Return to the zero pose (not in the incision group) |
 
 Start is refused until the sticks are centred and the triggers and motion buttons released;
 after Y changes groups with motion held, the new group waits until the controls are neutral.
@@ -350,6 +362,13 @@ In both cases teleop must be disabled and Start released and pressed again befor
 resumes. The diagnostics panel shows the command gate, teleop state, each joint, each
 drive's last CAN frame and the simulated bus load.
 
+When a move stops at a limit, the controller rumbles briefly, at most once a second. The
+RViz label also turns red and names the cause, for example `STOPPED-joint_3` or
+`OUT-OF-REACH`. If the drives stop the arm while teleop is still enabled, for example after
+rejecting a target or losing encoder feedback, the label shows `DRIVES-STOPPED` and the
+drives' reason, and the controller rumbles once; press B, then Start, to continue. Rumble
+works with a controller plugged into the ground station and through the Windows bridge.
+
 When the bridge reports that the controller disconnected, every control is released once,
 so the arm slows to a stop. After 0.5 s without controller input, teleop disables and holds
 the arm where it is. Reconnect the controller and press Start to continue.
@@ -361,8 +380,23 @@ tracking error from encoder quantization and acceleration. Tilt moves the should
 and wrist around the tool tip. Roll counters spin about the tool axis; a downward-pointing
 blade retains its heading in this model.
 
-The current arm URDF has provisional joint limits and no collision boxes. Cartesian moves
-have no table, base or self-collision protection or verified escape path. The simulated
+The incision group is for working through a keyhole. The incision point is where the
+tip was when you selected the group, shown as a pink dot in RViz. The tool always
+passes through that point, whether you insert it, withdraw it or tilt it, and the
+return to the zero pose is off so the tool is never dragged sideways through the
+incision. With five joints, the tool can only tilt in the arm's vertical plane:
+tilting sideways about the incision point would need a sixth joint.
+
+Y does not leave the incision group while the tool is inserted past the incision
+point; withdraw it first. Selecting the group again keeps the incision point while
+the tool axis still passes within 2 mm of it, and otherwise sets a new one at the tip.
+If the arm is re-enabled with the tool axis passing within 2 mm of the incision point,
+the point moves onto the axis instead of the arm moving. Further away, the group stops
+rather than pull the tool back: press Y, withdraw the tool in another group, then
+select the incision group again to set a new incision point.
+
+The current arm URDF has provisional joint limits, and the collision checks below model
+each link as a box; they have been tested with simulated drives only. The simulated
 CAN map is not a powered-arm safety case. Do not change a wrist bound or operate powered
 motors until Mechanical identifies the URDF joint and measures signed travel from upright
 zero, including any cable or gear stop.
@@ -377,6 +411,27 @@ targets by more than two updates at once, so after a pause the drives do not cat
 up faster than the teleop speed limits. This checks simulated behavior only. Do
 not connect powered drives or treat it as a hardware E-stop test; drive
 identities, wiring, zeroing and electrical safety still need hardware verification.
+
+Every group stops a move before any part of the arm comes within 10 mm of the
+table or folds into the arm's own base. The checks use a box around each link,
+which you can see by ticking **Collision Enabled** on RViz's RobotModel display.
+The tool's box is a placeholder around the RViz jaws, which reach 30 mm past
+`tool_link`, until the real tool is modelled; a longer tool needs a longer box.
+When a move stops, the diagnostics panel names the part, for example
+`At limit: forearm_link: table`. If the arm stands on a raised mount, set
+`table_height` in `waybionic_teleop/config/xbox_teleop.yaml` to the table's height
+above the bottom of the base. `collision_clearance` in the same file sets the 10 mm
+margin. If the arm is already touching something, the only moves still allowed are
+the ones that back out of it: a move that presses any contact further in is
+refused, even if it would ease another contact at the same time.
+
+The boxes are what makes any of this work. A `robot_description` without a
+collision box for the base, shoulder, upper arm, forearm, wrist, wrist roll or tool
+leaves teleop disabled, and the diagnostics panel names the missing links.
+A description reload while teleop is enabled disables teleop and holds the arm where
+it is, and the drives stop on any `robot_description` change, so Start has to be
+released and pressed again under the new model. This path has been tested with
+simulated drives; powered hardware has not been tested.
 
 The RViz camera follows the tool as the arm moves; drag to orbit and scroll to zoom
 as usual, or add `follow_camera:=false` to the launch command for a fixed view.
@@ -449,6 +504,68 @@ ros2 run waybionic_teleop mks_drive_sim --interface socketcan --channel vcan0
 
 In a second terminal, launch with `drive_interface:=socketcan drive_channel:=vcan0`
 and zero as above. CI runs `waybionic_teleop/test/test_can_drives.py` over `vcan0`.
+
+## Doctor View Camera
+
+Until the doctor's camera is chosen, a USB webcam stands in for it. `camera_bridge`
+captures the webcam on the computer it is plugged into and sends JPEG frames to the
+ground station, each stamped with its capture time. The ground station publishes
+them on `/doctor_view/left/image_raw/compressed` with `/doctor_view/left/camera_info`.
+The diagnostics panel's `camera.doctor_view` entry shows the frame rate and the delay
+from capture to arrival: mean, minimum, maximum and jitter.
+
+**Windows (Docker):** first install OpenCV for the bridge with
+`python -m pip install opencv-python`. Python 3.13 or newer is recommended for the
+bridge: on Windows, older versions read the clock in 15.6 ms steps, which can add up
+to 15.6 ms to the measured delay. Then start the ground station with the camera
+port, from the repository root:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin\docker.exe" compose run --rm --build -p 127.0.0.1:47310:47310 wslg ros2 launch waybionic_bringup ground_station.launch.py camera:=true camera_bind:=0.0.0.0
+```
+
+In a second PowerShell window, start the bridge from the repository root:
+
+```powershell
+cd waybionic_camera
+python -m waybionic_camera.camera_bridge
+```
+
+Finally, tick **Doctor View** in RViz's Displays panel.
+
+**Bridge options:**
+
+- `--camera 1` uses another camera.
+- `--width 1280 --height 720` changes the resolution.
+- On Windows, `--backend dshow` often opens a webcam faster.
+
+**Linux (native ROS):** run
+`ros2 launch waybionic_bringup ground_station.launch.py camera:=true`. Then, from
+`waybionic_camera`, run `python3 -m waybionic_camera.camera_bridge`; it needs
+`python3-opencv`.
+
+**Measuring the delay.**
+
+- **What the reported delay covers:** from when OpenCV hands the bridge a frame to
+  when the frame reaches ROS. It leaves out the time spent inside the camera and on
+  the display.
+- **Full delay:** point the camera at a millisecond stopwatch on the same screen as
+  RViz, then compare the live stopwatch with the one in the Doctor View.
+- **Logging each frame:** add `camera_log:=` with a CSV path to the launch command to
+  log every frame's capture time, arrival time and delay. `frame` counts the frames
+  that arrived, so a dropped frame shows as a longer gap in `captured_s`. With native
+  ROS, any path works, such as `camera_log:=/tmp/camera.csv`. In Docker, `--rm`
+  deletes the container and its files when it stops, so log to a Windows folder
+  mounted into the container instead. This writes `camera.csv` to `camera-logs` in
+  your user folder:
+
+  ```powershell
+  & "$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin\docker.exe" compose run --rm --build -p 127.0.0.1:47310:47310 -v "$HOME\camera-logs:/camera-logs" wslg ros2 launch waybionic_bringup ground_station.launch.py camera:=true camera_bind:=0.0.0.0 camera_log:=/camera-logs/camera.csv
+  ```
+
+- **Clocks:** the bridge stamps frames with the camera computer's clock, so the two
+  clocks must agree. Docker Desktop keeps them within a few milliseconds. If the
+  delay looks negative or keeps growing after the PC sleeps, restart Docker Desktop.
 
 ## Native Ubuntu Setup for RViz
 
