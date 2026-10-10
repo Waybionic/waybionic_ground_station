@@ -82,8 +82,14 @@ def config_from_parameters(params):
             home_gain=float(params['home_gain']))
     except KeyError as missing:
         raise ValueError(f'missing teleop parameter {missing}') from None
-    if not math.isfinite(config.period):
-        raise ValueError('rate_hz is too small for a finite control period')
+    check_config(config)
+    return config
+
+
+def check_config(config):
+    """Raise ValueError unless the controller mapping and motion limits are usable."""
+    if not 0 < config.period < math.inf:
+        raise ValueError('the control period (1 / rate_hz) must be positive and finite')
     if not config.groups:
         raise ValueError('at least one teleop group is required')
     speeds = (config.tool_speed, config.max_speed, config.max_accel, config.linear_speed,
@@ -93,8 +99,9 @@ def config_from_parameters(params):
     if any(not math.isfinite(value) or not 0 < value <= 1 for value in config.speed_levels):
         raise ValueError('speed_levels must be in (0, 1]')
     for group in config.groups:
-        if any(not math.isfinite(scale) for scale in group.scales):
-            raise ValueError(f'group {group.name} scales must be finite')
+        # A scale above 1 would let a full stick pass the speed limits.
+        if any(not -1.0 <= scale <= 1.0 for scale in group.scales):
+            raise ValueError(f'group {group.name} scales must be between -1 and 1')
         if group.mode == 'cartesian':
             if not len(group.axes) == len(group.scales) == len(CARTESIAN_AXES):
                 raise ValueError(f'group {group.name} needs x, y, z and roll axes and scales')
@@ -111,7 +118,6 @@ def config_from_parameters(params):
         raise ValueError('initial_speed_level or deadzone out of range')
     if len(config.tool_limits) != 2 or not config.tool_limits[0] < config.tool_limits[1]:
         raise ValueError('tool_limits must be [open, closed] with open < closed')
-    return config
 
 
 class ArmTeleop:
@@ -119,6 +125,7 @@ class ArmTeleop:
 
     def __init__(self, config, limits, kinematics=None):
         """Take the config, {joint: (lower, upper)} radians and optional ArmKinematics."""
+        check_config(config)
         self.config = config
         self.kinematics = kinematics
         # Without kinematics for this arm, the Cartesian groups are left out.

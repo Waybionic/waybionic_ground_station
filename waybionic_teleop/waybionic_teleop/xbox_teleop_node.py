@@ -42,6 +42,8 @@ class XboxTeleop(Node):
                   for name in self.list_parameters([], 0).names}
         self.config = config_from_parameters(params)
         self.timeout = float(params['input_timeout_s'])
+        if not 0 < self.timeout < math.inf:
+            raise ValueError('input_timeout_s must be positive and finite')
         self.tool_frame = params['tool_frame']
         self.base_frame = params['base_frame']
         self.teleop = None

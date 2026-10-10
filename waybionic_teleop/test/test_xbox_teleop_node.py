@@ -172,3 +172,20 @@ def test_bad_description_and_mismatched_joint_map_fail_closed(node):
     node.config.groups[2].joints.reverse()
     node.load(String(data=URDF))
     assert node.teleop is None and 'does not match the URDF' in node.problem
+
+
+@pytest.mark.parametrize('change', [
+    {'rate_hz': 0.0}, {'input_timeout_s': 0.0}, {'input_timeout_s': -0.5},
+    {'input_timeout_s': math.inf},
+])
+def test_the_rate_and_input_timeout_must_be_positive(monkeypatch, parameters, change):
+    monkeypatch.setenv('ROS_AUTOMATIC_DISCOVERY_RANGE', 'OFF')
+    context = rclpy.Context()
+    rclpy.init(context=context)
+    params = {**parameters('xbox_teleop.yaml', 'xbox_teleop'), **change}
+    try:
+        with pytest.raises(ValueError, match=next(iter(change))):
+            XboxTeleop(context=context, parameter_overrides=[
+                Parameter(name, value=value) for name, value in params.items()])
+    finally:
+        rclpy.try_shutdown(context=context)

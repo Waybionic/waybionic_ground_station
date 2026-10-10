@@ -310,7 +310,23 @@ def test_nonfinite_feedback_cannot_enable_teleop(teleop):
     {'max_linear_speed_mm_s': math.nan},
     {'speed_levels': [math.inf]},
     {'tool_limits': [0.0]},
+    {'max_accel_deg_s2': -480.0},
+    {'home_gain': 0.0},
+    {'tool_speed': math.inf},
+    {'speed_levels': [0.5, 1.5]},
+    {'base.scales': [1.0, -1.5, 1.0]},
 ])
 def test_invalid_motion_config_cannot_start(params, change):
     with pytest.raises(ValueError):
         config_from_parameters({**params, **change})
+
+
+@pytest.mark.parametrize('field, value', [
+    ('max_speed', -1.0), ('max_accel', -1.0), ('home_gain', math.nan), ('tool_speed', 0.0),
+    ('speed_levels', [0.5, 2.0]), ('period', -0.01),
+])
+def test_teleop_refuses_a_config_with_unusable_motion_limits(params, field, value):
+    config = config_from_parameters(params)
+    setattr(config, field, value)
+    with pytest.raises(ValueError):
+        ArmTeleop(config, LIMITS)
