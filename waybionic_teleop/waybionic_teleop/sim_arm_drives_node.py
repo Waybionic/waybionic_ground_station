@@ -10,10 +10,12 @@ has been zeroed with the arm in the zero pose: at start-up in simulation, and th
 ``~/zero`` service on real drives. A drive that stops answering is treated as power-cycled:
 every drive stops and the arm must be zeroed again.
 
-Whoever publishes ``/joint_commands`` must keep publishing while the arm is meant to move.
-Once ``command_timeout_s`` passes with no command, every drive stops where it is and holds
-there, whatever speed it was last given, so a publisher that dies cannot leave the arm
-running on to its last target.
+Joint commands are accepted only after a valid robot_description and a fresh teleop enable
+that teleop keeps republishing. Whoever publishes ``/joint_commands`` must keep publishing
+while the arm is meant to move: once ``command_timeout_s`` passes with no command, every
+drive stops where it is, whatever speed it was last given, so a publisher that dies cannot
+leave the arm running on to its last target. After any stop, teleop must be disabled and
+enabled again before the arm moves.
 """
 
 import math
@@ -21,11 +23,12 @@ import time
 
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 import rclpy
+from rclpy._rclpy_pybind11 import RCLError
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 
 from waybionic_teleop import mks_can
@@ -57,12 +60,28 @@ class SimArmDrives(Node):
         self.map = drive_map_from_parameters(params, mks_can.COUNTS_PER_REV)
         self.acc = int(params['acc'])
         self.max_rpm = int(params['max_rpm'])
-        self.period = 1.0 / float(params['rate_hz'])
+        rate_hz = float(params['rate_hz'])
         self.bitrate = int(params['bitrate'])
         self.heartbeat_ms = int(params['heartbeat_ms'])
+        self.enable_timeout = float(params['enable_timeout_s'])
         self.command_timeout = float(params.get('command_timeout_s', 0.5))
+        if (not 0 <= self.acc <= 255 or not 1 <= self.max_rpm <= mks_can.MAX_SPEED_RPM
+                or not math.isfinite(rate_hz) or rate_hz <= 0 or self.bitrate <= 0
+                or not 1 <= self.heartbeat_ms <= 0xFFFFFFFF
+                or not 0 < self.command_timeout < math.inf
+                or not 0 < self.enable_timeout < math.inf):
+            raise ValueError('invalid drive rate, acceleration, speed, heartbeat, command '
+                             'timeout or enable timeout')
+        self.period = 1.0 / rate_hz
+        self.heartbeat_s = self.heartbeat_ms / 1000.0
         self.interface = params.get('interface', 'sim')
         channel = params.get('channel', '')
+        unmodeled = set(params['unmodeled_joints'])
+        if not unmodeled <= set(self.map.joints):
+            raise ValueError('unmodeled_joints must name drives in the simulated map')
+        self.modeled_joints = [joint for joint in self.map.joints if joint not in unmodeled]
+        if not self.modeled_joints:
+            raise ValueError('at least one drive joint needs a URDF limit')
         drives = self.map.drives
         self.index = {drive.can_id: index for index, drive in enumerate(drives)}
         if self.interface == 'sim':
@@ -88,6 +107,7 @@ class SimArmDrives(Node):
         self.setup_time = [None] * len(drives)
         self.state = ['starting'] * len(drives)
         self.sent = [None] * len(drives)
+        self.heartbeat_stops = [0] * len(drives)
         self.last_command = [''] * len(drives)
         self.commanded = None
         self.velocities = {}
@@ -96,6 +116,10 @@ class SimArmDrives(Node):
         # one has already stopped the drives. It keeps the stop and its warning to one shot.
         self.stale = True
         self.limits = {}
+        self.description_valid = False
+        self.authorized = False
+        self.enabled_at = -math.inf
+        self.awaiting_release = True
         self.rejected = 0
         self.bus_errors = 0
         for index in range(len(drives)):
@@ -103,9 +127,11 @@ class SimArmDrives(Node):
         zero_on_start = params.get('zero_on_start', self.interface == 'sim')
         if zero_on_start:
             self.zero()
+        self.stop_reason = 'Waiting for robot_description and a released Start button'
         topic = params.get('diagnostics_topic', '/diagnostics')
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(String, 'robot_description', self.on_description, latched)
+        self.create_subscription(Bool, 'teleop_enabled', self.on_enabled, latched)
         self.create_subscription(JointState, 'joint_commands', self.on_command, 10)
         self.create_service(Trigger, '~/zero', self.on_zero)
         self.state_publisher = self.create_publisher(JointState, 'joint_states', 10)
@@ -113,7 +139,7 @@ class SimArmDrives(Node):
         self.last_tick = time.monotonic()
         self.report_time, self.report_frames, self.report_bits = self.last_tick, 0, 0
         self.report_errors = 0
-        self.create_timer(1.0 / float(params['rate_hz']), self.tick)
+        self.create_timer(self.period, self.tick)
         self.create_timer(0.5, self.report)
         drive_list = ', '.join(f'{drive.name}=CAN {drive.can_id}' for drive in drives)
         if self.interface == 'sim':
@@ -140,16 +166,14 @@ class SimArmDrives(Node):
                      mks_can.set_heartbeat(can_id, self.heartbeat_ms)):
             self.bus.send(can_id, data)
 
-    def stop_all(self):
-        """Stop every drive where it is and drop the targets until the arm is zeroed again."""
-        for drive in self.map.drives:
-            self.bus.send(drive.can_id, mks_can.stop(drive.can_id, self.acc))
-        self.commanded, self.velocities = None, {}
-        self.sent = [None] * len(self.map.drives)
+    def stop_all(self, reason):
+        """Stop every drive where it is; teleop must be enabled afresh before it moves."""
+        self.stop_drives()
+        self.disarm(reason, require_release=True)
 
     def zero(self):
         """Make the current pose every drive's zero."""
-        self.stop_all()
+        self.stop_all('Zeroing the drives')
         for drive in self.map.drives:
             self.bus.send(drive.can_id, mks_can.set_zero(drive.can_id))
         self.zeroed = [False] * len(self.map.drives)
@@ -171,41 +195,105 @@ class SimArmDrives(Node):
         return response
 
     def on_description(self, message):
+        self.disarm('Robot description changed', require_release=True)
         try:
-            self.limits = joint_limits(message.data, self.map.joints, required=False)
+            self.limits = joint_limits(message.data, self.modeled_joints)
         except ValueError as error:
-            self.get_logger().error(f'Joint limits unavailable: {error}')
+            self.limits = {}
+            self.description_valid = False
+            self.stop_reason = f'Joint limits unavailable: {error}'
+            self.get_logger().error(self.stop_reason)
+            return
+        self.description_valid = True
+
+    def feedback_fresh(self, now):
+        return all(heard is not None and now - heard <= REPLY_TIMEOUT_S for heard in self.heard)
+
+    def on_enabled(self, message):
+        now = time.monotonic()
+        if not message.data:
+            self.disarm('Teleop disabled')
+            self.awaiting_release = False
+        elif (not self.awaiting_release and self.description_valid and all(self.zeroed)
+              and not any(self.unconfirmed) and None not in self.counts
+              and self.feedback_fresh(now)):
+            if not self.authorized:
+                self.commanded = self.map.to_positions(self.counts)
+            self.authorized = True
+            self.enabled_at = now
+            self.stop_reason = ''
+
+    def disarm(self, reason, require_release=False):
+        if self.authorized:
+            self.stop_drives()
+        self.authorized = False
+        self.awaiting_release = self.awaiting_release or require_release
+        self.commanded = None
+        self.velocities.clear()
+        self.sent = [None] * len(self.map.drives)
+        self.stop_reason = reason
 
     def on_command(self, message):
         self.command_time, self.stale = time.monotonic(), False
-        if self.commanded is None:
+        if not self.authorized or self.commanded is None:
             return
-        for index, joint in enumerate(message.name):
-            if joint not in self.commanded or index >= len(message.position):
-                continue
-            position = message.position[index]
-            velocity = message.velocity[index] if index < len(message.velocity) else 0.0
-            if not (math.isfinite(position) and math.isfinite(velocity)):
-                self.rejected += 1
-                continue
-            self.commanded[joint], self.velocities[joint] = position, velocity
+        names = message.name
+        if (len(names) != len(self.map.joints) or set(names) != set(self.map.joints)
+                or len(message.position) != len(names) or len(message.velocity) != len(names)
+                or any(not math.isfinite(value) for value in message.position)
+                or any(not math.isfinite(value) for value in message.velocity)):
+            self.reject_command('incomplete, duplicate or nonfinite joint command')
+            return
+        positions = dict(zip(names, message.position))
+        measured = self.map.to_positions(self.counts)
+        for joint, (lower, upper) in self.limits.items():
+            position, actual = positions[joint], measured[joint]
+            # An already-outside encoder may move toward the URDF range, never farther out.
+            if ((position < lower and (actual >= lower or position < actual))
+                    or (position > upper and (actual <= upper or position > actual))):
+                self.reject_command(f'{joint} target outside its URDF range')
+                return
+        self.commanded = positions
+        self.velocities = dict(zip(names, message.velocity))
+
+    def reject_command(self, reason):
+        self.rejected += 1
+        self.disarm(reason, require_release=True)
+        self.get_logger().warning(f'{reason}; release Start before re-enabling',
+                                  throttle_duration_sec=2.0)
 
     def tick(self):
         now = time.monotonic()
         dt, self.last_tick = now - self.last_tick, now
+        # The old motion must consume the entire elapsed host time before any new frame
+        # can reset its heartbeat. A pause requires a released and newly pressed Start.
+        self.bus.step(dt)
+        if self.interface == 'sim':
+            for index, drive in enumerate(self.map.drives):
+                # A simulated drive taken off the bus, as if unplugged, reports nothing.
+                servo = self.bus.drives.get(drive.can_id)
+                if servo is not None and servo.heartbeat_stops != self.heartbeat_stops[index]:
+                    self.heartbeat_stops[index] = servo.heartbeat_stops
+                    self.sent[index] = None
         if not self.stale and now - self.command_time > self.command_timeout:
             # The commands stopped, say because teleop exited or its host died: stop where the
-            # arm is rather than run on to the last target. A position-only command carries no
-            # velocity, so the speed the drives were last given must not decide this.
+            # arm is rather than run on to the last target, whatever speed it was given.
             self.stale = True
-            self.stop_all()
-            self.get_logger().warning(
-                f'No joint command for {self.command_timeout:.1f} s; every drive is stopped')
+            if self.authorized:
+                self.stop_all(f'No joint command for {self.command_timeout:.1f} s')
+                self.get_logger().warning(
+                    f'No joint command for {self.command_timeout:.1f} s; every drive is stopped')
         self.check_replies()
-        # Speeds follow the encoders, so the targets are refreshed every tick.
-        if self.commanded is not None:
-            self.send_targets()
-        self.bus.step(dt)
+        if dt >= self.heartbeat_s:
+            self.disarm('Host paused past the drive heartbeat', require_release=True)
+        else:
+            if self.authorized and not self.feedback_fresh(now):
+                self.disarm('Drive encoder feedback stale', require_release=True)
+            # Teleop republishes its enable every tick, so silence means it stopped or died.
+            if self.authorized and now - self.enabled_at > self.enable_timeout:
+                self.disarm('Teleop enable timed out', require_release=True)
+            if self.authorized and self.commanded is not None:
+                self.send_targets()
         for index, drive in enumerate(self.map.drives):
             self.bus.send(drive.can_id, mks_can.read_encoder(drive.can_id))
             self.unanswered[index] += 1
@@ -213,8 +301,8 @@ class SimArmDrives(Node):
         if not all(self.zeroed) or None in self.counts:
             return
         positions = self.map.to_positions(self.counts)
-        if self.commanded is None and not any(self.unconfirmed):
-            # Hold wherever the drives already are until the first command arrives.
+        if self.commanded is None:
+            # Hold the actual encoder pose while disarmed, including after a host pause.
             self.commanded = dict(positions)
         message = JointState(name=list(positions), position=list(positions.values()))
         message.header.stamp = self.get_clock().now().to_msg()
@@ -230,23 +318,46 @@ class SimArmDrives(Node):
                     or self.unanswered[index] <= self.max_unanswered):
                 continue
             self.lost[index], self.zeroed[index] = True, False
-            self.stop_all()
+            self.stop_all(f'{drive.name} stopped answering')
             self.get_logger().error(f'{drive.name} stopped answering; every drive is stopped')
 
-    def send_targets(self):
-        moves = self.map.synchronized(self.commanded, self.velocities, self.counts, self.period,
-                                      self.max_rpm, self.limits)
-        for index, (drive, (axis, speed)) in enumerate(zip(self.map.drives, moves)):
-            if self.sent[index] == (axis, speed):
+    def stop_drives(self):
+        """Stop every drive with the manual's F5 zero-speed, zero-acceleration frame."""
+        self.velocities.clear()
+        for index, drive in enumerate(self.map.drives):
+            if self.sent[index] == (None, 0):
                 continue
-            try:
-                data = mks_can.absolute_axis(drive.can_id, axis, speed, self.acc)
-            except ValueError as error:
-                self.get_logger().warning(f'{drive.name}: {error}', throttle_duration_sec=2.0)
+            data = mks_can.stop(drive.can_id, 0)
+            self.bus.send(drive.can_id, data)
+            self.sent[index] = (None, 0)
+            self.last_command[index] = mks_can.hex_frame(drive.can_id, data)
+
+    def send_targets(self):
+        try:
+            moves = self.map.synchronized(self.commanded, self.counts, self.period, self.max_rpm,
+                                          self.velocities)
+            motor_rates = self.map.to_rpm(self.velocities)
+            commands = []
+            # Preflight every int24 axis and frame before sending any coupled motor an update.
+            for drive, (axis, speed), rpm in zip(self.map.drives, moves, motor_rates):
+                if not mks_can.MIN_AXIS <= axis <= mks_can.MAX_AXIS:
+                    raise ValueError(f'{drive.name}: axis {axis} is outside int24')
+                if rpm == 0.0:
+                    key = (None, 0)
+                    data = mks_can.absolute_axis(drive.can_id, 0, 0, 0)
+                else:
+                    key = (axis, speed)
+                    data = mks_can.absolute_axis(drive.can_id, axis, speed, self.acc)
+                commands.append((key, data))
+        except (ValueError, OverflowError) as error:
+            self.reject_command(f'Cannot synchronize drives: {error}')
+            return
+        for index, (drive, (key, data)) in enumerate(zip(self.map.drives, commands)):
+            if self.sent[index] == key:
                 continue
             # A frame the interface refused is sent again on the next tick.
             if self.bus.send(drive.can_id, data):
-                self.sent[index] = (axis, speed)
+                self.sent[index] = key
                 self.last_command[index] = mks_can.hex_frame(drive.can_id, data)
 
     def drain(self, now):
@@ -304,6 +415,12 @@ class SimArmDrives(Node):
             'can.bus', level, f'{frames:.0f}', 'frames/s',
             f'{load:.0f}% worst-case load at {self.bitrate // 1000} kbit/s ({self.bus_label})',
             load_percent=f'{load:.1f}', errors=errors, rejected_commands=self.rejected)]
+        gate_level = (DiagnosticStatus.OK if self.authorized else
+                      DiagnosticStatus.ERROR if not self.description_valid else
+                      DiagnosticStatus.WARN)
+        statuses.append(status('arm.command_gate', gate_level,
+                               'enabled' if self.authorized else 'stopped', '',
+                               self.stop_reason or 'Receiving validated teleop setpoints'))
         if not all(self.zeroed):
             statuses.append(status('arm.zero', DiagnosticStatus.WARN, 'no', '',
                                    f'Not zeroed. {self.zero_hint()}'))
@@ -336,7 +453,7 @@ class SimArmDrives(Node):
 
     def close(self):
         """Stop the drives and release the bus; the drives' heartbeat would also stop them."""
-        self.stop_all()
+        self.stop_all('Shutting down')
         self.bus.shutdown()
 
 
@@ -348,6 +465,15 @@ def main():
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
+    except RCLError as error:
+        # SIGINT can shut down the context before spin recreates its wait set.
+        if rclpy.ok() or 'the given context is not valid' not in str(error):
+            raise
+    except RuntimeError as error:
+        # Jazzy may surface this binding error when SIGINT invalidates a subscription.
+        if (rclpy.ok() or not str(error).startswith(
+                "Unable to convert call argument '0' to Python object")):
+            raise
     finally:
         if node is not None:
             node.close()

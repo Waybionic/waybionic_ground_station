@@ -78,6 +78,21 @@ def test_set_zero_makes_the_current_position_zero():
     assert mks_can.encoder_value(arguments) == 0
 
 
+def test_f5_stop_is_immediate_and_a_new_negative_target_rearms_the_drive():
+    servo = ready_servo()
+    assert servo.receive(mks_can.absolute_axis(1, 0x4000, 300, 0)) == [RUNNING]
+    run(servo, 0.05)
+    assert servo.rpm > 0.0 and servo.axis > 0.0
+    held = servo.axis
+    assert servo.receive(mks_can.absolute_axis(1, 0, 0, 0)) == [COMPLETE]
+    assert servo.enabled and servo.target is None and servo.rpm == 0.0
+    assert run(servo, 0.4) == []
+    assert servo.axis == held
+    assert servo.receive(mks_can.absolute_axis(1, -0x4000, 300, 0)) == [RUNNING]
+    run(servo, 0.05)
+    assert servo.target == -0x4000 and servo.rpm < 0.0 and servo.axis < held
+
+
 def test_bus_routes_replies_and_counts_bad_frames():
     bus = SimulatedBus([SimulatedServo(1), SimulatedServo(2)], 500000)
     bus.send(2, mks_can.read_encoder(2))

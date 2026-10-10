@@ -11,6 +11,7 @@ from waybionic_teleop import mks_can
     (mks_can.absolute_axis(1, 0x28000, 300, 2), 'F5012C02028000A7'),
     (mks_can.absolute_axis(1, 0x7F8000, 300, 2), 'F5012C027F800024'),
     (mks_can.absolute_axis(1, 0, 0, 4), 'F5000004000000FA'),
+    (mks_can.absolute_axis(1, 0, 0, 0), 'F5000000000000F6'),
     (mks_can.read_encoder(1), '3132'),
     (mks_can.set_mode(1), '820588'),
     (mks_can.enable(1), 'F301F5'),
@@ -30,6 +31,14 @@ def test_encoder_reply_decodes_negative_values():
     assert mks_can.encoder_value(arguments) == -16
 
 
+@pytest.mark.parametrize('raw, expected', [
+    ('800000000000', -(1 << 47)),
+    ('7FFFFFFFFFFF', (1 << 47) - 1),
+])
+def test_encoder_reply_preserves_the_signed_int48_limits(raw, expected):
+    assert mks_can.encoder_value(bytes.fromhex(raw)) == expected
+
+
 @pytest.mark.parametrize('can_id, data', [
     (1, bytes.fromhex('3133')),
     (1, b'\x31'),
@@ -41,7 +50,8 @@ def test_parse_rejects_bad_checksums_and_lengths(can_id, data):
 
 
 @pytest.mark.parametrize('axis, speed, acc', [
-    (0x800000, 100, 2), (-0x800001, 100, 2), (0, 3001, 2), (0, 100, 256)])
+    (0x800000, 100, 2), (-0x800001, 100, 2), (0, -1, 2),
+    (0, 3001, 2), (0, 100, 256)])
 def test_absolute_axis_rejects_out_of_range_arguments(axis, speed, acc):
     with pytest.raises(ValueError):
         mks_can.absolute_axis(1, axis, speed, acc)

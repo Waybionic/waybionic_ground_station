@@ -15,6 +15,11 @@ sim_arm_drives:
     # Without a new joint command for this long, every drive stops where it is and holds
     # there, whether or not the last command carried a speed.
     command_timeout_s: 0.5
+    # Teleop republishes its enable every tick; stop the drives if it goes quiet this long (the
+    # same as xbox_teleop's input_timeout_s).
+    enable_timeout_s: 0.5
+    # The placeholder grip has no URDF joint yet; every modeled arm joint must have a limit.
+    unmodeled_joints: [tool_grip]
     drives: [base_yaw, shoulder, elbow, wrist_left, wrist_right, tool]
     base_yaw:
       can_id: 1
