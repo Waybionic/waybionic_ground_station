@@ -8,7 +8,7 @@ whose ID is the motor ID; the data is a function code, big-endian arguments and 
 
 COUNTS_PER_REV = 0x4000
 MAX_SPEED_RPM = 3000
-MAX_AXIS = 0x7FFFFF
+MIN_AXIS, MAX_AXIS = -0x800000, 0x7FFFFF
 
 READ_ENCODER = 0x31
 SET_MODE = 0x82
@@ -49,7 +49,7 @@ def hex_frame(can_id, data):
 
 def absolute_axis(can_id, axis, speed_rpm, acc):
     """Move to an absolute encoder coordinate (F5h); resending updates a running move."""
-    if not -MAX_AXIS <= axis <= MAX_AXIS:
+    if not MIN_AXIS <= axis <= MAX_AXIS:
         raise ValueError(f'axis {axis} is outside the int24 coordinate range')
     if not 0 <= speed_rpm <= MAX_SPEED_RPM or not 0 <= acc <= 255:
         raise ValueError('speed must be 0-3000 rpm and acc 0-255')
