@@ -28,6 +28,8 @@ JAW_OPEN_GAP = 0.024
 # One short rumble each time a move is stopped at a limit.
 RUMBLE_INTENSITY = 0.6
 RUMBLE_S = 0.25
+# A stick wavering at the deadzone edge against a limit would otherwise rumble every other tick.
+RUMBLE_REFRACTORY_S = 1.0
 
 
 def stop_reason(blocked):
@@ -73,6 +75,8 @@ class XboxTeleop(Node):
         # game_controller_node rumbles a local controller; joy_udp_receiver passes it on.
         self.feedback_publisher = self.create_publisher(JoyFeedback, 'joy/set_feedback', 10)
         self.rumble_until = None
+        self.rumble_started = -math.inf
+        self.rumble_due = False
         self.was_blocked = False
         self.marker_publisher = self.create_publisher(MarkerArray, 'waybionic/teleop/markers', 10)
         self.diagnostics_publisher = self.create_publisher(
@@ -181,14 +185,16 @@ class XboxTeleop(Node):
         self.enable_publisher.publish(Bool(data=enabled))
 
     def feel_limits(self, now):
-        blocked = self.teleop.enabled and bool(self.teleop.blocked)
-        if blocked and not self.was_blocked:
+        enabled = self.teleop.enabled
+        blocked = enabled and bool(self.teleop.blocked)
+        self.rumble_due = enabled and (self.rumble_due or (blocked and not self.was_blocked))
+        self.was_blocked = blocked
+        if self.rumble_due and now - self.rumble_started >= RUMBLE_REFRACTORY_S:
             self.rumble(RUMBLE_INTENSITY)
-            self.rumble_until = now + RUMBLE_S
+            self.rumble_started, self.rumble_until, self.rumble_due = now, now + RUMBLE_S, False
         elif self.rumble_until is not None and now >= self.rumble_until:
             self.rumble(0.0)
             self.rumble_until = None
-        self.was_blocked = blocked
 
     def rumble(self, intensity):
         self.feedback_publisher.publish(

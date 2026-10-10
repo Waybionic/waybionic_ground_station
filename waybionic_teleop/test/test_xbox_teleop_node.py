@@ -189,3 +189,35 @@ def test_the_rate_and_input_timeout_must_be_positive(monkeypatch, parameters, ch
                 Parameter(name, value=value) for name, value in params.items()])
     finally:
         rclpy.try_shutdown(context=context)
+
+
+def test_a_stick_wavering_at_a_limit_rumbles_at_most_once_a_second(node, monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(xbox_teleop_node, 'time', clock)
+    rumbles = []
+    monkeypatch.setattr(node.feedback_publisher, 'publish',
+                        lambda message: rumbles.append((clock.now, message.intensity)))
+    node.load(String(data=URDF))
+    pose = dict.fromkeys(node.teleop.limits, 0.1)
+    pose['joint_3'] = node.teleop.limits['joint_3'][1]
+    node.last_tick, period = clock.now, node.config.period
+
+    def step(*pressed, **axes):
+        clock.now += period
+        node.on_joint_states(JointState(name=list(pose), position=list(pose.values())))
+        node.on_joy(joy(*pressed, **axes))
+        node.tick()
+
+    step()
+    step('start')
+    assert node.teleop.enabled
+    first = clock.now + period
+    # The base group's right stick pushes the elbow into its limit, past the deadzone every
+    # other tick, so the arm is blocked and released 60 times a second.
+    for index in range(round(2.5 / period)):
+        step(right_y=0.2 if index % 2 == 0 else 0.0)
+    starts = [at for at, intensity in rumbles if intensity > 0]
+    assert starts[0] == first
+    assert len(starts) == 3
+    assert all(later - earlier >= 1.0 for earlier, later in zip(starts, starts[1:]))
+    assert rumbles[-1][1] == 0.0
