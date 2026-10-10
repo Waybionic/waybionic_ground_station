@@ -27,9 +27,12 @@ class JoyUdpReceiver(Node):
         self.socket.setblocking(False)
         self.joy_publisher = self.create_publisher(Joy, 'joy', 10)
         self.diagnostics_publisher = self.create_publisher(DiagnosticArray, topic, 10)
+        self.create_subscription(DiagnosticArray, topic, self.on_diagnostics, 10)
         self.sequence = None
         self.last_packet = None
+        self.last_joy = None
         self.connected = False
+        self.teleop_input_stale = False
         self.sender = None
         self.published = 0
         self.rejected = 0
@@ -68,24 +71,42 @@ class JoyUdpReceiver(Node):
             message.header.stamp = self.get_clock().now().to_msg()
             message.header.frame_id = 'joy'
             self.joy_publisher.publish(message)
+            self.last_joy = time.monotonic()
             self.published += 1
+
+    def on_diagnostics(self, message):
+        """Use the teleop consumer's existing /joy freshness status."""
+        for status in message.status:
+            if status.name == 'teleop.input':
+                self.teleop_input_stale = status.level == DiagnosticStatus.STALE
+                break
 
     def report(self):
         now = time.monotonic()
         rate = self.published / max(now - self.report_time, 1e-3)
         self.published, self.report_time = 0, now
+        packet_age = None if self.last_packet is None else now - self.last_packet
+        joy_age = None if self.last_joy is None else now - self.last_joy
         status = DiagnosticStatus(name='controller.link', level=DiagnosticStatus.OK)
-        if self.last_packet is None or now - self.last_packet > self.timeout:
+        if packet_age is None or packet_age > self.timeout:
+            state = 'BRIDGE_NOT_RUNNING'
             status.level = DiagnosticStatus.STALE
             status.message = ('No packets on udp {}:{}; run xinput_bridge on the host'
                               .format(*self.address))
         elif not self.connected:
+            state = 'NO_CONTROLLER'
             status.level = DiagnosticStatus.WARN
             status.message = 'Host bridge is running but no controller is connected'
+        elif (self.teleop_input_stale or joy_age is None or joy_age > self.timeout):
+            state = 'INPUT_STALE'
+            status.level = DiagnosticStatus.STALE
+            status.message = 'No fresh /joy input reported by xbox_teleop'
         else:
+            state = 'CONNECTED'
             status.message = f'Receiving from {self.sender[0]}'
         status.values = [KeyValue(key='value', value=f'{rate:.0f}'),
                          KeyValue(key='unit', value='Hz'),
+                         KeyValue(key='state', value=state),
                          KeyValue(key='rejected', value=str(self.rejected))]
         message = DiagnosticArray(status=[status])
         message.header.stamp = self.get_clock().now().to_msg()
