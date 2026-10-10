@@ -5,6 +5,7 @@ The end-to-end test uses python-can's in-process virtual bus. The CAN CI job set
 WAYBIONIC_CAN_TEST=socketcan:vcan0 to run it over a kernel CAN interface instead.
 """
 
+import io
 import math
 import os
 from pathlib import Path
@@ -138,14 +139,92 @@ def test_the_bus_drops_its_own_echo_but_not_an_identical_reply():
     try:
         # A successful enable reply is byte for byte the enable command.
         host.send(1, mks_can.enable(1))
-        assert host.receive() is None
-        assert drive.receive() == (1, mks_can.enable(1))
+        assert drive.receive(1.0) == (1, mks_can.enable(1))
+        assert host.receive(0.1) is None
         drive.send(1, mks_can.frame(1, mks_can.ENABLE, [1]))
-        assert drive.receive() is None
-        assert host.receive() == (1, mks_can.enable(1))
+        assert host.receive(1.0) == (1, mks_can.enable(1))
+        assert drive.receive(0.1) is None
     finally:
         host.shutdown()
         drive.shutdown()
+
+
+class FakeSlcanPort:
+    """The serial port of an slcan (LAWICEL) adapter, with MKS drives on its CAN side."""
+
+    def __init__(self, servos):
+        self.servos = servos
+        self.output = bytearray()
+        self.ready = threading.Condition()
+        self.write_timeout = None
+
+    @property
+    def in_waiting(self):
+        with self.ready:
+            return len(self.output)
+
+    def read(self, size=1):
+        with self.ready:
+            if not self.output:
+                self.ready.wait(0.001)
+            data = bytes(self.output[:size])
+            del self.output[:size]
+            return data
+
+    def write(self, data):
+        with self.ready:
+            for line in bytes(data).split(b'\r')[:-1]:
+                if line[:1] != b't':
+                    self.output += b'\r'
+                    continue
+                can_id, size = int(line[1:4], 16), int(line[4:5])
+                data = bytes.fromhex(line[5:5 + 2 * size].decode())
+                # The adapter acknowledges every frame it transmits with a z line.
+                self.output += b'z\r'
+                for reply in self.servos[can_id].receive(data):
+                    self.output += f't{can_id:03X}{len(reply)}{reply.hex().upper()}\r'.encode()
+            self.ready.notify_all()
+        return len(data)
+
+    def flush(self):
+        pass
+
+    def reset_input_buffer(self):
+        with self.ready:
+            self.output.clear()
+
+    def close(self):
+        pass
+
+    def fileno(self):
+        raise io.UnsupportedOperation('fileno')
+
+
+def test_every_slcan_reply_is_read_between_the_adapter_acknowledgements(monkeypatch):
+    serial = pytest.importorskip('serial')
+    servos = {can_id: SimulatedServo(can_id) for can_id in range(1, 7)}
+    port = FakeSlcanPort(servos)
+    monkeypatch.setattr(serial, 'serial_for_url', lambda *args, **kwargs: port)
+    bus = CanBus('slcan', 'fake', BITRATE, sleep_after_open=0)
+    drained = []
+    try:
+        for _ in range(5):
+            # A host tick sends two frames per drive; each gets a z line, then the reply.
+            for can_id in servos:
+                bus.send(can_id, mks_can.read_encoder(can_id))
+                bus.send(can_id, mks_can.set_mode(can_id))
+            deadline = time.monotonic() + 0.5
+            while port.in_waiting and time.monotonic() < deadline:
+                time.sleep(0.001)
+            time.sleep(0.02)
+            replies = []
+            # The host drains without waiting, as on every tick.
+            while (reply := bus.receive()) is not None:
+                replies.append(reply)
+            drained.append(len(replies))
+    finally:
+        bus.shutdown()
+    assert drained == [12] * 5 and bus.errors == 0
 
 
 def test_the_host_drives_mks_servos_over_can(make_node):
