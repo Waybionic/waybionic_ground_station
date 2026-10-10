@@ -390,6 +390,25 @@ window; with no controller input, teleop disables and holds the arm after the
 start the bridge again and press Start. Real drives need a stop that does not
 depend on the controller.
 
+### Self-Running Demo
+
+`autoplay:=true` plays a scripted demo as soon as the ground station is ready, and again
+whenever the controller has been left alone for 30 seconds. The demo lifts the arm, draws a square and a vertical line with the tool
+tip, and tilts the tool about its tip, showing the path and a caption in RViz.
+Touching any button, stick or trigger stops the demo at once and hands you the arm.
+Leave the controller alone for 30 seconds and the demo starts again. Autoplay runs
+only with simulated drives.
+
+**Windows, in one step:** double-click `scripts\windows-demo.cmd`. It does three things:
+
+- starts Docker Desktop if it isn't running;
+- opens the controller bridge in its own window, if Python 3 is installed;
+- starts the ground station.
+
+Press **Ctrl+C** in its window to stop.
+
+**Linux:** `ros2 launch waybionic_bringup ground_station.launch.py teleop:=true autoplay:=true`.
+
 ## Real MKS Drives over CAN
 
 `drive_interface` sends the same frames to real MKS SERVO42D/57D drives through a
