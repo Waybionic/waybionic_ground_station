@@ -295,7 +295,8 @@ can report exit code `-2`, indicating the requested SIGINT interruption.
 ## Xbox Controller (Simulated Arm)
 
 `teleop:=true` drives the arm with an Xbox controller through simulated CAN drives;
-nothing is sent to hardware. The controller mapping is in
+nothing is sent to hardware unless you choose a drive bus, as described in
+[Real MKS drives over CAN](#real-mks-drives-over-can). The controller mapping is in
 `waybionic_teleop/config/xbox_teleop.yaml`, and the placeholder joint-to-drive map
 (MKS SERVO42D/57D CAN IDs, gear ratios and the wrist differential) is in
 `waybionic_teleop/config/arm_drives.yaml`.
@@ -325,34 +326,129 @@ Press **Ctrl+C** in each window to stop.
 | --- | --- |
 | Start (Xbox Menu button, three lines) | Enable or disable; the arm starts disabled |
 | B | Stop and hold the current pose |
-| Y | Switch group: base (joints 1-3) or upper (joints 2-5) |
+| Y | Switch group: base (joints 1-3), upper (joints 2-5) or Cartesian (tool tip) |
 | Base group: left stick | Base yaw (left/right) and shoulder (up/down) |
 | Base group: right stick up/down | Elbow |
 | Upper group: left stick | Shoulder (left/right) and elbow (up/down) |
 | Upper group: right stick | Wrist roll (left/right) and wrist pitch (up/down) |
+| Cartesian group: left stick | Tool tip left/right and forward/back, in straight lines |
+| Cartesian group: right stick | Tool roll (left/right) and tool tip up/down |
+| Cartesian group: LB (hold) | Move along one axis only: the stick direction pushed furthest |
+| Cartesian group: D-pad left/right | Tilt the tool about its tip; the tip stays still |
 | RT / LT | Close / open the placeholder end effector |
-| D-pad up/down | Speed: 10, 25, 50 or 100% of 60 deg/s |
+| D-pad up/down | Speed: 10, 25, 50 or 100% of 60 deg/s, or of 50 mm/s and 30 deg/s of tilt in the Cartesian group |
 | A (hold) | Return to the zero pose |
 
-Start is refused until the sticks are centred and the triggers released. The
-diagnostics panel shows the teleop state, each joint, each drive's last CAN frame
-and the simulated bus load.
+Start is refused until the sticks are centred and the triggers and motion buttons released;
+after Y changes groups with motion held, the new group waits until the controls are neutral.
+Stick and trigger movement inside the 15% deadzone is ignored, so a trigger that does not
+fully return does not move the tool. The simulated drives accept complete finite joint
+commands only after receiving a valid URDF and a fresh teleop enable, which teleop repeats
+on every update. If the enable stops for 0.5 s (for example because teleop stopped), the
+drives stop. A host pause past the 500 ms drive heartbeat also stops the simulated servos.
+In both cases teleop must be disabled and Start released and pressed again before motion
+resumes. The diagnostics panel shows the command gate, teleop state, each joint, each
+drive's last CAN frame and the simulated bus load.
+
+When the bridge reports that the controller disconnected, every control is released once,
+so the arm slows to a stop. After 0.5 s without controller input, teleop disables and holds
+the arm where it is. Reconnect the controller and press Start to continue.
+
+The Cartesian group computes its next setpoint with the same limit-aware solver used for
+the current tool-tip pose. Diagonal moves are limited to the same 50 mm/s as moves along
+one axis. The simulated drives are assigned speeds for a common nominal arrival time, with
+tracking error from encoder quantization and acceleration. Tilt moves the shoulder, elbow
+and wrist around the tool tip. Roll counters spin about the tool axis; a downward-pointing
+blade retains its heading in this model.
+
+The current arm URDF has provisional joint limits and no collision boxes. Cartesian moves
+have no table, base or self-collision protection or verified escape path. The simulated
+CAN map is not a powered-arm safety case. Do not change a wrist bound or operate powered
+motors until Mechanical identifies the URDF joint and measures signed travel from upright
+zero, including any cable or gear stop.
 
 In simulation, a zero-velocity joint command (including B and controller timeout)
 sends an MKS F5 frame with zero speed and zero acceleration to each moving drive.
 An out-of-range encoder target stops all drives instead of updating only part of
 the arm. The placeholder drive speed is capped at 300 RPM; the MKS manual warns
-against immediate software stops above 1000 RPM. This checks simulated behavior
-only. Do not connect powered drives or treat it as a hardware E-stop test; drive
+against immediate software stops above 1000 RPM. Each drive also runs no faster
+than 1.5 times its commanded speed plus 1 RPM, and teleop never advances its
+targets by more than two updates at once, so after a pause the drives do not catch
+up faster than the teleop speed limits. This checks simulated behavior only. Do
+not connect powered drives or treat it as a hardware E-stop test; drive
 identities, wiring, zeroing and electrical safety still need hardware verification.
 
 The RViz camera follows the tool as the arm moves; drag to orbit and scroll to zoom
 as usual, or add `follow_camera:=false` to the launch command for a fixed view.
 
-If the arm stops responding and the bridge's axis values stop changing while you
-move the sticks, Windows has stopped updating the controller. Turn the controller
-off and on (or unplug and replug it), then press Start again; the bridge
-reconnects by itself.
+If the arm stops responding or keeps moving after you release the sticks, and the
+bridge's axis values stop changing while you move them, Windows has stopped
+updating the controller. The bridge keeps sending the last state it read, so the
+controller cannot stop the arm, not even with B. Press **Ctrl+C** in the bridge
+window; with no controller input, teleop disables and holds the arm after the
+0.5 s input timeout. Turn the controller off and on (or unplug and replug it),
+start the bridge again and press Start. Real drives need a stop that does not
+depend on the controller.
+
+## Real MKS Drives over CAN
+
+`drive_interface` sends the same frames to real MKS SERVO42D/57D drives through a
+[python-can](https://python-can.readthedocs.io/) interface. The drive map in
+`waybionic_teleop/config/arm_drives.yaml` is still a placeholder: check each CAN ID,
+gear ratio and direction before the first powered test, and start with the motors
+unloaded. Set every drive to the bitrate in that file (1 Mbit/s; the MKS default is
+500 kbit/s). On a real bus every drive joint needs a URDF limit before the host holds or
+moves anything (`unmodeled_joints` applies to simulation only), so remove the placeholder
+`tool` drive from the map, or give its joint a limit in the URDF.
+
+The computer running ROS needs the USB CAN adapter. Docker Desktop on Windows and
+macOS cannot reach USB devices, so use native ROS on Linux or macOS (RoboStack), or
+Docker on Linux with `--network host`.
+
+Linux, SocketCAN adapter (candleLight firmware):
+
+```bash
+sudo ip link set can0 up type can bitrate 1000000
+ros2 launch waybionic_bringup ground_station.launch.py teleop:=true drive_interface:=socketcan drive_channel:=can0
+```
+
+macOS or Linux, serial-line (slcan) adapter:
+
+```bash
+ros2 launch waybionic_bringup ground_station.launch.py teleop:=true drive_interface:=slcan drive_channel:=/dev/tty.usbmodem1101
+```
+
+**Zeroing.** The encoders count from where the drives were powered on, so the host
+publishes no joint states and moves nothing until the arm is zeroed. Put the arm in
+the zero pose (the pose RViz shows before anything moves), leave teleop disabled, and
+run:
+
+```bash
+ros2 service call /sim_arm_drives/zero std_srvs/srv/Trigger
+```
+
+Then press Start. Real drives take commands through the same gate as the simulated ones.
+If a drive stops answering, for example because the E-stop cut its power, or its encoder
+count jumps further than `max_rpm` allows between two readings, as after a brief power
+loss, every drive stops and the arm must be zeroed again. The same happens when a drive
+reports a failed move (as when its stall protection releases the motor) or an end-limit
+stop, or stays more than `following_error_counts` from its target for
+`following_error_ticks` ticks; both are provisional values in `arm_drives.yaml`. If the
+joint commands stop for 0.5 s, every drive stops where it is, and if the host stops, the
+drives' heartbeat stops them. A stop frame the adapter refuses is sent again on every
+tick, and Start is refused until it has gone out. After any stop, disable teleop and press
+Start again.
+
+**Without hardware.** `mks_drive_sim` answers on a CAN interface the way the drives
+do, so the host can be tested end to end over a virtual CAN interface on Linux:
+
+```bash
+sudo ip link add dev vcan0 type vcan && sudo ip link set up vcan0
+ros2 run waybionic_teleop mks_drive_sim --interface socketcan --channel vcan0
+```
+
+In a second terminal, launch with `drive_interface:=socketcan drive_channel:=vcan0`
+and zero as above. CI runs `waybionic_teleop/test/test_can_drives.py` over `vcan0`.
 
 ## Doctor View Camera
 

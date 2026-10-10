@@ -18,7 +18,10 @@ xbox_teleop:
     home_button: a
     faster_button: dpad_up
     slower_button: dpad_down
-    groups: [base, upper]
+    lock_button: left_bumper
+    tilt_up_button: dpad_right
+    tilt_down_button: dpad_left
+    groups: [base, upper, cartesian]
     base:
       joints: [joint_1, joint_2, joint_3]
       axes: [left_x, left_y, right_y]
@@ -27,6 +30,17 @@ xbox_teleop:
       joints: [joint_2, joint_3, joint_4, joint_5]
       axes: [left_x, left_y, right_y, right_x]
       scales: [1.0, 1.0, 1.0, 1.0]
+    # Straight tool-tip moves in base_link: forward (x), left (y), up (z), then tool roll. The
+    # lock button keeps only the strongest of x, y and z; the tilt buttons pivot the tool about
+    # its tip.
+    cartesian:
+      mode: cartesian
+      joints: [joint_1, joint_2, joint_3, joint_4, joint_5]
+      axes: [left_y, left_x, right_y, right_x]
+      scales: [1.0, 1.0, 1.0, 1.0]
+    max_linear_speed_mm_s: 50.0
+    max_linear_accel_mm_s2: 250.0
+    max_tilt_speed_deg_s: 30.0
     # Placeholder end effector until Biomedical defines the tool: 0 is open, 1 is closed.
     tool_joint: tool_grip
     tool_limits: [0.0, 1.0]

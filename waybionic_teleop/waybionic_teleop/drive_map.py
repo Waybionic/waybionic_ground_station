@@ -40,14 +40,18 @@ class DriveMap:
 
     def __init__(self, drives, counts_per_rev):
         self.drives = list(drives)
+        if not math.isfinite(counts_per_rev) or counts_per_rev <= 0:
+            raise ValueError('counts_per_rev must be positive')
         self.counts_per_rev = counts_per_rev
         self.joints = list(dict.fromkeys(
             joint for drive in self.drives for joint in drive.factors))
         ids = [drive.can_id for drive in self.drives]
         if len(set(ids)) != len(ids) or not all(1 <= can_id <= 0x7FF for can_id in ids):
             raise ValueError('drive CAN IDs must be unique and between 1 and 2047')
-        if any(drive.gear_ratio <= 0 for drive in self.drives):
-            raise ValueError('gear ratios must be positive')
+        if any(not math.isfinite(drive.gear_ratio) or drive.gear_ratio <= 0
+               or any(not math.isfinite(factor) for factor in drive.factors.values())
+               for drive in self.drives):
+            raise ValueError('gear ratios must be positive and drive factors finite')
         if len(self.joints) != len(self.drives):
             raise ValueError('the drives must move exactly as many joints as there are drives')
         # Row i gives drive i's output angle as a mix of joint angles.
@@ -77,6 +81,38 @@ class DriveMap:
         return {joint: sum(weight * output for weight, output in zip(row, outputs))
                 for joint, row in zip(self.joints, self.inverse)}
 
+    def synchronized(self, positions, counts, period, max_rpm, velocities=None):
+        """
+        Return (axis, rpm) per drive for an already-validated next-period joint setpoint.
+
+        Each speed covers the drive's remaining encoder distance in one nominal period. If a
+        drive would exceed max_rpm, all speeds scale together; actual drive acceleration and
+        quantization can still cause tracking error. Cartesian lookahead belongs in teleop's
+        limit-aware solver, not in independent joint extrapolation here. Given the commanded
+        joint velocities, no drive runs faster than 1.5 times its share of them plus 1 rpm.
+        """
+        if (not math.isfinite(period) or period <= 0 or not isinstance(max_rpm, int)
+                or max_rpm < 1):
+            raise ValueError('period and max_rpm must be positive')
+        if (set(positions) != set(self.joints) or len(counts) != len(self.drives)
+                or any(not math.isfinite(value) for value in positions.values())
+                or any(count is None or not math.isfinite(count) for count in counts)):
+            raise ValueError('need a finite position and encoder reading for every drive')
+        if any(not math.isfinite(value) for value in (velocities or {}).values()):
+            raise ValueError('joint velocities must be finite')
+        axes = self.to_counts(positions)
+        rates = [abs(axis - count) / self.counts_per_rev / period * 60.0
+                 for axis, count in zip(axes, counts)]
+        fastest = max(rates, default=0.0)
+        scale = max_rpm / fastest if fastest > max_rpm else 1.0
+        caps = [max_rpm] * len(self.drives)
+        if velocities is not None:
+            # Teleop's speed limits hold even when a setpoint jumped ahead, as after a host stall.
+            caps = [min(max_rpm, int(1.5 * rpm + 1.0)) for rpm in self.to_rpm(velocities)]
+        # Speed 0 means stop to the drive, so the slowest move is 1 rpm.
+        return [(axis, max(1, min(cap, round(rate * scale))))
+                for axis, rate, cap in zip(axes, rates, caps)]
+
 
 def drive_map_from_parameters(params, counts_per_rev):
     """Build a DriveMap from flat ROS parameter names such as 'wrist_left.joints'."""
@@ -85,8 +121,8 @@ def drive_map_from_parameters(params, counts_per_rev):
         for name in params['drives']:
             joints = list(params[f'{name}.joints'])
             factors = [float(factor) for factor in params[f'{name}.factors']]
-            if len(joints) != len(factors):
-                raise ValueError(f'drive {name} needs one factor per joint')
+            if len(joints) != len(factors) or len(set(joints)) != len(joints):
+                raise ValueError(f'drive {name} needs one factor per distinct joint')
             drives.append(Drive(name, int(params[f'{name}.can_id']),
                                 float(params[f'{name}.gear_ratio']), dict(zip(joints, factors))))
     except KeyError as missing:

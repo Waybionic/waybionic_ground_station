@@ -70,6 +70,12 @@ def main():
         # SIGINT can shut down the context before spin recreates its wait set.
         if rclpy.ok() or 'the given context is not valid' not in str(error):
             raise
+    except RuntimeError as error:
+        # A TF subscription can surface this Jazzy binding error if its ROS context is
+        # already invalidated during SIGINT. Other runtime errors must still fail.
+        if (rclpy.ok() or not str(error).startswith(
+                "Unable to convert call argument '0' to Python object")):
+            raise
     finally:
         node.destroy_node()
         rclpy.try_shutdown()

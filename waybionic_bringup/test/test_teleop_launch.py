@@ -67,16 +67,21 @@ class TestTeleop(unittest.TestCase):
 
         try:
             deadline = time.monotonic() + 30.0
-            # Press Start only once teleop has loaded the robot description (the group row
-            # appears) and receives the controller, or the press is lost on a slow machine.
+            # Press Start only once teleop (the group row) and the drives (a gate waiting for
+            # Start, not a model) have the robot description and teleop receives the controller,
+            # or the press is lost on a slow machine.
             while time.monotonic() < deadline and not (
                     'tool_grip' in joints and 'teleop.group' in diagnostics
-                    and diagnostics['teleop.input'].level == DiagnosticStatus.OK):
+                    and diagnostics['teleop.input'].level == DiagnosticStatus.OK
+                    and 'arm.command_gate' in diagnostics
+                    and diagnostics['arm.command_gate'].level == DiagnosticStatus.WARN):
                 hold(0.1)
             self.assertIn('tool_grip', joints, 'the simulated drives never reported positions')
             self.assertIn('teleop.group', diagnostics, 'teleop never loaded the robot description')
             self.assertEqual(diagnostics['teleop.input'].level, DiagnosticStatus.OK,
                              'teleop never received the controller packets')
+            self.assertEqual(diagnostics['arm.command_gate'].level, DiagnosticStatus.WARN,
+                             'the drives never loaded the robot description')
             hold(1.0, left_x=1.0)
             self.assertAlmostEqual(joints['joint_1'], 0.0, places=3, msg='moved while disabled')
             hold(0.2, 'start')
