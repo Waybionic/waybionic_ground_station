@@ -45,7 +45,11 @@ foreach ($name in 'py', 'python', 'python3') {
     if (-not $command) {
         continue
     }
-    $prefix = if ($command.Name -eq 'py.exe') { @('-3') } else { @() }
+    # Not an if expression: its output would unroll @('-3') into the string '-3'.
+    $prefix = @()
+    if ($command.Name -eq 'py.exe') {
+        $prefix = @('-3')
+    }
     & $command.Source @prefix -c 'import sys; sys.exit(sys.version_info[0] != 3)' *> $null
     if ($LASTEXITCODE -eq 0) {
         $python, $pythonArguments = $command, $prefix
@@ -57,6 +61,11 @@ if ($python) {
     $arguments = $pythonArguments + @('-m', 'waybionic_teleop.xinput_bridge')
     $bridge = Start-Process -FilePath $python.Source -ArgumentList $arguments -PassThru `
         -WorkingDirectory (Join-Path $root 'waybionic_teleop')
+    if ($bridge.WaitForExit(2000)) {
+        Write-Warning ('The controller bridge stopped right after starting, so a controller ' +
+            'cannot take over. To see why, run this in the waybionic_teleop folder: ' +
+            "$($python.Name) $($arguments -join ' ')")
+    }
 } else {
     Write-Warning 'Python 3 was not found, so the demo runs but a controller cannot take over.'
 }
