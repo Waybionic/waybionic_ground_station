@@ -67,6 +67,10 @@ select_manager() {
 prepare() {
   check_host
   select_manager
+  if [[ -z "${CONDA_BUILD_SYSROOT:-}" ]]; then
+    CONDA_BUILD_SYSROOT="$(xcrun --show-sdk-path)"
+    export CONDA_BUILD_SYSROOT
+  fi
 }
 
 setup_environment() {
@@ -103,7 +107,8 @@ build_workspace() {
   echo "Building workspace..."
   (
     cd "$ROOT"
-    run_environment colcon build --symlink-install
+    run_environment colcon build --symlink-install \
+      --cmake-args "-DCMAKE_OSX_SYSROOT=$CONDA_BUILD_SYSROOT"
   )
 }
 
@@ -150,7 +155,8 @@ case "$command_name" in
     ;;
   launch)
     prepare
-    run_workspace ros2 launch waybionic_bringup ground_station.launch.py "$@"
+    run_workspace env RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}" \
+      ros2 launch waybionic_bringup ground_station.launch.py "$@"
     ;;
   run)
     [[ $# -gt 0 ]] || fail "run requires a command"
