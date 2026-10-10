@@ -21,6 +21,8 @@ class SimulatedServo:
         self.respond = True
         self.active = True
         self.heartbeat_ms = 0
+        # Unplugged drives hear nothing and stay quiet, so only their heartbeat can stop them.
+        self.unplugged = False
         self.quiet_ms = 0.0
         self.heartbeat_stops = 0
         self.axis = 0.0
@@ -31,6 +33,8 @@ class SimulatedServo:
 
     def receive(self, data):
         """Handle one command and return the reply frames."""
+        if self.unplugged:
+            return []
         code, arguments = mks_can.parse(self.can_id, data)
         self.quiet_ms = 0.0
         if code == mks_can.READ_ENCODER and not arguments:
@@ -46,6 +50,9 @@ class SimulatedServo:
             self.enabled, status = bool(arguments[0]), 1
             if not self.enabled:
                 self.target, self.rpm = None, 0.0
+        elif code == mks_can.SET_ZERO and not arguments:
+            # A target from before would be in the old coordinates, so the move is dropped.
+            self.axis, self.target, self.rpm, status = 0.0, None, 0.0, 1
         elif code == mks_can.ABSOLUTE_AXIS and len(arguments) == 6:
             status = self.start_move(arguments)
         else:
@@ -87,7 +94,7 @@ class SimulatedServo:
         remaining = self.target - self.axis
         if abs(remaining) < 0.5 or (move * remaining > 0 and abs(move) >= abs(remaining)):
             self.axis, self.rpm, self.target = float(self.target), 0.0, None
-            if self.respond and self.active:
+            if self.respond and self.active and not self.unplugged:
                 return [mks_can.frame(self.can_id, mks_can.ABSOLUTE_AXIS, [2])]
             return []
         self.axis += move

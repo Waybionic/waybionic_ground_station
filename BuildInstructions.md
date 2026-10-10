@@ -330,6 +330,32 @@ move the sticks, Windows has stopped updating the controller. Turn the controlle
 off and on (or unplug and replug it), then press Start again; the bridge
 reconnects by itself.
 
+### Drive Start-Up, Set Zero and Dropouts
+
+At start-up the drive node sends each drive 82h (bus FOC mode), 8Ch (replies on),
+F3h (shaft enabled) and 98h (heartbeat stop), one at a time, and waits for the drive
+to confirm each one. It then reads the drive's encoder (31h). The arm holds still and
+`/joint_states` stays quiet until every drive has done this; the diagnostics panel
+shows the step each drive is on.
+
+To zero the drives, put the arm in the zero pose (pointing straight up), disable
+teleop, and run:
+
+```bash
+ros2 service call /sim_arm_drives/zero std_srvs/srv/Trigger
+```
+
+Every drive must be ready. The node stops the arm, sends set zero (92h), waits for
+each drive to confirm it and reads the encoders again; the reply names any drive
+that was not zeroed.
+
+If a drive leaves a request unanswered for 0.5 s, the node stops the other drives,
+pauses `/joint_states` and starts that drive's set-up again; its own heartbeat stops
+it. A drive that refuses a set-up frame is retried every second. Once every drive
+is ready again, the arm holds the measured pose and ignores commands until teleop
+is disabled and enabled, so it never jumps to a target from before the dropout.
+The same applies after set zero.
+
 ## Native Ubuntu Setup for RViz
 
 Only follow this section if you need ROS and RViz outside the container. It is

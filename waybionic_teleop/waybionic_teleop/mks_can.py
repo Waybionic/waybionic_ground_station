@@ -13,6 +13,7 @@ MAX_AXIS = 0x7FFFFF
 READ_ENCODER = 0x31
 SET_MODE = 0x82
 SET_RESPONSE = 0x8C
+SET_ZERO = 0x92
 SET_HEARTBEAT = 0x98
 ENABLE = 0xF3
 ABSOLUTE_AXIS = 0xF5
@@ -57,6 +58,11 @@ def absolute_axis(can_id, axis, speed_rpm, acc):
                  + axis.to_bytes(3, 'big', signed=True))
 
 
+def stop(can_id, acc):
+    """Stop an F5h move (speed 0): slow down with acc, or stop at once if acc is 0."""
+    return absolute_axis(can_id, 0, 0, acc)
+
+
 def read_encoder(can_id):
     """Request the cumulative multi-turn encoder value (31h), 0x4000 counts per turn."""
     return frame(can_id, READ_ENCODER)
@@ -77,6 +83,11 @@ def set_mode(can_id, mode=MODE_SR_VFOC):
 def set_response(can_id, respond=True, active=True):
     """Choose whether the drive replies (8Ch) and reports finished moves on its own."""
     return frame(can_id, SET_RESPONSE, [int(respond), int(active)])
+
+
+def set_zero(can_id):
+    """Make the current position encoder coordinate 0 (92h)."""
+    return frame(can_id, SET_ZERO)
 
 
 def set_heartbeat(can_id, milliseconds):

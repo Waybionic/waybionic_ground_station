@@ -50,5 +50,7 @@ xbox_teleop:
     tool_frame: tool_link
     base_frame: base_link
     # Keep-in box for the tool tip in base_frame, in mm: [x, y, z]. Must contain the home pose.
-    keep_in_min_mm: [-400.0, -400.0, 50.0]
-    keep_in_max_mm: [400.0, 400.0, 800.0]
+    # Provisional: x and y span the arm's full reach and z keeps the tip 50 mm above the base;
+    # replace once the workspace limits are confirmed.
+    keep_in_min_mm: [-550.0, -550.0, 50.0]
+    keep_in_max_mm: [550.0, 550.0, 800.0]
