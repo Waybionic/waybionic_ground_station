@@ -13,6 +13,7 @@ MIN_AXIS, MAX_AXIS = -0x800000, 0x7FFFFF
 READ_ENCODER = 0x31
 SET_MODE = 0x82
 SET_RESPONSE = 0x8C
+SET_ZERO = 0x92
 SET_HEARTBEAT = 0x98
 ENABLE = 0xF3
 ABSOLUTE_AXIS = 0xF5
@@ -47,6 +48,11 @@ def hex_frame(can_id, data):
     return f'{can_id:03X}#{bytes(data).hex().upper()}'
 
 
+def frame_bits(data):
+    """Worst-case bits of a standard data frame, with stuff bits and interframe space."""
+    return 47 + 8 * len(data) + (34 + 8 * len(data) - 1) // 4
+
+
 def absolute_axis(can_id, axis, speed_rpm, acc):
     """Move to an absolute encoder coordinate (F5h); resending updates a running move."""
     if not MIN_AXIS <= axis <= MAX_AXIS:
@@ -55,6 +61,11 @@ def absolute_axis(can_id, axis, speed_rpm, acc):
         raise ValueError('speed must be 0-3000 rpm and acc 0-255')
     return frame(can_id, ABSOLUTE_AXIS, speed_rpm.to_bytes(2, 'big') + bytes([acc])
                  + axis.to_bytes(3, 'big', signed=True))
+
+
+def stop(can_id, acc):
+    """Slow down with acc and hold (F5h with speed 0); acc 0 stops at once."""
+    return absolute_axis(can_id, 0, 0, acc)
 
 
 def read_encoder(can_id):
@@ -77,6 +88,11 @@ def set_mode(can_id, mode=MODE_SR_VFOC):
 def set_response(can_id, respond=True, active=True):
     """Choose whether the drive replies (8Ch) and reports finished moves on its own."""
     return frame(can_id, SET_RESPONSE, [int(respond), int(active)])
+
+
+def set_zero(can_id):
+    """Make the current position the drive's axis zero (92h)."""
+    return frame(can_id, SET_ZERO)
 
 
 def set_heartbeat(can_id, milliseconds):

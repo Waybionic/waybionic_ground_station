@@ -295,7 +295,8 @@ can report exit code `-2`, indicating the requested SIGINT interruption.
 ## Xbox Controller (Simulated Arm)
 
 `teleop:=true` drives the arm with an Xbox controller through simulated CAN drives;
-nothing is sent to hardware. The controller mapping is in
+nothing is sent to hardware unless you choose a drive bus, as described in
+[Real MKS drives over CAN](#real-mks-drives-over-can). The controller mapping is in
 `waybionic_teleop/config/xbox_teleop.yaml`, and the placeholder joint-to-drive map
 (MKS SERVO42D/57D CAN IDs, gear ratios and the wrist differential) is in
 `waybionic_teleop/config/arm_drives.yaml`.
@@ -378,8 +379,8 @@ the point moves onto the axis instead of the arm moving. Further away, the group
 rather than pull the tool back: press Y, withdraw the tool in another group, then
 select the incision group again to set a new incision point.
 
-The current arm URDF has provisional joint limits and no collision boxes. Cartesian moves
-have no table, base or self-collision protection or verified escape path. The simulated
+The current arm URDF has provisional joint limits, and the collision checks below model
+each link as a box; they have been tested with simulated drives only. The simulated
 CAN map is not a powered-arm safety case. Do not change a wrist bound or operate powered
 motors until Mechanical identifies the URDF joint and measures signed travel from upright
 zero, including any cable or gear stop.
@@ -395,6 +396,27 @@ up faster than the teleop speed limits. This checks simulated behavior only. Do
 not connect powered drives or treat it as a hardware E-stop test; drive
 identities, wiring, zeroing and electrical safety still need hardware verification.
 
+Every group stops a move before any part of the arm comes within 10 mm of the
+table or folds into the arm's own base. The checks use a box around each link,
+which you can see by ticking **Collision Enabled** on RViz's RobotModel display.
+The tool's box is a placeholder around the RViz jaws, which reach 30 mm past
+`tool_link`, until the real tool is modelled; a longer tool needs a longer box.
+When a move stops, the diagnostics panel names the part, for example
+`At limit: forearm_link: table`. If the arm stands on a raised mount, set
+`table_height` in `waybionic_teleop/config/xbox_teleop.yaml` to the table's height
+above the bottom of the base. `collision_clearance` in the same file sets the 10 mm
+margin. If the arm is already touching something, the only moves still allowed are
+the ones that back out of it: a move that presses any contact further in is
+refused, even if it would ease another contact at the same time.
+
+The boxes are what makes any of this work. A `robot_description` without a
+collision box for the base, shoulder, upper arm, forearm, wrist, wrist roll or tool
+leaves teleop disabled, and the diagnostics panel names the missing links.
+A description reload while teleop is enabled disables teleop and holds the arm where
+it is, and the drives stop on any `robot_description` change, so Start has to be
+released and pressed again under the new model. This path has been tested with
+simulated drives; powered hardware has not been tested.
+
 The RViz camera follows the tool as the arm moves; drag to orbit and scroll to zoom
 as usual, or add `follow_camera:=false` to the launch command for a fixed view.
 
@@ -406,6 +428,66 @@ window; with no controller input, teleop disables and holds the arm after the
 0.5 s input timeout. Turn the controller off and on (or unplug and replug it),
 start the bridge again and press Start. Real drives need a stop that does not
 depend on the controller.
+
+## Real MKS Drives over CAN
+
+`drive_interface` sends the same frames to real MKS SERVO42D/57D drives through a
+[python-can](https://python-can.readthedocs.io/) interface. The drive map in
+`waybionic_teleop/config/arm_drives.yaml` is still a placeholder: check each CAN ID,
+gear ratio and direction before the first powered test, and start with the motors
+unloaded. Set every drive to the bitrate in that file (1 Mbit/s; the MKS default is
+500 kbit/s). On a real bus every drive joint needs a URDF limit before the host holds or
+moves anything (`unmodeled_joints` applies to simulation only), so remove the placeholder
+`tool` drive from the map, or give its joint a limit in the URDF.
+
+The computer running ROS needs the USB CAN adapter. Docker Desktop on Windows and
+macOS cannot reach USB devices, so use native ROS on Linux or macOS (RoboStack), or
+Docker on Linux with `--network host`.
+
+Linux, SocketCAN adapter (candleLight firmware):
+
+```bash
+sudo ip link set can0 up type can bitrate 1000000
+ros2 launch waybionic_bringup ground_station.launch.py teleop:=true drive_interface:=socketcan drive_channel:=can0
+```
+
+macOS or Linux, serial-line (slcan) adapter:
+
+```bash
+ros2 launch waybionic_bringup ground_station.launch.py teleop:=true drive_interface:=slcan drive_channel:=/dev/tty.usbmodem1101
+```
+
+**Zeroing.** The encoders count from where the drives were powered on, so the host
+publishes no joint states and moves nothing until the arm is zeroed. Put the arm in
+the zero pose (the pose RViz shows before anything moves), leave teleop disabled, and
+run:
+
+```bash
+ros2 service call /sim_arm_drives/zero std_srvs/srv/Trigger
+```
+
+Then press Start. Real drives take commands through the same gate as the simulated ones.
+If a drive stops answering, for example because the E-stop cut its power, or its encoder
+count jumps further than `max_rpm` allows between two readings, as after a brief power
+loss, every drive stops and the arm must be zeroed again. The same happens when a drive
+reports a failed move (as when its stall protection releases the motor) or an end-limit
+stop, or stays more than `following_error_counts` from its target for
+`following_error_ticks` ticks; both are provisional values in `arm_drives.yaml`. If the
+joint commands stop for 0.5 s, every drive stops where it is, and if the host stops, the
+drives' heartbeat stops them. A stop frame the adapter refuses is sent again on every
+tick, and Start is refused until it has gone out. After any stop, disable teleop and press
+Start again.
+
+**Without hardware.** `mks_drive_sim` answers on a CAN interface the way the drives
+do, so the host can be tested end to end over a virtual CAN interface on Linux:
+
+```bash
+sudo ip link add dev vcan0 type vcan && sudo ip link set up vcan0
+ros2 run waybionic_teleop mks_drive_sim --interface socketcan --channel vcan0
+```
+
+In a second terminal, launch with `drive_interface:=socketcan drive_channel:=vcan0`
+and zero as above. CI runs `waybionic_teleop/test/test_can_drives.py` over `vcan0`.
 
 ## Native Ubuntu Setup for RViz
 
