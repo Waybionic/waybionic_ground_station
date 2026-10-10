@@ -34,7 +34,9 @@ Every setting is at the top of `tool_board.ino`:
 cables limit how far each motor may turn, so take the real limits from the
 Biomedical team's `nema8_2pair_LimitedRotationV3.ino` before driving the tool. A
 target past a limit stops at the limit, and the move reports status 3 (stopped at
-end limit).
+end limit). If a stop or move asks for too gentle a ramp to stop before the limit
+ahead, the motor brakes harder, or stops at once when even the maximum acceleration
+is not enough.
 
 ## Commands
 

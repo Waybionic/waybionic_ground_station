@@ -96,22 +96,45 @@ private:
       if (request.acc == 0) {
         hold();
       } else {
-        stepper_.setAcceleration(steps_per_s2(request.acc));
+        set_acceleration(steps_per_s2(request.acc));
         stepper_.stop();
+        // AccelStepper rounds the stopping distance up by a step.
+        stepper_.moveTo(within_limits(stepper_.targetPosition()));
         moving_ = false;
       }
       return mks::MOVE_RUNNING;
     }
     const long wanted = steps_from_counts(request.axis);
-    const long target = wanted < config_.min_steps ? config_.min_steps :
-      wanted > config_.max_steps ? config_.max_steps : wanted;
+    const long target = within_limits(wanted);
     limited_ = target != wanted;
     const float speed = request.rpm * static_cast<float>(config_.steps_per_rev) / 60.0f;
     stepper_.setMaxSpeed(speed < config_.max_steps_per_s ? speed : config_.max_steps_per_s);
-    stepper_.setAcceleration(steps_per_s2(request.acc));
+    set_acceleration(steps_per_s2(request.acc));
     stepper_.moveTo(target);
     moving_ = true;
     return mks::MOVE_RUNNING;
+  }
+
+  // Raise the acceleration so AccelStepper can stop before the limit ahead, or stop at once.
+  void set_acceleration(float acceleration)
+  {
+    const float speed = stepper_.speed();
+    const long position = stepper_.currentPosition();
+    const long room = speed > 0 ? config_.max_steps - position : position - config_.min_steps;
+    if (speed != 0 && speed * speed > 2.0f * acceleration * room) {
+      if (room <= 0 || speed * speed > 2.0f * config_.max_steps_per_s2 * room) {
+        hold();
+      } else {
+        acceleration = speed * speed / (2.0f * room);
+      }
+    }
+    stepper_.setAcceleration(acceleration);
+  }
+
+  long within_limits(long steps) const
+  {
+    return steps < config_.min_steps ? config_.min_steps :
+      steps > config_.max_steps ? config_.max_steps : steps;
   }
 
   void hold()

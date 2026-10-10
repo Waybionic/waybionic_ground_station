@@ -29,7 +29,17 @@ struct FakeStepper
   float acceleration = 0.0f;
   bool braking = false;
   void moveTo(long goal) {target = goal;}
-  void stop() {braking = true;}
+  // Runs at full speed until it reaches the target, and stops like AccelStepper::stop().
+  float speed() {return position < target ? max_speed : position > target ? -max_speed : 0.0f;}
+  void stop()
+  {
+    braking = true;
+    const float velocity = speed();
+    if (velocity != 0.0f) {
+      const long steps = static_cast<long>(velocity * velocity / (2.0 * acceleration)) + 1;
+      target = position + (velocity > 0 ? steps : -steps);
+    }
+  }
   bool run()
   {
     position += position < target ? 1 : position > target ? -1 : 0;
@@ -37,6 +47,7 @@ struct FakeStepper
   }
   void setCurrentPosition(long value) {position = target = value;}
   long currentPosition() {return position;}
+  long targetPosition() {return target;}
   long distanceToGo() {return target - position;}
   void setMaxSpeed(float value) {max_speed = value;}
   void setAcceleration(float value) {acceleration = value;}
@@ -183,6 +194,30 @@ def test_stop_with_acceleration_zero_is_immediate_and_otherwise_brakes(program):
                 mks_can.stop(ID, 255), 'state')
     braking = state(out[5])
     assert braking['braking'] and braking['acceleration'] == 20000.0
+
+
+def test_a_stop_brakes_harder_rather_than_pass_the_travel_limit(program):
+    # 400 steps from the limit at 3200 steps/s; acc 1 (4183 steps/s^2) would need 1224 steps.
+    out = motor(program, *READY, mks_can.absolute_axis(ID, TURN, 60, 255), 'run 2800',
+                mks_can.stop(ID, 1), 'state')
+    braking = state(out[5])
+    assert (braking['target'], braking['acceleration']) == (3200, 12800.0)
+    # 100 steps from it, even the maximum of 20000 steps/s^2 needs 256: stop at once.
+    out = motor(program, *READY, mks_can.absolute_axis(ID, TURN, 60, 255), 'run 3100',
+                mks_can.stop(ID, 1), 'state')
+    held = state(out[5])
+    assert held['position'] == held['target'] == 3100
+
+
+def test_a_gentler_move_brakes_harder_rather_than_pass_the_travel_limit(program):
+    out = motor(program, *READY, mks_can.absolute_axis(ID, TURN, 60, 255), 'run 2800',
+                mks_can.absolute_axis(ID, 0, 60, 1), 'state')
+    turning = state(out[5])
+    assert (turning['target'], turning['acceleration']) == (0, 12800.0)
+    # With room to stop, the frame's own acceleration stands.
+    out = motor(program, *READY, mks_can.absolute_axis(ID, TURN, 60, 255), 'run 1000',
+                mks_can.absolute_axis(ID, 0, 60, 1), 'state')
+    assert state(out[5])['acceleration'] == 4183.0
 
 
 def test_disabling_holds_and_zeroing_makes_here_zero(program):
