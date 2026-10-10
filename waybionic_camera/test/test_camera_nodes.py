@@ -11,7 +11,7 @@ from rclpy.executors import SingleThreadedExecutor
 from rclpy.parameter import Parameter
 from sensor_msgs.msg import CameraInfo, CompressedImage
 
-from waybionic_camera.camera_receiver import CameraReceiver
+from waybionic_camera.camera_receiver import CameraReceiver, READ_TIMEOUT_S
 from waybionic_camera.frames import pack
 from waybionic_camera.latency_monitor import LatencyMonitor
 
@@ -117,6 +117,38 @@ def test_bridge_frames_become_stamped_images_and_a_delay_report(nodes):
     assert wait_for(lambda: any(
         status.message.startswith('No frame for')
         for status in statuses(received['diagnostics'][stopped:], DiagnosticStatus.WARN)), 3.0)
+
+
+def test_a_silent_connection_gives_way_to_the_next_bridge(nodes):
+    receiver, received = nodes
+    # A bridge that vanished without closing its connection, then connected again.
+    silent = socket.create_connection(('127.0.0.1', receiver.port))
+    with silent, socket.create_connection(('127.0.0.1', receiver.port)) as sender:
+        sender.sendall(pack(1, time.time_ns(), 640, 480, JPEG))
+        assert wait_for(lambda: received['images'], READ_TIMEOUT_S + 3.0)
+        silent.settimeout(1.0)
+        assert silent.recv(1) == b''
+
+
+def test_close_wakes_a_receiver_waiting_for_a_bridge(nodes):
+    receiver, _ = nodes
+    receiver.close()
+    assert not receiver.thread.is_alive()
+
+
+def test_close_ends_a_live_connection_at_once(nodes):
+    receiver, received = nodes
+    with socket.create_connection(('127.0.0.1', receiver.port)) as sender:
+        assert stream(sender, [], lambda: received['images'], 5.0)
+        assert receiver.connection.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE)
+        # The bridge goes quiet, so the receiver is waiting for its next frame.
+        time.sleep(0.2)
+        start = time.monotonic()
+        receiver.close()
+        assert time.monotonic() - start < READ_TIMEOUT_S / 2
+        assert not receiver.thread.is_alive()
+        sender.settimeout(1.0)
+        assert sender.recv(1) == b''
 
 
 def test_a_stalled_feed_warns(monitor):

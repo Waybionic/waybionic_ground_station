@@ -6,6 +6,7 @@ doctor_view/left/image_raw/compressed with doctor_view/left/camera_info, both st
 the time the frame was captured. RViz shows them with the compressed image transport.
 """
 
+import contextlib
 import socket
 import threading
 
@@ -15,6 +16,9 @@ from rclpy.node import Node
 from sensor_msgs.msg import CameraInfo, CompressedImage
 
 from waybionic_camera.frames import read_frame
+
+# A silent bridge (cable pulled, PC asleep) is dropped after this, so its reconnection is served.
+READ_TIMEOUT_S = 2.0
 
 
 def to_messages(frame_id, stamp_ns, width, height, jpeg):
@@ -42,6 +46,7 @@ class CameraReceiver(Node):
         self.info_publisher = self.create_publisher(CameraInfo, 'doctor_view/left/camera_info', 10)
         self.server = socket.create_server((bind, port))
         self.port = self.server.getsockname()[1]
+        self.connection = None
         self.running = True
         self.thread = threading.Thread(target=self.serve, daemon=True)
         self.thread.start()
@@ -53,10 +58,13 @@ class CameraReceiver(Node):
                 connection, address = self.server.accept()
             except OSError:
                 return
+            connection.settimeout(READ_TIMEOUT_S)
+            connection.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            self.connection = connection
             self.get_logger().info(f'Camera bridge connected from {address[0]}')
             with connection:
                 try:
-                    while (frame := read_frame(connection)) is not None:
+                    while self.running and (frame := read_frame(connection)) is not None:
                         _, stamp_ns, width, height, jpeg = frame
                         image, info = to_messages(self.frame_id, stamp_ns, width, height, jpeg)
                         self.image_publisher.publish(image)
@@ -67,7 +75,13 @@ class CameraReceiver(Node):
 
     def close(self):
         self.running = False
+        # On Linux, closing a socket does not wake a thread blocked on it; shutting it down does.
+        for sock in (self.server, self.connection):
+            if sock is not None:
+                with contextlib.suppress(OSError):
+                    sock.shutdown(socket.SHUT_RDWR)
         self.server.close()
+        self.thread.join(READ_TIMEOUT_S)
 
 
 def main():
