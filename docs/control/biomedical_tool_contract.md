@@ -28,10 +28,14 @@ It is **not** steps per degree of claw motion. Motor signs
 are configurable and their present values are unverified. No CAN or A4988
 commands are sent. Do not use these values as hardware limits.
 
-Six supplied STL parts are now used as RViz mesh markers. Their observed bounds
-are plausible in millimetres, so they are displayed at scale 0.001. The
-mounting transform, relative placement and 8 mm preview travel remain guesses
-until Biomedical supplies a corrected assembly and physical measurements.
+Julie's `Julie - Assembly.stl` is now the source for three RViz meshes: its six
+fixed components and two independently moving claw components. The export gives
+the parts' relative assembled positions. Its base is 80 STL units wide, so RViz
+currently interprets one unit as one millimetre. The base is centred on the
+arm's `tool_link` with its bottom on the flange; Biomedical still needs to
+confirm that mounting transform and the file units. The claws rotate by a
+provisional 0.35 radians about the assembled bar axis from Julie's pose. This
+is a visual demonstration, not a measured open-to-closed range.
 
 ## Measurements and decisions to obtain from Biomedical
 

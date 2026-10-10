@@ -23,6 +23,7 @@ from waybionic_teleop.collision import ArmCollision
 from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
+from waybionic_teleop.tool_visual import ASSEMBLY_ORIGIN, claw_pose, STL_TO_METRES
 
 # One short rumble each time a move is stopped at a limit.
 RUMBLE_INTENSITY = 0.6
@@ -43,9 +44,6 @@ def drive_stop_reason(reason):
     words = reason.split(':')[0].split()
     return 'DRIVES-STOPPED' + ('\n' + '-'.join(words) if words else '')
 TOOL_MESH_ROOT = 'package://waybionic_description/meshes/tool/'
-STL_TO_METRES = 0.001
-CLAW_OPEN_OFFSET = 0.018
-CLAW_CLOSE_TRAVEL = 0.008
 
 
 def status(name, level, value, unit, message):
@@ -268,41 +266,33 @@ class XboxTeleop(Node):
     def publish_markers(self, fresh):
         low, high = self.config.tool_limits
         markers = MarkerArray()
-        # Approximate layout until Biomedical provides the assembly transforms.
-        static_parts = (
-            ('base.stl', (0.0, 0.0, 0.0)),
-            ('rerouter.stl', (0.0, 0.0, 0.0)),
-            ('bar.stl', (0.0, 0.0, 0.095)),
-            ('friction_cap.stl', (0.0, 0.0, 0.126)),
-        )
-        for index, (filename, position) in enumerate(static_parts):
-            part = Marker(ns='tool_static', id=index, type=Marker.MESH_RESOURCE,
-                          action=Marker.ADD, frame_locked=True)
-            part.header.frame_id = self.tool_frame
-            part.mesh_resource = TOOL_MESH_ROOT + filename
-            part.mesh_use_embedded_materials = False
-            part.pose.position.x, part.pose.position.y, part.pose.position.z = position
-            part.pose.orientation.x = -math.sqrt(0.5)
-            part.pose.orientation.w = math.sqrt(0.5)
-            part.scale.x = part.scale.y = part.scale.z = STL_TO_METRES
-            part.color.r, part.color.g, part.color.b, part.color.a = 0.55, 0.58, 0.65, 1.0
-            markers.markers.append(part)
+        part = Marker(ns='tool_static', id=0, type=Marker.MESH_RESOURCE,
+                      action=Marker.ADD, frame_locked=True)
+        part.header.frame_id = self.tool_frame
+        part.mesh_resource = TOOL_MESH_ROOT + 'assembly_static.stl'
+        part.mesh_use_embedded_materials = False
+        (part.pose.position.x, part.pose.position.y,
+         part.pose.position.z) = ASSEMBLY_ORIGIN
+        part.pose.orientation.w = 1.0
+        part.scale.x = part.scale.y = part.scale.z = STL_TO_METRES
+        part.color.r, part.color.g, part.color.b, part.color.a = 0.55, 0.58, 0.65, 1.0
+        markers.markers.append(part)
         for index, (side, joint) in enumerate(
                 zip((-1.0, 1.0), self.config.tool_joints)):
             closed = min(max((self.measured.get(joint, low) - low) / (high - low),
                              0.0), 1.0)
-            offset = CLAW_OPEN_OFFSET - CLAW_CLOSE_TRAVEL * closed
+            position, quaternion = claw_pose(int(side), closed)
             jaw = Marker(ns='tool', id=index, type=Marker.MESH_RESOURCE,
                          action=Marker.ADD,
                          frame_locked=True)
             jaw.header.frame_id = self.tool_frame
-            jaw.mesh_resource = TOOL_MESH_ROOT + ('left_claw.stl' if index == 0
-                                                  else 'right_claw.stl')
+            jaw.mesh_resource = TOOL_MESH_ROOT + ('assembly_left_claw.stl' if index == 0
+                                                  else 'assembly_right_claw.stl')
             jaw.mesh_use_embedded_materials = False
-            jaw.pose.position.x = side * offset
-            jaw.pose.position.z = 0.11
-            jaw.pose.orientation.x = -math.sqrt(0.5)
-            jaw.pose.orientation.w = math.sqrt(0.5)
+            (jaw.pose.position.x, jaw.pose.position.y,
+             jaw.pose.position.z) = position
+            (jaw.pose.orientation.x, jaw.pose.orientation.y,
+             jaw.pose.orientation.z, jaw.pose.orientation.w) = quaternion
             jaw.scale.x = jaw.scale.y = jaw.scale.z = STL_TO_METRES
             jaw.color.r, jaw.color.g, jaw.color.b, jaw.color.a = 0.3, 0.75, 1.0, 0.9
             markers.markers.append(jaw)

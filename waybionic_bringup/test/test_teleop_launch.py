@@ -91,12 +91,13 @@ class TestTeleop(unittest.TestCase):
             hold(1.0, left_x=1.0)
             hold(0.2)
             self.assertEqual({key for key in markers if key[0] == 'tool_static'},
-                             {('tool_static', index) for index in range(4)})
+                             {('tool_static', 0)})
             self.assertEqual({key for key in markers if key[0] == 'tool'},
                              {('tool', 0), ('tool', 1)})
             self.assertEqual(markers['tool', 0].type, Marker.MESH_RESOURCE)
-            self.assertIn('left_claw.stl', markers['tool', 0].mesh_resource)
-            open_left_x = markers['tool', 0].pose.position.x
+            self.assertIn('assembly_static.stl', markers['tool_static', 0].mesh_resource)
+            self.assertIn('assembly_left_claw.stl', markers['tool', 0].mesh_resource)
+            open_left_rotation = markers['tool', 0].pose.orientation.x
             self.assertAlmostEqual(joints['joint_1'], 0.0, places=3, msg='moved while disabled')
             hold(0.2, 'start')
             hold(1.0, left_x=1.0)
@@ -108,7 +109,8 @@ class TestTeleop(unittest.TestCase):
             self.assertGreater(joints['joint_4'], 0.2)
             hold(1.5, right_trigger=-1.0)
             self.assertGreater(joints['left_claw'], 0.2)
-            self.assertGreater(markers['tool', 0].pose.position.x, open_left_x)
+            self.assertLess(abs(markers['tool', 0].pose.orientation.x),
+                            abs(open_left_rotation))
             self.assertAlmostEqual(joints['right_claw'], 0.0, places=2)
             hold(0.2, 'x')
             hold(1.5, right_trigger=-1.0)
