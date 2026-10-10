@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from waybionic_teleop.kinematics import ArmKinematics
+from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
         / 'waybionic_arm.urdf').read_text(encoding='utf-8')
@@ -187,8 +187,7 @@ def test_a_cut_stops_on_the_line_at_the_edge_of_the_workspace(arm):
     joints, fraction, blocked = arm.jog(path[-1], (0.05, 0.0, 0.0), 0.0, 0.0, DT, LIMITS,
                                         MAX_RATE)
     assert fraction == pytest.approx(0.0, abs=1e-6) and blocked
-    assert all(LIMITS[name][0] - 1e-9 <= joints[name] <= LIMITS[name][1] + 1e-9
-               for name in arm.joints)
+    assert all(LIMITS[name][0] <= joints[name] <= LIMITS[name][1] for name in arm.joints)
     assert distance_from_line(arm.forward(joints)[0], start, (1.0, 0.0, 0.0)) < 1e-9
 
 
@@ -200,3 +199,46 @@ def test_other_arm_layouts_are_rejected(change):
     old, new, count = change
     with pytest.raises(ValueError, match='Cartesian moves need'):
         ArmKinematics.from_urdf(URDF.replace(old, new, count))
+
+
+def test_joint_limits_match_the_model_and_allow_only_explicit_missing_placeholders():
+    assert joint_limits(URDF, ['joint_1', 'joint_2']) == {
+        'joint_1': (-3.141593, 3.141593),
+        'joint_2': (-1.570796, 1.570796)}
+    assert joint_limits(URDF, ['tool_grip'], required=False) == {}
+    with pytest.raises(ValueError, match='tool_grip'):
+        joint_limits(URDF, ['tool_grip'])
+
+
+@pytest.mark.parametrize('bad', [
+    URDF.replace('lower="-1.570796"', 'lower="nan"', 1),
+    URDF.replace('upper="1.570796"', 'upper="inf"', 1),
+    URDF.replace('upper="1.570796"', 'upper="-2"', 1),
+    URDF.replace('lower="-1.570796" ', '', 1),
+    URDF.replace('</robot>', '<joint name="joint_2" type="continuous"/></robot>'),
+])
+def test_invalid_or_duplicate_urdf_joint_bounds_are_rejected(bad):
+    with pytest.raises(ValueError):
+        joint_limits(bad, ['joint_2'], required=False)
+
+
+@pytest.mark.parametrize('bad', [
+    URDF.replace('<axis xyz="0 1 0"/>', '<axis xyz="0 1"/>', 1),
+    URDF.replace('<axis xyz="0 1 0"/>', '<axis xyz="0 nan 0"/>', 1),
+    URDF.replace('<child link="upper_arm_link"/>', '<child link="shoulder_link"/>', 1),
+    URDF.replace('<parent link="base_link"/>', '<parent link="wrist_roll_link"/>', 1),
+    URDF.replace('xyz="0 0.005 0.165"', 'xyz="0 0.005 0"', 1),
+    '<robot><joint',
+])
+def test_malformed_geometry_fails_closed_instead_of_crashing(bad):
+    with pytest.raises(ValueError):
+        ArmKinematics.from_urdf(bad)
+
+
+def test_cartesian_step_can_recover_from_a_joint_outside_its_limit(arm):
+    outside = LIMITS['joint_3'][1] + 0.02
+    start = {**DOWN, 'joint_3': outside, 'joint_4': DOWN['joint_4'] - (outside - DOWN['joint_3'])}
+    inward, fraction, _ = arm.jog(start, (0.0, 0.0, 0.0), 0.2, 0.0, DT, LIMITS, MAX_RATE)
+    assert fraction > 0 and inward['joint_3'] < outside
+    outward, _, _ = arm.jog(start, (0.0, 0.0, 0.0), -0.2, 0.0, DT, LIMITS, MAX_RATE)
+    assert outward['joint_3'] <= outside
