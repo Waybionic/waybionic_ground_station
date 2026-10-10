@@ -81,14 +81,15 @@ class DriveMap:
         return {joint: sum(weight * output for weight, output in zip(row, outputs))
                 for joint, row in zip(self.joints, self.inverse)}
 
-    def synchronized(self, positions, counts, period, max_rpm):
+    def synchronized(self, positions, counts, period, max_rpm, velocities=None):
         """
         Return (axis, rpm) per drive for an already-validated next-period joint setpoint.
 
         Each speed covers the drive's remaining encoder distance in one nominal period. If a
         drive would exceed max_rpm, all speeds scale together; actual drive acceleration and
         quantization can still cause tracking error. Cartesian lookahead belongs in teleop's
-        limit-aware solver, not in independent joint extrapolation here.
+        limit-aware solver, not in independent joint extrapolation here. Given the commanded
+        joint velocities, no drive runs faster than 1.5 times its share of them plus 1 rpm.
         """
         if (not math.isfinite(period) or period <= 0 or not isinstance(max_rpm, int)
                 or max_rpm < 1):
@@ -97,14 +98,20 @@ class DriveMap:
                 or any(not math.isfinite(value) for value in positions.values())
                 or any(count is None or not math.isfinite(count) for count in counts)):
             raise ValueError('need a finite position and encoder reading for every drive')
+        if any(not math.isfinite(value) for value in (velocities or {}).values()):
+            raise ValueError('joint velocities must be finite')
         axes = self.to_counts(positions)
         rates = [abs(axis - count) / self.counts_per_rev / period * 60.0
                  for axis, count in zip(axes, counts)]
         fastest = max(rates, default=0.0)
         scale = max_rpm / fastest if fastest > max_rpm else 1.0
+        caps = [max_rpm] * len(self.drives)
+        if velocities is not None:
+            # Teleop's speed limits hold even when a setpoint jumped ahead, as after a host stall.
+            caps = [min(max_rpm, int(1.5 * rpm + 1.0)) for rpm in self.to_rpm(velocities)]
         # Speed 0 means stop to the drive, so the slowest move is 1 rpm.
-        return [(axis, max(1, min(max_rpm, round(rate * scale))))
-                for axis, rate in zip(axes, rates)]
+        return [(axis, max(1, min(cap, round(rate * scale))))
+                for axis, rate, cap in zip(axes, rates, caps)]
 
 
 def drive_map_from_parameters(params, counts_per_rev):

@@ -108,6 +108,14 @@ def test_a_valid_setpoint_reaches_the_simulated_bus_and_feedback(node):
     assert all(count is not None for count in node.counts)
 
 
+def test_a_setpoint_far_ahead_is_chased_near_its_commanded_speed(node):
+    ready(node)
+    node.on_command(command(node, velocities={'joint_1': 0.2}, joint_1=0.5))
+    advance(node)
+    # 0.2 rad/s is 1.9 rpm at the placeholder 1:1 gearing; the gap alone would ask 300 rpm.
+    assert int.from_bytes(sent_frame(node, 0)[1][:2], 'big') == 3
+
+
 @pytest.mark.parametrize('fault', [
     'missing_position', 'duplicate_joint', 'nonfinite_position', 'nonfinite_speed',
     'outside_urdf_limit',

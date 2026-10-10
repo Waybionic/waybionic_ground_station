@@ -82,6 +82,18 @@ def test_a_host_pause_disables_even_if_controller_packets_look_fresh(node, monke
     assert node.teleop.enabled and enabled[-1].data is True
 
 
+def test_a_late_tick_moves_the_targets_at_most_two_periods(node):
+    ready(node)
+    for _ in range(20):
+        tick(node, left_x=1.0)
+    speed = node.teleop.velocities['joint_1']
+    assert speed == pytest.approx(node.teleop.speed)
+    before = node.teleop.targets['joint_1']
+    tick(node, left_x=1.0, elapsed=0.1)
+    assert node.teleop.targets['joint_1'] - before == pytest.approx(
+        2 * node.config.period * speed)
+
+
 @pytest.mark.parametrize('bad', [
     Joy(axes=[0.0], buttons=[0] * len(BUTTONS)),
     Joy(axes=[math.nan] + [0.0] * (len(AXES) - 1), buttons=[0] * len(BUTTONS)),

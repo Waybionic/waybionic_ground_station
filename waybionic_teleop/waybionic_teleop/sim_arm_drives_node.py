@@ -209,7 +209,8 @@ class SimArmDrives(Node):
 
     def send_targets(self):
         try:
-            moves = self.map.synchronized(self.commanded, self.counts, self.period, self.max_rpm)
+            moves = self.map.synchronized(self.commanded, self.counts, self.period, self.max_rpm,
+                                          self.velocities)
             motor_rates = self.map.to_rpm(self.velocities)
             commands = []
             # Preflight every int24 axis and frame before sending any coupled motor an update.

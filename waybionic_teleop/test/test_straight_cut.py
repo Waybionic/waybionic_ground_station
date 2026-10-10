@@ -48,6 +48,9 @@ def test_every_drive_gets_the_speed_that_reaches_its_setpoint_in_one_period(driv
     period = 1.0 / drives['rate_hz']
     moves = mapping.synchronized(extrapolate(DOWN, velocities, period), counts, period,
                                  drives['max_rpm'])
+    # The commanded-speed cap never slows a drive that keeps pace with its setpoint.
+    assert mapping.synchronized(extrapolate(DOWN, velocities, period), counts, period,
+                                drives['max_rpm'], velocities) == moves
     for (axis, rpm), count in zip(moves, counts):
         distance = abs(axis - count) / mks_can.COUNTS_PER_REV
         # Rounding to whole rpm is the only difference between the drives' arrival times.
@@ -121,7 +124,7 @@ def cut(drives, teleop_params, ratio, level, seconds):
         if teleop.targets:
             moves = mapping.synchronized(teleop.command_targets,
                                          [servo.axis for servo in servos], period,
-                                         drives['max_rpm'])
+                                         drives['max_rpm'], teleop.velocities)
             for servo, (axis, rpm) in zip(servos, moves):
                 servo.receive(mks_can.absolute_axis(servo.can_id, axis, rpm, drives['acc']))
         for _ in range(SUBSTEPS):

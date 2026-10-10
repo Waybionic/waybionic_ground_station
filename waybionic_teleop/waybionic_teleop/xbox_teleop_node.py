@@ -129,7 +129,8 @@ class XboxTeleop(Node):
     def tick(self):
         now = time.monotonic()
         elapsed, self.last_tick = now - self.last_tick, now
-        dt = min(max(elapsed, 0.0), 0.1)
+        # A late tick moves the targets at most two periods, so the drives never chase a jump.
+        dt = min(max(elapsed, 0.0), 2.0 * self.config.period)
         self.ticks += 1
         if self.teleop is None:
             self.publish_enabled(False)
