@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from waybionic_teleop.gamepad import AXES, BUTTONS
-from waybionic_teleop.kinematics import ArmKinematics
+from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
 LIMITS = {'joint_1': (-math.pi, math.pi), 'joint_2': (-1.5708, 1.5708),
@@ -133,6 +133,29 @@ def test_roll_turns_the_tool_without_moving_it_off_the_incision(teleop, arm):
     assert abs(teleop.targets['joint_5'] - roll) > 0.1
     assert distance < 1e-5 and rolled_depth == pytest.approx(depth, abs=1e-5)
     assert arm.forward(teleop.targets)[1] == pytest.approx(pitch, abs=1e-9)
+
+
+@pytest.mark.parametrize('axes, joint', [
+    ({'left_y': -1.0}, 'joint_4'), ({'right_y': 1.0}, 'joint_3'), ({'right_y': -1.0}, 'joint_4')])
+def test_moving_into_a_joint_limit_sends_targets_within_the_urdf_limits(
+        parameters, arm, axes, joint):
+    limits = joint_limits(URDF, arm.joints)
+    params = {**parameters('xbox_teleop.yaml', 'xbox_teleop'), 'initial_speed_level': 3}
+    teleop = ArmTeleop(config_from_parameters(params), limits, arm)
+    for button in ('start', 'y', 'y', 'y'):
+        teleop.update(*sample(button), LEANING, DT)
+        teleop.update(*sample(), LEANING, DT)
+    for _ in range(round(10.0 / DT)):
+        teleop.update(*sample(**axes), dict(teleop.targets), DT)
+        # The drives refuse any setpoint past a URDF limit, even by solver rounding.
+        for targets in (teleop.targets, teleop.command_targets):
+            assert all(lower <= targets[name] <= upper for name, (lower, upper) in limits.items())
+        if joint in teleop.blocked:
+            break
+    else:
+        pytest.fail(f'{joint} never reached its limit')
+    assert teleop.targets[joint] == pytest.approx(limits[joint][1], abs=1e-6)
+    assert through(arm, teleop.targets, teleop.incision)[0] < 1e-6
 
 
 def test_re_enabling_away_from_the_incision_point_moves_nothing(teleop, arm):
