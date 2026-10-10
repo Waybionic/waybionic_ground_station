@@ -15,7 +15,8 @@ It is an integration worksheet, not a specification for the physical tool board.
 - The prototype uses an Arduino Uno R3, CNC Shield and A4988 drivers. Its demo
   code gives motor settings, not a measured claw-angle calibration.
 - The ground station now has two independent *simulated* claw coordinates and
-  four simulated motor counts. The visuals are temporary cubes, not CAD joints.
+  four simulated motor counts. The visuals use supplied STL meshes as RViz markers,
+  not calibrated CAD joints.
 
 ## Simulation-only assumptions
 
@@ -60,12 +61,14 @@ be extended with four tool motors for two claw joints.
 This four-motor path is simulation only. It encodes the same F5h target frames
 as tool board PR #32 for CAN IDs 7 to 10, but does not transmit them to a
 physical bus. PR #32 uses 3200 microsteps and 16384 MKS counts per motor turn.
+The arm's five-joint `joint_commands` topic stays separate from `tool_commands`.
 Do not transmit provisional targets before physical calibration is confirmed.
 
 ## Tool-board interface for the CAN bring-up group
 
-The final message IDs, encoding, units, update rate and ownership of step generation
-are **pending**. The logical interface should cover:
+The provisional motor IDs and position-frame encoding follow PR #32. Physical
+claw-to-motor calibration, command rate, acceleration, feedback ownership and
+fault behavior are **pending**. The logical interface should cover:
 
 | Host command | Tool-board feedback |
 | --- | --- |

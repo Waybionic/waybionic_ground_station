@@ -172,10 +172,10 @@ def test_a_trigger_resting_inside_the_deadzone_leaves_the_tool_still(teleop):
     teleop.update(*sample('start', right_trigger=-0.1), HOME, DT)
     assert teleop.enabled
     run(teleop, 1.0, right_trigger=-0.1)
-    assert teleop.targets['tool_grip'] == 0.0
+    assert teleop.targets['left_claw'] == 0.0
     # Past the deadzone the travel is rescaled, so the speed still starts from zero.
     run(teleop, 1.0, right_trigger=-0.575)
-    assert teleop.targets['tool_grip'] == pytest.approx(0.5)
+    assert teleop.targets['left_claw'] == pytest.approx(0.125)
 
 
 def test_dpad_changes_speed_once_per_press(teleop):

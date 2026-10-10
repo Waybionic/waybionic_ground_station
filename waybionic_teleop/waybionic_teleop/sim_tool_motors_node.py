@@ -41,7 +41,7 @@ class SimToolMotors(Node):
         self.rejected = 0
         self.last_tick = time.monotonic()
         self.create_subscription(
-            JointState, 'joint_commands', self.on_command, 10)
+            JointState, 'tool_commands', self.on_command, 10)
         self.state_publisher = self.create_publisher(
             JointState, 'joint_states', 10)
         self.diagnostics_publisher = self.create_publisher(

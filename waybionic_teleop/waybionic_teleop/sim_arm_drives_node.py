@@ -82,7 +82,7 @@ class SimArmDrives(Node):
         self.heartbeat_s = self.heartbeat_ms / 1000.0
         self.interface = params.get('interface', 'sim')
         channel = params.get('channel', '')
-        unmodeled = set(params['unmodeled_joints'])
+        unmodeled = set(params.get('unmodeled_joints', []))
         if self.interface != 'sim':
             # Real drives move only joints whose URDF limits are known.
             unmodeled = set()

@@ -81,6 +81,7 @@ class XboxTeleop(Node):
         self.create_subscription(String, 'robot_description', self.load, latched)
         self.create_subscription(Joy, 'joy', self.on_joy, 10)
         self.create_subscription(JointState, 'joint_states', self.on_joint_states, 10)
+        self.tool_command_publisher = self.create_publisher(JointState, 'tool_commands', 10)
         self.command_publisher = self.create_publisher(JointState, 'joint_commands', 10)
         self.enable_publisher = self.create_publisher(Bool, 'teleop_enabled', latched)
         # game_controller_node rumbles a local controller; joy_udp_receiver passes it on.
@@ -235,10 +236,16 @@ class XboxTeleop(Node):
         targets = self.teleop.command_targets
         if not targets:
             return
-        message = JointState(name=list(targets), position=list(targets.values()),
-                             velocity=[self.teleop.velocities[joint] for joint in targets])
-        message.header.stamp = self.get_clock().now().to_msg()
-        self.command_publisher.publish(message)
+        tool = set(self.config.tool_joints)
+        stamp = self.get_clock().now().to_msg()
+        for names, publisher in (
+                ([name for name in targets if name not in tool], self.command_publisher),
+                ([name for name in targets if name in tool], self.tool_command_publisher)):
+            message = JointState(name=names,
+                                 position=[targets[name] for name in names],
+                                 velocity=[self.teleop.velocities[name] for name in names])
+            message.header.stamp = stamp
+            publisher.publish(message)
 
     def summary(self, fresh):
         # RViz text markers misplace words separated by spaces, so use one word per line.

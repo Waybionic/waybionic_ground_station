@@ -266,12 +266,17 @@ def test_the_host_drives_mks_servos_over_can(make_node):
 
 def test_a_real_bus_needs_a_urdf_limit_for_every_drive_joint(make_node, mock_drives):
     channel, servos = mock_drives
-    sim, _ = make_node()
+    # Add a synthetic unmodeled drive so this safety test still exercises the
+    # real-bus URDF gate after the placeholder grip was removed from the map.
+    extra = {'drives': [*ARM_DRIVES, 'tool'], 'unmodeled_joints': ['tool_grip'],
+             'tool.can_id': 6, 'tool.gear_ratio': 1.0,
+             'tool.joints': ['tool_grip'], 'tool.factors': [1.0]}
+    sim, _ = make_node(**extra)
     sim.on_description(String(data=URDF))
     assert sim.description_valid and 'tool_grip' not in sim.limits
     # Simulation runs the placeholder tool drive without a limit; real drives never hold or
     # take a command until the URDF limits every joint they move.
-    node, executor = make_node(interface='virtual', channel=channel)
+    node, executor = make_node(interface='virtual', channel=channel, **extra)
     assert spin_until(executor, lambda: all(state == 'ready' for state in node.state))
     assert zero(node).success
     assert spin_until(executor, lambda: node.commanded is not None)
