@@ -40,8 +40,8 @@ is not enough.
 
 ## Commands
 
-The board answers the MKS commands that the host sends. Positions are in MKS encoder
-counts, 16384 per motor turn.
+The board answers the MKS commands that the host sends, and the emergency stop.
+Positions are in MKS encoder counts, 16384 per motor turn.
 
 | Code | Command | On this board |
 | --- | --- | --- |
@@ -52,6 +52,7 @@ counts, 16384 per motor turn.
 | 98h | Heartbeat | Stops a moving motor if no frame arrives in time |
 | F3h | Enable | Enabling any motor powers all four drivers |
 | F5h | Absolute move | Speed 0 stops the motor. Speed is capped at 60 rpm and acceleration at 20000 steps/s² |
+| F7h | Emergency stop | Stops the motor at once |
 
 The motors have no encoders, so the reported position is the commanded one. A
 stalled motor goes unnoticed until it is zeroed again.
@@ -88,13 +89,15 @@ cansend can0 007#3138              # read motor 1: 007#3100000000000038
 cansend can0 007#82058E            # bus mode: 007#82018A
 cansend can0 007#F301FB            # enable: 007#F301FB
 cansend can0 007#F5001EC800200002  # half a turn at 30 rpm: 007#F501FD, then 007#F502FE
+cansend can0 007#F7FE              # emergency stop (try it mid-move): 007#F701FF
 cansend can0 007#9299              # zero here: 007#92019A
 ```
 
 The `waybionic_teleop` tests check this firmware's frame code against `mks_can.py`. They
 also run the motor logic in `tool_motor.h` with a fake stepper driver: moves, travel limits,
-the heartbeat stop, stops, enable and zero. The reply queue in `reply_queue.h` is tested
-with back-to-back replies against a fake one-frame CAN controller.
+the heartbeat stop, stops, the emergency stop, enable and zero. The reply queue in
+`reply_queue.h` is tested with back-to-back replies against a fake one-frame CAN
+controller.
 
 ## Using It from the Ground Station
 

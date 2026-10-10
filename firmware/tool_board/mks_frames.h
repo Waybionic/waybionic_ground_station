@@ -17,6 +17,7 @@ constexpr uint8_t SET_ZERO = 0x92;
 constexpr uint8_t SET_HEARTBEAT = 0x98;
 constexpr uint8_t ENABLE = 0xF3;
 constexpr uint8_t ABSOLUTE_AXIS = 0xF5;
+constexpr uint8_t EMERGENCY_STOP = 0xF7;
 
 constexpr uint8_t MODE_SR_VFOC = 0x05;
 constexpr int32_t COUNTS_PER_REV = 0x4000;

@@ -11,6 +11,8 @@ from waybionic_teleop import mks_can
 FIRMWARE = Path(__file__).resolve().parents[2] / 'firmware' / 'tool_board'
 ID = 7
 TURN = mks_can.COUNTS_PER_REV
+# The MKS emergency stop (F7h); the host does not send it, so mks_can has no builder for it.
+EMERGENCY_STOP = 0xF7
 
 # Drives one ToolMotor (3200 steps per turn, one turn of travel either way) from stdin:
 #   frame HEX    hand it a frame        wait MS   let time pass, then update once
@@ -218,6 +220,15 @@ def test_a_gentler_move_brakes_harder_rather_than_pass_the_travel_limit(program)
     out = motor(program, *READY, mks_can.absolute_axis(ID, TURN, 60, 255), 'run 1000',
                 mks_can.absolute_axis(ID, 0, 60, 1), 'state')
     assert state(out[5])['acceleration'] == 4183.0
+
+
+def test_the_emergency_stop_holds_at_once_and_says_so(program):
+    out = motor(program, *READY, mks_can.absolute_axis(ID, TURN, 60, 200), 'run 10',
+                mks_can.frame(ID, EMERGENCY_STOP), 'state', 'run 100')
+    assert out[4] == status(EMERGENCY_STOP, 1)
+    held = state(out[5])
+    assert held['position'] == held['target'] == 10 and not held['braking']
+    assert out[6] == '-'
 
 
 def test_disabling_holds_and_zeroing_makes_here_zero(program):

@@ -60,6 +60,8 @@ public:
       }
     } else if (code == mks::ABSOLUTE_AXIS && count == 6) {
       status = move(mks::absolute_axis(arguments));
+    } else if (code == mks::EMERGENCY_STOP && count == 0) {
+      hold();
     } else {
       return 0;
     }
