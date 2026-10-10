@@ -1,0 +1,28 @@
+name: Tool Board Firmware
+
+on:
+  push:
+    branches: [ "main" ]
+    paths: [ "firmware/**", ".github/workflows/firmware.yml" ]
+  pull_request:
+    paths: [ "firmware/**", ".github/workflows/firmware.yml" ]
+
+permissions:
+  contents: read
+
+jobs:
+  compile-tool-board:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Compile for the UNO R4 WiFi
+        uses: arduino/compile-sketches@v1
+        with:
+          fqbn: arduino:renesas_uno:unor4wifi
+          sketch-paths: |
+            - firmware/tool_board
+          libraries: |
+            - name: AccelStepper
