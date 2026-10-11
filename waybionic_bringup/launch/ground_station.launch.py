@@ -3,11 +3,12 @@ import os
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch.conditions import IfCondition
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import (
-    AndSubstitution, Command, EqualsSubstitution, LaunchConfiguration, NotSubstitution,
-    OrSubstitution)
+    AndSubstitution, Command, EqualsSubstitution, IfElseSubstitution, LaunchConfiguration,
+    NotSubstitution, OrSubstitution)
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -25,6 +26,11 @@ def check_files_exist(context, *args, **kwargs):
     joy_source = LaunchConfiguration('joy_source').perform(context)
     if joy_source not in ('device', 'udp', 'none'):
         raise ValueError(f'joy_source must be device, udp or none, not {joy_source}')
+    if IfCondition(LaunchConfiguration('autoplay')).evaluate(context):
+        if not IfCondition(LaunchConfiguration('teleop')).evaluate(context):
+            raise RuntimeError('autoplay plays the controller demo, so it needs teleop:=true')
+        if LaunchConfiguration('drive_interface').perform(context) != 'sim':
+            raise RuntimeError('autoplay only runs with simulated drives')
     return []
 
 
@@ -68,7 +74,16 @@ def generate_launch_description():
 
     teleop_arg = DeclareLaunchArgument(
         'teleop', default_value='false',
-        description='Drive the arm with an Xbox controller through simulated CAN drives')
+        description='Drive the arm with an Xbox controller through CAN drives')
+
+    drive_interface_arg = DeclareLaunchArgument(
+        'drive_interface', default_value='sim',
+        description='Drive bus: sim for simulated drives, or a python-can interface such as '
+                    'socketcan or slcan for the real MKS drives')
+
+    drive_channel_arg = DeclareLaunchArgument(
+        'drive_channel', default_value='',
+        description='CAN channel for a real drive bus, such as can0 or /dev/ttyACM0')
 
     simulated_safety_arg = DeclareLaunchArgument(
         'simulated_safety_source', default_value='true',
@@ -77,6 +92,11 @@ def generate_launch_description():
     joy_source_arg = DeclareLaunchArgument(
         'joy_source', default_value='device',
         description='Controller input: device (local joystick), udp (host bridge) or none')
+
+    autoplay_arg = DeclareLaunchArgument(
+        'autoplay', default_value='false',
+        description='Play a scripted demo whenever the controller is left idle '
+                    '(teleop with simulated drives only)')
 
     joy_udp_bind_arg = DeclareLaunchArgument(
         'joy_udp_bind', default_value='127.0.0.1',
@@ -93,6 +113,18 @@ def generate_launch_description():
     use_sim_time_arg = DeclareLaunchArgument(
         'use_sim_time', default_value='false',
         description='Use simulation time')
+
+    camera_arg = DeclareLaunchArgument(
+        'camera', default_value='false',
+        description='Show the doctor view sent by camera_bridge and report its delay')
+
+    camera_bind_arg = DeclareLaunchArgument(
+        'camera_bind', default_value='127.0.0.1',
+        description='Address the camera receiver listens on (0.0.0.0 inside Docker)')
+
+    camera_log_arg = DeclareLaunchArgument(
+        'camera_log', default_value='',
+        description='CSV file for each camera frame: capture time, arrival time and delay')
 
     launch_rviz_arg = DeclareLaunchArgument(
         'launch_rviz', default_value='true',
@@ -132,10 +164,14 @@ def generate_launch_description():
             NotSubstitution(simulated_joints)))
     )
 
+    # With autoplay, the controller goes through the autoplay node before it reaches teleop.
+    autoplay = AndSubstitution(teleop, LaunchConfiguration('autoplay'))
+    operator_joy = [('joy', IfElseSubstitution(autoplay, 'joy_operator', 'joy'))]
+
     joy_node = Node(
         package='joy', executable='game_controller_node', name='joy',
         condition=IfCondition(AndSubstitution(teleop, EqualsSubstitution(joy_source, 'device'))),
-        parameters=[sim_time]
+        parameters=[sim_time], remappings=operator_joy
     )
 
     joy_udp_node = Node(
@@ -145,7 +181,13 @@ def generate_launch_description():
             {'bind_address': LaunchConfiguration('joy_udp_bind')},
             {'port': ParameterValue(LaunchConfiguration('joy_udp_port'), value_type=int)},
             diagnostics_topic, sim_time
-        ]
+        ],
+        remappings=operator_joy
+    )
+
+    autoplay_node = Node(
+        package='waybionic_teleop', executable='autoplay', name='autoplay', output='screen',
+        condition=IfCondition(autoplay), parameters=[diagnostics_topic, sim_time]
     )
 
     teleop_node = Node(
@@ -159,6 +201,10 @@ def generate_launch_description():
         package='waybionic_teleop', executable='sim_arm_drives', name='sim_arm_drives',
         output='screen', condition=IfCondition(teleop),
         parameters=[os.path.join(teleop_config_dir, 'arm_drives.yaml'), diagnostics_topic,
+                    {'interface': ParameterValue(LaunchConfiguration('drive_interface'),
+                                                 value_type=str),
+                     'channel': ParameterValue(LaunchConfiguration('drive_channel'),
+                                               value_type=str)},
                     sim_time]
     )
 
@@ -202,7 +248,19 @@ def generate_launch_description():
         ]
     )
 
-    # Demo mode and teleop report on /diagnostics, so the panel listens to live diagnostics.
+    camera = LaunchConfiguration('camera')
+    camera_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(
+            get_package_share_directory('waybionic_camera'), 'launch', 'camera.launch.py')),
+        condition=IfCondition(camera),
+        launch_arguments={
+            'bind_address': LaunchConfiguration('camera_bind'),
+            'log_csv': LaunchConfiguration('camera_log'),
+            'diagnostics_topic': LaunchConfiguration('diagnostics_topic'),
+        }.items()
+    )
+
+    # Demo mode, teleop and the camera report on /diagnostics, so the panel listens to them.
     rviz_node = Node(
         package='rviz2', executable='rviz2', name='rviz2', output='screen',
         arguments=['-d', LaunchConfiguration('rvizconfig')],
@@ -210,17 +268,19 @@ def generate_launch_description():
         parameters=[
             {'use_sim_time': LaunchConfiguration('use_sim_time')},
             {'use_mock_diagnostics': AndSubstitution(
-                LaunchConfiguration('use_mock_diagnostics'), NotSubstitution(simulated_joints))},
+                LaunchConfiguration('use_mock_diagnostics'),
+                NotSubstitution(OrSubstitution(simulated_joints, camera)))},
             {'diagnostics_topic': LaunchConfiguration('diagnostics_topic')}
         ]
     )
 
     return LaunchDescription([
         model_arg, use_mock_diag_arg, diag_topic_arg, start_temp_pub_arg,
-        use_jsp_gui_arg, demo_mode_arg, demo_speed_arg, teleop_arg, simulated_safety_arg,
-        joy_source_arg,
-        joy_udp_bind_arg, joy_udp_port_arg, follow_camera_arg, use_sim_time_arg,
+        use_jsp_gui_arg, demo_mode_arg, demo_speed_arg, teleop_arg, drive_interface_arg,
+        drive_channel_arg, simulated_safety_arg, joy_source_arg, autoplay_arg,
+        joy_udp_bind_arg, joy_udp_port_arg, follow_camera_arg, use_sim_time_arg, camera_arg,
+        camera_bind_arg, camera_log_arg,
         launch_rviz_arg, rviz_config_arg, file_check, rsp_node, jsp_gui_node, joint_demo_node,
-        joy_node, joy_udp_node, teleop_node, drives_node, safety_node, camera_follower_node,
-        temp_diag_pub_node, rviz_node
+        joy_node, joy_udp_node, autoplay_node, teleop_node, drives_node, safety_node,
+        camera_follower_node, temp_diag_pub_node, camera_launch, rviz_node
     ])

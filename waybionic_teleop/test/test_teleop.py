@@ -151,6 +151,16 @@ def test_triggers_close_and_open_the_tool_within_its_range(teleop):
     assert teleop.targets['tool_grip'] == pytest.approx(0.5)
 
 
+def test_a_trigger_resting_inside_the_deadzone_leaves_the_tool_still(teleop):
+    teleop.update(*sample('start', right_trigger=-0.1), HOME, DT)
+    assert teleop.enabled
+    run(teleop, 1.0, right_trigger=-0.1)
+    assert teleop.targets['tool_grip'] == 0.0
+    # Past the deadzone the travel is rescaled, so the speed still starts from zero.
+    run(teleop, 1.0, right_trigger=-0.575)
+    assert teleop.targets['tool_grip'] == pytest.approx(0.5)
+
+
 def test_dpad_changes_speed_once_per_press(teleop):
     press(teleop, 'start')
     run(teleop, 0.5, 'dpad_up')
@@ -189,6 +199,16 @@ def test_holding_lb_keeps_only_the_strongest_direction(arm, cartesian):
     end = arm.forward(cartesian.targets)[0]
     assert end[0] > start[0] + 0.005
     assert end[1:] == pytest.approx(start[1:], abs=1e-12)
+
+
+def test_a_diagonal_moves_the_tip_no_faster_than_one_axis(arm, cartesian):
+    for _ in range(round(0.5 / DT)):
+        start = arm.forward(cartesian.targets)[0]
+        cartesian.update(*sample(left_x=1.0, left_y=1.0, right_y=1.0), DOWN, DT)
+    # 25 mm/s at the initial speed level, shared evenly by x, y and z.
+    assert cartesian.linear == pytest.approx((cartesian.linear_speed / math.sqrt(3),) * 3)
+    assert math.dist(arm.forward(cartesian.targets)[0], start) == pytest.approx(
+        cartesian.linear_speed * DT)
 
 
 def test_the_dpad_tilts_the_tool_about_its_tip(arm, cartesian):
@@ -254,7 +274,7 @@ def test_group_change_discards_cartesian_motion_and_lookahead(cartesian):
         cartesian.update(*sample(left_x=1.0, right_x=1.0), DOWN, DT)
     assert cartesian.linear[1] > 0 and cartesian.roll > 0
     cartesian.update(*sample('y'), DOWN, DT)
-    assert cartesian.active_group.name == 'base'
+    assert cartesian.active_group.name == 'incision'
     assert cartesian.linear == (0.0, 0.0, 0.0) and cartesian.roll == 0.0
     assert not any(cartesian.velocities.values())
     assert cartesian.command_targets == cartesian.targets
@@ -263,14 +283,14 @@ def test_group_change_discards_cartesian_motion_and_lookahead(cartesian):
 def test_switching_groups_with_a_held_stick_waits_for_neutral(cartesian):
     cartesian.update(*sample('y', left_y=1.0), DOWN, DT)
     held = dict(cartesian.targets)
-    assert cartesian.active_group.name == 'base' and cartesian.warning
+    assert cartesian.active_group.name == 'incision' and cartesian.warning
     for _ in range(10):
         cartesian.update(*sample(left_y=1.0), DOWN, DT)
         assert cartesian.targets == held and cartesian.command_targets == held
     cartesian.update(*sample(), DOWN, DT)
     assert cartesian.targets == held and not cartesian.warning
     cartesian.update(*sample(left_y=1.0), DOWN, DT)
-    assert cartesian.targets['joint_2'] > held['joint_2']
+    assert cartesian.targets != held
 
 
 def test_cartesian_group_must_name_the_actual_urdf_chain(params, arm):
@@ -290,7 +310,23 @@ def test_nonfinite_feedback_cannot_enable_teleop(teleop):
     {'max_linear_speed_mm_s': math.nan},
     {'speed_levels': [math.inf]},
     {'tool_limits': [0.0]},
+    {'max_accel_deg_s2': -480.0},
+    {'home_gain': 0.0},
+    {'tool_speed': math.inf},
+    {'speed_levels': [0.5, 1.5]},
+    {'base.scales': [1.0, -1.5, 1.0]},
 ])
 def test_invalid_motion_config_cannot_start(params, change):
     with pytest.raises(ValueError):
         config_from_parameters({**params, **change})
+
+
+@pytest.mark.parametrize('field, value', [
+    ('max_speed', -1.0), ('max_accel', -1.0), ('home_gain', math.nan), ('tool_speed', 0.0),
+    ('speed_levels', [0.5, 2.0]), ('period', -0.01),
+])
+def test_teleop_refuses_a_config_with_unusable_motion_limits(params, field, value):
+    config = config_from_parameters(params)
+    setattr(config, field, value)
+    with pytest.raises(ValueError):
+        ArmTeleop(config, LIMITS)

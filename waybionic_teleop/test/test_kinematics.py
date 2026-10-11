@@ -187,8 +187,7 @@ def test_a_cut_stops_on_the_line_at_the_edge_of_the_workspace(arm):
     joints, fraction, blocked = arm.jog(path[-1], (0.05, 0.0, 0.0), 0.0, 0.0, DT, LIMITS,
                                         MAX_RATE)
     assert fraction == pytest.approx(0.0, abs=1e-6) and blocked
-    assert all(LIMITS[name][0] - 1e-9 <= joints[name] <= LIMITS[name][1] + 1e-9
-               for name in arm.joints)
+    assert all(LIMITS[name][0] <= joints[name] <= LIMITS[name][1] for name in arm.joints)
     assert distance_from_line(arm.forward(joints)[0], start, (1.0, 0.0, 0.0)) < 1e-9
 
 
@@ -242,4 +241,4 @@ def test_cartesian_step_can_recover_from_a_joint_outside_its_limit(arm):
     inward, fraction, _ = arm.jog(start, (0.0, 0.0, 0.0), 0.2, 0.0, DT, LIMITS, MAX_RATE)
     assert fraction > 0 and inward['joint_3'] < outside
     outward, _, _ = arm.jog(start, (0.0, 0.0, 0.0), -0.2, 0.0, DT, LIMITS, MAX_RATE)
-    assert outward['joint_3'] <= outside + 1e-9
+    assert outward['joint_3'] <= outside

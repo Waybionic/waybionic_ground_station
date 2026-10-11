@@ -10,17 +10,20 @@ fail() {
 build=false
 detach=false
 stop=false
+service=linux-gui
 while (($#)); do
   case "$1" in
     --build) build=true ;;
     -d|--detach) detach=true ;;
     --stop) stop=true ;;
+    --controller) service=linux-gui-teleop ;;
     -h|--help)
       printf '%s\n' \
-        'Usage: linux-gui.sh [--build] [-d|--detach] [-- COMMAND ARG...]' \
+        'Usage: linux-gui.sh [--build] [-d|--detach] [--controller] [-- COMMAND ARG...]' \
         '       linux-gui.sh --stop' \
         'Rebuilds the ROS workspace from live source on launch. Use --build after dependency changes.' \
-        'Detached windows remain open after the terminal closes; --stop removes the container.'
+        'Detached windows remain open after the terminal closes; --stop removes the container.' \
+        '--controller passes only the USB game controllers plugged in now and starts teleop.'
       exit 0 ;;
     --) shift; break ;;
     -*) fail "Unknown option: $1 (see --help)." ;;
@@ -50,8 +53,19 @@ display_number=${display_number%%.*}
 docker compose version >/dev/null
 
 compose=(docker compose -f "$repo_root/compose.yaml")
+controllers=()
+if [[ $service == linux-gui-teleop ]]; then
+  # Only game controllers: all of /dev/input would also expose keyboards and their keystrokes.
+  for link in /dev/input/by-id/*-event-joystick; do
+    [[ -e $link ]] || continue
+    node=$(readlink -f -- "$link")
+    [[ $node =~ ^/dev/input/event[0-9]+$ && -c $node ]] || fail "Unexpected controller device: $link"
+    controllers+=("$node")
+  done
+  ((${#controllers[@]})) || fail "No game controller found in /dev/input/by-id. Plug it in by USB, then start again."
+fi
 if ! $build; then
-  image_name=$("${compose[@]}" config --images linux-gui)
+  image_name=$("${compose[@]}" config --images "$service")
   docker image inspect "$image_name" >/dev/null 2>&1 || fail "The GUI image is unavailable. Run ./scripts/linux-gui.sh --build first (and check Docker access)."
 fi
 # Keep credentials outside the build context. Once mounted, Linux keeps the file
@@ -69,10 +83,24 @@ touch "$WAYBIONIC_XAUTHORITY"
 sed 's/^..../ffff/' "$auth_dir/records" | xauth -f "$WAYBIONIC_XAUTHORITY" nmerge -
 # The parent directory is private; the mounted file must be readable by ubuntu.
 chmod 644 "$WAYBIONIC_XAUTHORITY"
+if ((${#controllers[@]})); then
+  {
+    printf 'services:\n  linux-gui-teleop:\n    devices:\n'
+    for node in "${controllers[@]}"; do
+      # rw without m: the container can use these nodes but not create others.
+      printf '      - "%s:%s:rw"\n' "$node" "$node"
+    done
+    # The container user joins the groups that own the nodes (usually input) by number.
+    printf '    group_add:\n'
+    stat -c '      - "%g"' -- "${controllers[@]}" | sort -u
+  } > "$auth_dir/controllers.yaml"
+  compose+=(-f "$auth_dir/controllers.yaml")
+  printf 'Passing only these game controllers: %s\n' "${controllers[*]}"
+fi
 run_options=(--rm --pull never --name "$container_name")
 if $build; then run_options+=(--build); fi
 if $detach; then run_options+=(--detach --interactive=false); fi
-"${compose[@]}" run "${run_options[@]}" linux-gui "$@"
+"${compose[@]}" run "${run_options[@]}" "$service" "$@"
 if $detach; then
   printf 'GUI running in background. Stop with: %s/scripts/linux-gui.sh --stop\n' "$repo_root"
 fi

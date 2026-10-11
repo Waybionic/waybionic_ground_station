@@ -48,6 +48,9 @@ def test_every_drive_gets_the_speed_that_reaches_its_setpoint_in_one_period(driv
     period = 1.0 / drives['rate_hz']
     moves = mapping.synchronized(extrapolate(DOWN, velocities, period), counts, period,
                                  drives['max_rpm'])
+    # The commanded-speed cap never slows a drive that keeps pace with its setpoint.
+    assert mapping.synchronized(extrapolate(DOWN, velocities, period), counts, period,
+                                drives['max_rpm'], velocities) == moves
     for (axis, rpm), count in zip(moves, counts):
         distance = abs(axis - count) / mks_can.COUNTS_PER_REV
         # Rounding to whole rpm is the only difference between the drives' arrival times.
@@ -121,7 +124,7 @@ def cut(drives, teleop_params, ratio, level, seconds):
         if teleop.targets:
             moves = mapping.synchronized(teleop.command_targets,
                                          [servo.axis for servo in servos], period,
-                                         drives['max_rpm'])
+                                         drives['max_rpm'], teleop.velocities)
             for servo, (axis, rpm) in zip(servos, moves):
                 servo.receive(mks_can.absolute_axis(servo.can_id, axis, rpm, drives['acc']))
         for _ in range(SUBSTEPS):
@@ -160,7 +163,7 @@ def test_cartesian_next_setpoint_stays_at_the_tip_when_tilt_hits_a_limit(drives,
         tip, _ = arm.forward(teleop.targets)
         ahead, _ = arm.forward(teleop.command_targets)
         assert ahead == pytest.approx(tip, abs=1e-9)
-        assert all(lower - 1e-8 <= teleop.command_targets[joint] <= upper + 1e-8
+        assert all(lower <= teleop.command_targets[joint] <= upper
                    for joint, (lower, upper) in LIMITS.items())
         moves = mapping.synchronized(teleop.command_targets, mapping.to_counts(teleop.targets),
                                      period, drives['max_rpm'])
