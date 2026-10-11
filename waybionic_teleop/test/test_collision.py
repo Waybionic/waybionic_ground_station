@@ -2,20 +2,20 @@
 
 import math
 from pathlib import Path
+import re
 
 import pytest
 
 from waybionic_teleop.collision import _intrusion, _overlap, _rotation, ArmCollision
 from waybionic_teleop.gamepad import AXES, BUTTONS
-from waybionic_teleop.kinematics import ArmKinematics
+from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 from waybionic_teleop.xbox_teleop_node import JAW_OPEN_GAP, JAW_SIZE
 
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
         / 'waybionic_arm.urdf').read_text(encoding='utf-8')
-LIMITS = {'joint_1': (-math.pi, math.pi), 'joint_2': (-1.5708, 1.5708),
-          'joint_3': (-1.5708, 1.5708), 'joint_4': (-1.5708, 1.5708),
-          'joint_5': (-1.5708, 1.5708)}
+COLLISION = re.compile(r'<collision .*?</collision>', re.S)
+LIMITS = joint_limits(URDF, ['joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5'])
 DT = 1.0 / 120.0
 
 
@@ -49,6 +49,31 @@ def test_folding_back_into_the_base_is_caught_past_todays_joint_limits(check):
     assert not any('table' in hit for hit in hits)
 
 
+def test_the_elbow_folds_until_the_forearm_almost_touches_the_shoulder(check):
+    # The forearm's boxes would stop this near 134 degrees; the CAD fold table allows 147.
+    assert check.hits(pose(0, 146, 0)) == [] and check.hits(pose(0, -146, 0)) == []
+    assert check.hits(pose(0, 149, 0)) == ['forearm_link: shoulder_link']
+    assert check.hits(pose(0, -149, 0)) == ['forearm_link: shoulder_link']
+
+
+def test_the_fold_limit_follows_the_shoulder_angle():
+    # With the shoulder tilted, the forearm meets the shoulder sooner on that side.
+    away = ArmCollision.from_urdf(URDF, table_z=-10.0)
+    for sign in (1, -1):
+        assert 'forearm_link: shoulder_link' not in away.hits(pose(sign * 90, sign * 128, 0))
+        assert 'forearm_link: shoulder_link' in away.hits(pose(sign * 90, sign * 133, 0))
+
+
+@pytest.mark.parametrize('old, new', [
+    ('across="joint_2"', 'across="joint_9"'), ('start="-135"', 'start="nan"'),
+    ('step="5"', 'step="0"'), ('upper="147.3 ', 'upper="'), ('lower="-122.7', 'lower="inf'),
+])
+def test_an_unusable_fold_table_is_refused(old, new):
+    assert old in URDF
+    with pytest.raises(ValueError, match='waybionic_fold'):
+        ArmCollision.from_urdf(URDF.replace(old, new))
+
+
 def test_table_height_and_clearance_are_configurable():
     # This pose's tool tip is 175 mm above the bottom of the base.
     joints = pose(28.6, 80.2, 71.1, 0.1)
@@ -57,15 +82,24 @@ def test_table_height_and_clearance_are_configurable():
     assert ArmCollision.from_urdf(URDF, table_z=0.1, clearance=0.1).hits(joints)
 
 
+def test_the_base_and_shoulder_have_their_own_smaller_clearance():
+    # The elbow bend is between 2 and 10 mm from the base's lid here.
+    joints = pose(-127, 60, 0, math.radians(5))
+    assert ArmCollision.from_urdf(URDF).hits(joints) == []
+    assert ArmCollision.from_urdf(URDF, self_clearance=0.01).hits(joints) == [
+        'forearm_link: base_link']
+
+
 def test_a_urdf_without_collision_boxes_is_refused():
     with pytest.raises(ValueError, match='no collision box'):
-        ArmCollision.from_urdf(URDF.replace('<collision>', '<!--').replace('</collision>', '-->'))
-    # Every link the checks rely on needs its box, including the upper arm and the tool.
+        ArmCollision.from_urdf(re.sub(COLLISION, '', URDF))
+    # Every link the checks rely on needs its boxes, including the upper arm and the tool.
     for link in ('upper_arm_link', 'tool_link'):
-        start = URDF.index('<collision>', URDF.index(f'<link name="{link}">'))
-        end = URDF.index('</collision>', start) + len('</collision>')
+        start = URDF.index(f'<link name="{link}">')
+        end = URDF.index('</link>', start)
         with pytest.raises(ValueError, match=link):
-            ArmCollision.from_urdf(URDF[:start] + URDF[end:])
+            ArmCollision.from_urdf(
+                URDF[:start] + re.sub(COLLISION, '', URDF[start:end]) + URDF[end:])
 
 
 @pytest.mark.parametrize('extra, roots', [
@@ -178,10 +212,10 @@ def test_teleop_refuses_to_slide_the_forearm_further_into_the_side_of_the_base(
         parameters, check):
     teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
                        LIMITS, ArmKinematics.from_urdf(URDF), check)
-    # Folded back past today's joint limits, the end of the forearm reaches into the side of
-    # the base. Turning the base towards zero slides it further in along that side, while its
-    # overlap across the side, the smallest of the separating-axis overlaps, shrinks.
-    start, turned = pose(-130, 40, 0, math.radians(15)), pose(-130, 40, 0, math.radians(14.5))
+    # Folded back with the shoulder near its limit, the elbow bend reaches into the base's lid.
+    # Turning the base towards zero slides it further in, while its smallest separating-axis
+    # overlap shrinks.
+    start, turned = pose(-130, 60, 0, math.radians(5)), pose(-130, 60, 0, math.radians(4.5))
     assert check.hits(start) == check.hits(turned) == ['forearm_link: base_link']
     assert separating_axis_depth(check, turned) < separating_axis_depth(check, start)
     assert (check.check(turned)['forearm_link: base_link']
@@ -213,10 +247,11 @@ def sample(*pressed, **axes):
 
 
 def separating_axis_depth(check, joints):
-    """Return the forearm's smallest overlap with the base across the separating axes."""
+    """Return the deepest overlap of a forearm part with the base across the separating axes."""
     poses = check.poses(joints)
-    return _overlap(next(check.world_boxes(poses, 'forearm_link')),
-                    next(check.world_boxes(poses, 'base_link')), check.clearance)
+    return max(_overlap(box, obstacle, check.self_clearance)
+               for box in check.world_boxes(poses, 'forearm_link')
+               for obstacle in check.world_boxes(poses, 'base_link'))
 
 
 def jaw_bottom(check, joints):

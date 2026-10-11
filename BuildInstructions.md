@@ -395,11 +395,14 @@ the point moves onto the axis instead of the arm moving. Further away, the group
 rather than pull the tool back: press Y, withdraw the tool in another group, then
 select the incision group again to set a new incision point.
 
-The current arm URDF has provisional joint limits, and the collision checks below model
-each link as a box; they have been tested with simulated drives only. The simulated
-CAN map is not a powered-arm safety case. Do not change a wrist bound or operate powered
-motors until Mechanical identifies the URDF joint and measures signed travel from upright
-zero, including any cable or gear stop.
+The arm URDF's joint limits come from the CAD: each pitch joint stops about 1 degree
+before two parts touch, 135 degrees either way for the shoulder, 147 for the elbow and
+93 for the wrist pitch (found with `scripts/cad/joint_clearance.py`). Base yaw and
+wrist roll never touch another part, so they turn 180 degrees either way until their
+cabling is measured. These limits and the collision checks below have been tested with
+simulated drives only. The simulated CAN map is not a powered-arm safety case. Do not
+operate powered motors until Mechanical confirms the signed travel of each joint from
+upright zero on the built arm, including any cable or gear stop.
 
 In simulation, a zero-velocity joint command (including B and controller timeout)
 sends an MKS F5 frame with zero speed and zero acceleration to each moving drive.
@@ -413,15 +416,20 @@ not connect powered drives or treat it as a hardware E-stop test; drive
 identities, wiring, zeroing and electrical safety still need hardware verification.
 
 Every group stops a move before any part of the arm comes within 10 mm of the
-table or folds into the arm's own base. The checks use a box around each link,
-which you can see by ticking **Collision Enabled** on RViz's RobotModel display.
+table or within 2 mm of the arm's own base and shoulder. The checks use a box
+around each CAD part, which you can see by ticking **Collision Enabled** on RViz's
+RobotModel display. Boxes are too coarse where the forearm folds back against the
+shoulder, so there the elbow follows a table of its limits against the shoulder
+angle, measured from the CAD 1 degree before the parts touch (`waybionic_fold` in
+the URDF).
 The tool's box is a placeholder around the RViz jaws, which reach 30 mm past
 `tool_link`, until the real tool is modelled; a longer tool needs a longer box.
 When a move stops, the diagnostics panel names the part, for example
 `At limit: forearm_link: table`. If the arm stands on a raised mount, set
 `table_height` in `waybionic_teleop/config/xbox_teleop.yaml` to the table's height
 above the bottom of the base. `collision_clearance` in the same file sets the 10 mm
-margin. If the arm is already touching something, the only moves still allowed are
+margin to the table, and `self_collision_clearance` the 2 mm margin to the base and
+shoulder. If the arm is already touching something, the only moves still allowed are
 the ones that back out of it: a move that presses any contact further in is
 refused, even if it would ease another contact at the same time.
 

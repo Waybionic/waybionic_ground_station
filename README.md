@@ -7,7 +7,7 @@ Currently, this repository contains the clean foundation and the SolidWorks-expo
 ## Packages
 
 - **`waybionic_description`**
-  Hardware description, URDF/Xacro files, and meshes. `waybionic_arm.urdf` is generated from the mechanical team's `full-arm-smaller.SLDASM` by the tools in `scripts/cad/`; regenerate it after CAD changes instead of editing it. The geometric placeholder model remains available.
+  Hardware description, URDF/Xacro files, and meshes. `waybionic_arm.urdf` is generated from the mechanical team's `full-arm-smaller.SLDASM` by the tools in `scripts/cad/`; regenerate it after CAD changes instead of editing it, with the joint limits `scripts/cad/joint_clearance.py` finds where the parts first touch. The geometric placeholder model remains available.
 - **`waybionic_bringup`**
   Launch files and RViz configurations to bring up the robot state and visualization.
 - **`waybionic_teleop`**

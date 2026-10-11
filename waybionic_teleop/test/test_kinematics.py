@@ -164,11 +164,12 @@ def test_tilting_pivots_the_tool_about_a_fixed_tip(arm):
 
 
 def test_tilting_stops_at_a_joint_limit_with_the_tip_in_place(arm):
-    path = cut(arm, (0.0, 0.0, 0.0), 2.0, pitch_rate=-0.2)
+    # Tilting the tool back about its tip pitches the wrist until it reaches its limit.
+    path = cut(arm, (0.0, 0.0, 0.0), 11.5, pitch_rate=-0.2)
     joints, fraction, blocked = arm.jog(path[-1], (0.0, 0.0, 0.0), -0.2, 0.0, DT, LIMITS,
                                         MAX_RATE)
-    assert blocked == ['joint_3'] and fraction == pytest.approx(0.0, abs=1e-6)
-    assert joints['joint_3'] == pytest.approx(LIMITS['joint_3'][1], abs=1e-6)
+    assert blocked == ['joint_4'] and fraction == pytest.approx(0.0, abs=1e-6)
+    assert joints['joint_4'] == pytest.approx(LIMITS['joint_4'][0], abs=1e-6)
     assert arm.forward(joints)[0] == pytest.approx(arm.forward(DOWN)[0], abs=1e-9)
 
 
@@ -204,17 +205,17 @@ def test_other_arm_layouts_are_rejected(change):
 def test_joint_limits_match_the_model_and_allow_only_explicit_missing_placeholders():
     assert joint_limits(URDF, ['joint_1', 'joint_2']) == {
         'joint_1': (-3.141593, 3.141593),
-        'joint_2': (-1.570796, 1.570796)}
+        'joint_2': (-2.356194, 2.356194)}
     assert joint_limits(URDF, ['tool_grip'], required=False) == {}
     with pytest.raises(ValueError, match='tool_grip'):
         joint_limits(URDF, ['tool_grip'])
 
 
 @pytest.mark.parametrize('bad', [
-    URDF.replace('lower="-1.570796"', 'lower="nan"', 1),
-    URDF.replace('upper="1.570796"', 'upper="inf"', 1),
-    URDF.replace('upper="1.570796"', 'upper="-2"', 1),
-    URDF.replace('lower="-1.570796" ', '', 1),
+    URDF.replace('lower="-2.356194"', 'lower="nan"', 1),
+    URDF.replace('upper="2.356194"', 'upper="inf"', 1),
+    URDF.replace('upper="2.356194"', 'upper="-3"', 1),
+    URDF.replace('lower="-2.356194" ', '', 1),
     URDF.replace('</robot>', '<joint name="joint_2" type="continuous"/></robot>'),
 ])
 def test_invalid_or_duplicate_urdf_joint_bounds_are_rejected(bad):

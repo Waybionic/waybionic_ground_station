@@ -139,10 +139,11 @@ def test_roll_turns_the_tool_without_moving_it_off_the_incision(teleop, arm):
     assert arm.forward(teleop.targets)[1] == pytest.approx(pitch, abs=1e-9)
 
 
-@pytest.mark.parametrize('axes, joint', [
-    ({'left_y': -1.0}, 'joint_4'), ({'right_y': 1.0}, 'joint_3'), ({'right_y': -1.0}, 'joint_4')])
+@pytest.mark.parametrize('axes, joint, bound', [
+    ({'left_y': -1.0}, 'joint_4', 1), ({'right_y': 1.0}, 'joint_4', 0),
+    ({'right_y': -1.0}, 'joint_4', 1)])
 def test_moving_into_a_joint_limit_sends_targets_within_the_urdf_limits(
-        parameters, arm, axes, joint):
+        parameters, arm, axes, joint, bound):
     limits = joint_limits(URDF, arm.joints)
     params = {**parameters('xbox_teleop.yaml', 'xbox_teleop'), 'initial_speed_level': 3}
     teleop = ArmTeleop(config_from_parameters(params), limits, arm)
@@ -158,7 +159,7 @@ def test_moving_into_a_joint_limit_sends_targets_within_the_urdf_limits(
             break
     else:
         pytest.fail(f'{joint} never reached its limit')
-    assert teleop.targets[joint] == pytest.approx(limits[joint][1], abs=1e-6)
+    assert teleop.targets[joint] == pytest.approx(limits[joint][bound], abs=1e-6)
     assert through(arm, teleop.targets, teleop.incision)[0] < 1e-6
 
 

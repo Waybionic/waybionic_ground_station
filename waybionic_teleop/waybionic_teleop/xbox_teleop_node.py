@@ -67,6 +67,11 @@ class XboxTeleop(Node):
         self.base_frame = params['base_frame']
         self.table_height = float(params.get('table_height', 0.0))
         self.clearance = float(params.get('collision_clearance', 0.01))
+        self.self_clearance = float(params.get('self_collision_clearance', 0.002))
+        if not (math.isfinite(self.table_height) and 0 <= self.clearance < math.inf
+                and 0 <= self.self_clearance < math.inf):
+            raise ValueError('table_height must be finite, and collision_clearance and '
+                             'self_collision_clearance zero or more and finite')
         self.teleop = None
         self.problem = 'Waiting for robot_description'
         self.joy = None
@@ -115,7 +120,8 @@ class XboxTeleop(Node):
             # The collision boxes are the only thing keeping the arm off the table and out of
             # its own base, so a description without them leaves teleop off rather than
             # running it unprotected.
-            collision = ArmCollision.from_urdf(message.data, self.table_height, self.clearance)
+            collision = ArmCollision.from_urdf(message.data, self.table_height, self.clearance,
+                                               self.self_clearance)
         except ValueError as error:
             self.teleop, self.problem = None, str(error)
             self.get_logger().error(f'Teleop disabled: {error}')
