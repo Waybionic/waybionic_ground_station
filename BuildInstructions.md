@@ -297,8 +297,8 @@ can report exit code `-2`, indicating the requested SIGINT interruption.
 `teleop:=true` drives the arm with an Xbox controller through simulated CAN drives;
 nothing is sent to hardware unless you choose a drive bus, as described in
 [Real MKS drives over CAN](#real-mks-drives-over-can). The controller mapping is in
-`waybionic_teleop/config/xbox_teleop.yaml`, and the placeholder joint-to-drive map
-(MKS SERVO42D/57D CAN IDs, gear ratios and the wrist differential) is in
+`waybionic_teleop/config/xbox_teleop.yaml`, and the joint-to-drive map (MKS
+SERVO42D/57D CAN IDs, the 26:1 and 3:1 gear ratios and the wrist differential) is in
 `waybionic_teleop/config/arm_drives.yaml`.
 
 **Windows (Docker):** connect the controller, then start the teleop version of the
@@ -404,7 +404,7 @@ zero, including any cable or gear stop.
 In simulation, a zero-velocity joint command (including B and controller timeout)
 sends an MKS F5 frame with zero speed and zero acceleration to each moving drive.
 An out-of-range encoder target stops all drives instead of updating only part of
-the arm. The placeholder drive speed is capped at 300 RPM; the MKS manual warns
+the arm. The drive speed is capped at 600 RPM (`max_rpm`); the MKS manual warns
 against immediate software stops above 1000 RPM. Each drive also runs no faster
 than 1.5 times its commanded speed plus 1 RPM, and teleop never advances its
 targets by more than two updates at once, so after a pause the drives do not catch

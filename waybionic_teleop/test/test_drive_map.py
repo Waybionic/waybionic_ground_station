@@ -1,4 +1,4 @@
-"""Joint positions to drive encoder counts with the placeholder drive map."""
+"""Joint positions to drive encoder counts with the arm's drive map."""
 
 import math
 
@@ -15,9 +15,11 @@ def arm_map(parameters):
         parameters('arm_drives.yaml', 'sim_arm_drives'), COUNTS)
 
 
-def test_placeholder_map_covers_every_arm_joint(arm_map):
+def test_the_map_covers_every_arm_joint_with_the_cad_gear_ratios(arm_map):
     assert arm_map.joints == ['joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5', 'tool_grip']
     assert [drive.can_id for drive in arm_map.drives] == [1, 2, 3, 4, 5, 6]
+    # 26:1 cycloidal reducers on the base, shoulder and elbow; 3:1 belts on the wrist motors.
+    assert [drive.gear_ratio for drive in arm_map.drives] == [26.0, 26.0, 26.0, 3.0, 3.0, 1.0]
 
 
 def test_positions_round_trip_through_counts(arm_map):
@@ -29,9 +31,10 @@ def test_positions_round_trip_through_counts(arm_map):
 
 def test_wrist_differential_mixes_pitch_and_roll(arm_map):
     zero = dict.fromkeys(arm_map.joints, 0.0)
-    quarter = COUNTS // 4
-    assert arm_map.to_counts({**zero, 'joint_4': math.pi / 2})[3:5] == [quarter, quarter]
-    assert arm_map.to_counts({**zero, 'joint_5': math.pi / 2})[3:5] == [-quarter, quarter]
+    # A quarter turn of the wrist is three quarters of a turn of each motor through the belts.
+    turn = 3 * COUNTS // 4
+    assert arm_map.to_counts({**zero, 'joint_4': math.pi / 2})[3:5] == [turn, turn]
+    assert arm_map.to_counts({**zero, 'joint_5': math.pi / 2})[3:5] == [-turn, turn]
 
 
 def test_gear_ratio_scales_counts_and_speed():
@@ -43,13 +46,15 @@ def test_gear_ratio_scales_counts_and_speed():
 def test_a_setpoint_that_jumped_ahead_is_chased_near_the_commanded_speed(arm_map):
     period = 1.0 / 120.0
     rates = {'joint_1': math.radians(60.0), 'joint_4': 0.5, 'joint_5': 0.2}
-    # A 100 ms host stall leaves the base setpoint 6 degrees ahead of its drive.
+    # A 100 ms host stall leaves the base setpoint 6 degrees ahead of its drive, which the
+    # 26:1 reducer makes more than the drive's top speed covers in one period.
     ahead = {joint: rates.get(joint, 0.0) * 0.1 for joint in arm_map.joints}
     counts = arm_map.to_counts(dict.fromkeys(arm_map.joints, 0.0))
-    free = arm_map.synchronized(ahead, counts, period, 300)
-    capped = arm_map.synchronized(ahead, counts, period, 300, rates)
+    top = mks_can.MAX_SPEED_RPM
+    free = arm_map.synchronized(ahead, counts, period, top)
+    capped = arm_map.synchronized(ahead, counts, period, top, rates)
     commanded = arm_map.to_rpm(rates)
-    assert commanded[0] == pytest.approx(10.0) and free[0][1] == 120
+    assert commanded[0] == pytest.approx(260.0) and free[0][1] == top
     # Each wrist drive is capped by its own mix of pitch and roll.
     for (axis, rpm), (free_axis, free_rpm), limit in zip(capped, free, commanded):
         assert axis == free_axis and 1 <= rpm <= 1.5 * limit + 1.0

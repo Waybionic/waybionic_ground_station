@@ -26,6 +26,8 @@ def serve(bus, servos, stop, period=0.001):
                     replies += [(can_id, reply) for reply in servos[can_id].receive(data)]
                 except ValueError:
                     bus.errors += 1
+                if servos[can_id].can_id != can_id:
+                    servos[servos[can_id].can_id] = servos.pop(can_id)
             frame = bus.receive()
         now = time.monotonic()
         for can_id, servo in servos.items():

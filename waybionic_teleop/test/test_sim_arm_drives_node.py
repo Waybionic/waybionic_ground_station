@@ -115,8 +115,86 @@ def test_a_setpoint_far_ahead_is_chased_near_its_commanded_speed(node):
     ready(node)
     node.on_command(command(node, velocities={'joint_1': 0.2}, joint_1=0.5))
     advance(node)
-    # 0.2 rad/s is 1.9 rpm at the placeholder 1:1 gearing; the gap alone would ask 300 rpm.
-    assert int.from_bytes(sent_frame(node, 0)[1][:2], 'big') == 3
+    # 0.2 rad/s is 49.7 rpm through the base's 26:1 reducer; the gap alone would ask 600 rpm.
+    assert int.from_bytes(sent_frame(node, 0)[1][:2], 'big') == 75
+
+
+def test_a_command_goes_out_at_once_unless_the_next_tick_stops_the_drives(node):
+    ready(node)
+    node.on_command(command(node, joint_1=0.5))
+    base = node.bus.drives[1]
+    target = base.target
+    assert target is not None
+    # After a host pause past the heartbeat, the next tick stops the drives instead.
+    node.last_tick -= node.heartbeat_s
+    node.on_command(command(node, joint_1=0.6))
+    assert base.target == target
+    node.tick()
+    assert_stopped(node)
+
+
+def capture_sends(node, monkeypatch):
+    sent, send = [], node.bus.send
+
+    def recorded(can_id, data):
+        sent.append(bytes(data))
+        return send(can_id, data)
+    monkeypatch.setattr(node.bus, 'send', recorded)
+    return sent
+
+
+def last_frame(node, index):
+    return bytes.fromhex(node.last_command[index].split('#')[1])
+
+
+def test_a_move_or_stop_the_carrier_refused_goes_out_again_unless_replaced(node, monkeypatch):
+    ready(node)
+    # The base takes every frame but stands still, so its target never changes by itself.
+    monkeypatch.setattr(node.bus.drives[1], 'step', lambda dt: [])
+    node.on_command(command(node, velocities={'joint_1': 0.2}, joint_1=0.5))
+    advance(node)
+    target, sent = last_frame(node, 0), capture_sends(node, monkeypatch)
+    advance(node)
+    assert target not in sent
+    # The carrier answers BELL a tick after send() returned True.
+    node.on_refused(1, target, False)
+    advance(node)
+    assert sent.count(target) == 1
+    # A refusal of a target that a later one replaced changes nothing.
+    node.on_command(command(node, velocities={'joint_1': 0.2}, joint_1=0.6))
+    newer, sent[:] = last_frame(node, 0), []
+    node.on_refused(1, target, False)
+    advance(node)
+    assert newer != target and newer not in sent and target not in sent
+    # A refused stop goes out again on the next tick, and Start waits for it meanwhile.
+    node.on_enabled(Bool(data=False))
+    stop = mks_can.stop(1, 0)
+    assert last_frame(node, 0) == stop and not node.stopping
+    node.on_refused(1, stop, False)
+    assert node.stopping == {0}
+    node.on_enabled(Bool(data=True))
+    assert not node.authorized
+    advance(node)
+    assert not node.stopping and sent.count(stop) == 2
+
+
+def test_a_refused_setup_or_zero_frame_goes_out_again_only_while_needed(node, monkeypatch):
+    advance(node)
+    sent = capture_sends(node, monkeypatch)
+    heartbeat, zero = mks_can.set_heartbeat(2, node.heartbeat_ms), mks_can.set_zero(3)
+    node.on_refused(2, heartbeat, False)
+    advance(node)
+    assert heartbeat not in sent
+    # A setting the shoulder has not confirmed goes out on the next tick, not a timeout later.
+    node.unconfirmed[1] = {mks_can.SET_HEARTBEAT}
+    node.on_refused(2, heartbeat, False)
+    advance(node)
+    assert heartbeat in sent and not node.unconfirmed[1]
+    # A zero goes out again only while the zero service waits, never later.
+    node.on_refused(3, zero, False)
+    assert zero not in sent
+    node.on_refused(3, zero, True)
+    assert zero in sent
 
 
 @pytest.mark.parametrize('fault', [
@@ -189,12 +267,13 @@ def test_host_pause_trips_watchdog_before_any_stale_frame_can_rearm_it(node):
 
 def test_int24_overflow_rejects_the_entire_coordinated_move(node):
     ready(node)
+    ratio = node.map.drives[0].gear_ratio
     node.map.drives[0].gear_ratio = 20000.0
     node.on_command(command(node, joint_1=0.5, joint_2=0.5))
     advance(node)
     assert node.rejected == 1
     assert_stopped(node)
-    node.map.drives[0].gear_ratio = 1.0
+    node.map.drives[0].gear_ratio = ratio
     valid = command(node, joint_1=0.5)
     node.on_enabled(Bool(data=True))
     node.on_command(valid)
@@ -301,10 +380,12 @@ def test_a_drive_that_stops_following_its_targets_stops_every_drive(node, monkey
     # The base accepts every move, but its encoder no longer turns.
     monkeypatch.setattr(base, 'step', lambda dt: [])
     behind = []
+    # The base motor turns 1.2 rad/s, whatever its reducer.
+    rate = 1.2 / node.map.drives[0].gear_ratio
     for tick in range(1, 100):
         node.on_enabled(Bool(data=True))
-        node.on_command(command(node, velocities={'joint_1': 1.2},
-                                joint_1=1.2 * tick * node.period))
+        node.on_command(command(node, velocities={'joint_1': rate},
+                                joint_1=rate * tick * node.period))
         advance(node)
         behind.append(node.behind[0])
         if not node.authorized:
