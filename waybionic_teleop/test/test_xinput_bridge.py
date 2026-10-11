@@ -81,6 +81,18 @@ def test_a_flood_of_rumble_requests_is_read_a_few_per_update(sockets):
     assert xinput_bridge.read_rumble(bridge, station.getsockname()) is None
 
 
+def test_only_the_ground_station_gets_its_ping_back(sockets):
+    bridge, station, stranger = sockets
+    ping = gamepad.pack_ping(5, 12.5)
+    for sock in (stranger, station):
+        sock.sendto(ping, bridge.getsockname())
+        assert select.select([bridge], [], [], 2.0)[0], 'the ping never arrived'
+        assert xinput_bridge.read_rumble(bridge, station.getsockname()) is None
+    assert select.select([station], [], [], 2.0)[0], 'the station got no pong'
+    assert gamepad.unpack_pong(station.recv(64)) == (5, 12.5)
+    assert not select.select([stranger], [], [], 0.2)[0], 'a stranger got a pong'
+
+
 class WindowsSocket:
     """Raise the errors Windows reports for an oversize datagram and an ICMP reply."""
 

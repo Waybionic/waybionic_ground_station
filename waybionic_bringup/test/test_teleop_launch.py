@@ -137,10 +137,17 @@ class TestTeleop(unittest.TestCase):
                 sequence += 1
                 sender.sendto(gamepad.pack(sequence, packet_axes, buttons), ('127.0.0.1', PORT))
                 rclpy.spin_once(node, timeout_sec=0.02)
-                try:
-                    rumbles.append(gamepad.unpack_rumble(sender.recv(64)))
-                except BlockingIOError:
-                    pass
+                while True:
+                    try:
+                        data, station = sender.recvfrom(64)
+                    except BlockingIOError:
+                        break
+                    # Answer the station's pings as the bridges do.
+                    answer = gamepad.pong(data)
+                    if answer is not None:
+                        sender.sendto(answer, station)
+                    else:
+                        rumbles.append(gamepad.unpack_rumble(data))
 
         def group():
             # Only a report sent after the last press counts.
@@ -174,6 +181,8 @@ class TestTeleop(unittest.TestCase):
             self.assertTrue(rumbles, 'the controller never rumbled')
             self.assertGreater(rumbles[0], 0.0)
             self.assertEqual(rumbles[-1], 0.0)
+            link = {value.key: value.value for value in diagnostics['controller.link'].values}
+            self.assertNotEqual(link['round_trip_ms'], '', 'the link was never timed')
         finally:
             hold(0.2, 'b')
             sender.close()

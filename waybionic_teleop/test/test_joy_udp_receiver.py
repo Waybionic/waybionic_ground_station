@@ -3,13 +3,14 @@
 import select
 import socket
 
+from diagnostic_msgs.msg import DiagnosticStatus
 import pytest
 import rclpy
 from rclpy.parameter import Parameter
 from sensor_msgs.msg import JoyFeedback
 
 from waybionic_teleop import gamepad
-from waybionic_teleop.joy_udp_receiver import JoyUdpReceiver
+from waybionic_teleop.joy_udp_receiver import JoyUdpReceiver, LinkQuality
 
 STICK = [0.5, -0.25, 0.0, 1.0, 0.0, -0.75]
 START = [int(name == 'start') for name in gamepad.BUTTONS]
@@ -109,3 +110,59 @@ def test_rumble_goes_back_to_the_bridge_until_its_link_times_out(receiver):
         assert not select.select([bridge], [], [], 0.2)[0], 'rumble sent over a timed-out link'
     finally:
         bridge.close()
+
+
+def test_link_quality_counts_loss_jitter_and_the_longest_gap():
+    link = LinkQuality()
+    for sequence, now in ((1, 0.000), (2, 0.004), (3, 0.008), (6, 0.020), (7, 0.024)):
+        link.arrived(sequence, now)
+    loss, jitter, gap = link.take()
+    # Packets 4 and 5 never came: 2 of 7.
+    assert loss == pytest.approx(2 / 7)
+    assert gap == pytest.approx(0.012)
+    # Intervals 4, 4, 12, 4 ms vary by 0, 8 and 8 ms.
+    assert jitter == pytest.approx(0.016 / 3)
+    assert link.take() == (0.0, 0.0, 0.0)
+    # A bridge that restarted counts from 1 again; that is not loss.
+    link.restart()
+    link.arrived(1, 5.0)
+    link.arrived(2, 5.004)
+    assert link.take()[0] == 0.0
+
+
+def test_the_bridge_times_the_link_and_lost_packets_make_it_warn(receiver, monkeypatch):
+    reports = []
+    monkeypatch.setattr(receiver.diagnostics_publisher, 'publish', reports.append)
+    bridge, stranger = (socket.socket(socket.AF_INET, socket.SOCK_DGRAM) for _ in range(2))
+
+    def deliver(sock, data):
+        sock.sendto(data, receiver.socket.getsockname())
+        assert select.select([receiver.socket], [], [], 2.0)[0], 'the packet never arrived'
+        receiver.poll()
+
+    def link():
+        receiver.report()
+        status = reports[-1].status[0]
+        return status, {value.key: value.value for value in status.values}
+
+    try:
+        for sequence in (1, 2, 3):
+            deliver(bridge, gamepad.pack(sequence, *NEUTRAL))
+        # Each report pings the bridge.
+        _, values = link()
+        assert values['round_trip_ms'] == ''
+        assert select.select([bridge], [], [], 2.0)[0], 'the ping never came'
+        ping = bridge.recv(64)
+        # Only the bridge's answer times the link.
+        deliver(stranger, gamepad.pong(ping))
+        assert receiver.round_trip is None
+        deliver(bridge, gamepad.pong(ping))
+        assert receiver.round_trip is not None
+        # Packets 4 to 9 never arrive.
+        deliver(bridge, gamepad.pack(10, *NEUTRAL))
+        status, values = link()
+        assert status.level == DiagnosticStatus.WARN and status.message.startswith('Unstable')
+        assert values['loss_percent'] == '85.7' and values['round_trip_ms'] != ''
+    finally:
+        bridge.close()
+        stranger.close()
