@@ -117,7 +117,7 @@ class XboxTeleop(Node):
         joints = {joint for group in self.config.groups for joint in group.joints}
         try:
             limits = joint_limits(message.data, joints)
-            # The collision boxes are the only thing keeping the arm off the table and out of
+            # The collision shapes are the only thing keeping the arm off the table and out of
             # its own base, so a description without them leaves teleop off rather than
             # running it unprotected.
             collision = ArmCollision.from_urdf(message.data, self.table_height, self.clearance,

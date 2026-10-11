@@ -417,11 +417,14 @@ identities, wiring, zeroing and electrical safety still need hardware verificati
 
 Every group stops a move before any part of the arm comes within 10 mm of the
 table or within 2 mm of the arm's own base and shoulder. The checks use a box
-around each CAD part, which you can see by ticking **Collision Enabled** on RViz's
-RobotModel display. Boxes are too coarse where the forearm folds back against the
-shoulder, so there the elbow follows a table of its limits against the shoulder
-angle, measured from the CAD 1 degree before the parts touch (`waybionic_fold` in
-the URDF).
+around each CAD part, or a cylinder where a part, or one side of it, is round
+about a joint axis, such as the base's lid, the tool mount and the lower half of
+the wrist's housing, so they fit those parts however the joints turn. You can see
+them by ticking **Collision Enabled** on RViz's RobotModel display. They are too
+coarse where the forearm folds against the shoulder or the base, so there the elbow
+follows tables of its limits against the shoulder angle, measured from the CAD
+1 degree before the parts touch (`waybionic_fold` in the URDF); the base's table
+holds at every yaw.
 The tool's box is a placeholder around the RViz jaws, which reach 30 mm past
 `tool_link`, until the real tool is modelled; a longer tool needs a longer box.
 When a move stops, the diagnostics panel names the part, for example
@@ -429,12 +432,13 @@ When a move stops, the diagnostics panel names the part, for example
 `table_height` in `waybionic_teleop/config/xbox_teleop.yaml` to the table's height
 above the bottom of the base. `collision_clearance` in the same file sets the 10 mm
 margin to the table, and `self_collision_clearance` the 2 mm margin to the base and
-shoulder. If the arm is already touching something, the only moves still allowed are
-the ones that back out of it: a move that presses any contact further in is
-refused, even if it would ease another contact at the same time.
+shoulder; the forearm's tables keep their 1 degree instead. If the arm is already
+touching something, the only moves still allowed are the ones that back out of it:
+a move that presses any contact further in is refused, even if it would ease
+another contact at the same time.
 
-The boxes are what makes any of this work. A `robot_description` without a
-collision box for the base, shoulder, upper arm, forearm, wrist, wrist roll or tool
+The collision shapes are what make any of this work. A `robot_description` without
+collision shapes for the base, shoulder, upper arm, forearm, wrist, wrist roll or tool
 leaves teleop disabled, and the diagnostics panel names the missing links.
 A description reload while teleop is enabled disables teleop and holds the arm where
 it is, and the drives stop on any `robot_description` change, so Start has to be

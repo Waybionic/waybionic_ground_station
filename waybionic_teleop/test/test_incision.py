@@ -179,7 +179,7 @@ def test_an_incision_move_into_the_table_is_refused_but_backing_out_is_not(
     run(teleop, 0.3)
     first = teleop.incision
     stopped = False
-    for _ in range(round(3.0 / DT)):
+    for _ in range(round(4.0 / DT)):
         before = dict(teleop.targets)
         teleop.update(*sample(**into), dict(teleop.targets), DT)
         assert check.hits(teleop.targets) == []

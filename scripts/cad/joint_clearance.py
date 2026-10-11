@@ -3,7 +3,7 @@
 
     python3 scripts/cad/joint_clearance.py build/cad/arm_export.json
 
-After a CAD change, copy the printed limits into JOINTS and ELBOW_FOLD in
+After a CAD change, copy the printed limits into JOINTS and ELBOW_FOLDS in
 build_arm_description.py and rebuild the URDF. This script needs numpy and
 scipy; the build script does not.
 
@@ -16,9 +16,11 @@ are press fits and are ignored. Gearbox internals are skipped: they are
 enclosed, and static CAD cannot model their eccentric motion. Base yaw and
 wrist roll turn round parts in round housings, so cabling sets their range.
 
-How far the elbow folds before the forearm meets the shoulder also depends on
-the shoulder angle, so that is tabulated against it. The collision boxes are
-too coarse for that pair, and the teleop collision check uses the table.
+How far the elbow folds before the forearm meets the shoulder or the base also
+depends on the shoulder angle, so that is tabulated against it. The base is
+round, so its gap is measured in distance from the yaw axis and height, which
+is the gap at the nearest yaw. The collision shapes are too coarse for these
+pairs, and the teleop collision check uses the tables.
 """
 
 import argparse
@@ -35,13 +37,18 @@ PENETRATION = 0.0005   # m inside another part that counts as a clash
 GROWTH = 0.00025       # m deeper than in the upright pose
 SEARCH = 0.004         # m
 NEIGHBOURS = 6
-CONTACT = 0.001        # m between forearm and shoulder samples that counts as touching
+CONTACT = 0.001        # m between forearm and shoulder or base samples that counts as touching
+FAR = 0.25             # m beyond which a fold's gap is only bounded
+SPARSE = 0.004         # m cells of the samples that find a fold's closest region
 MARGIN = 1.0           # degrees kept clear of contact
 INTERNAL = ('discs-sweep', 'disc-bearing', 'loose_disc', 'inner_bearing', 'shaft-sweep',
             'NEMA23SHAFT', 'outer_ball_bearing', 'outer-ring-bearing', 'bearing_brace',
             'updatednema23bearingbrace', 'top-sweep')
 PITCH_JOINTS = ('joint_2', 'joint_3', 'joint_4')
-FOLD = ('forearm_link', 'shoulder_link', 'joint_3', 'joint_2')
+# The link that folds, what it folds against, the joint tabulated, the joint across and its step
+# in degrees. The base's limit bends sharply near some shoulder angles, so it needs finer steps.
+FOLDS = (('forearm_link', 'shoulder_link', 'joint_3', 'joint_2', 5.0),
+         ('forearm_link', 'base_link', 'joint_3', 'joint_2', 2.5))
 
 spec = importlib.util.spec_from_file_location(
     'build_arm_description', Path(__file__).resolve().with_name('build_arm_description.py'))
@@ -123,6 +130,11 @@ class Arm:
 
     def cloud(self, link):
         return np.vstack([points for _, points, _, _ in self.parts[link]])
+
+
+def radial(points):
+    """Distance from the z axis and height, which base yaw leaves unchanged."""
+    return np.column_stack((np.hypot(points[:, 0], points[:, 1]), points[:, 2]))
 
 
 def inside(point, solids):
@@ -288,18 +300,44 @@ class Fold:
         self.robot, self.link, self.obstacle = robot, link, obstacle
         self.joint, self.across = joint, across
         self.points = robot.cloud(link)
-        self.tree = cKDTree(robot.cloud(obstacle))
+        # Base yaw turns the link about the base's z axis: compared in radial(), the gap is the
+        # one at the nearest yaw. There the base's samples crowd onto its profile, so keep one
+        # per 0.1 mm cell.
+        self.any_yaw = obstacle == 'base_link'
+        cloud = robot.cloud(obstacle)
+        if self.any_yaw:
+            cloud = np.unique(np.round(radial(cloud), 4), axis=0)
+        self.tree = cKDTree(cloud)
         axis = np.array(robot.joint(joint)['axis'])
         # No point of the link moves faster than this per radian of the joint.
         self.reach = float(np.linalg.norm(
             self.points - np.outer(self.points @ axis, axis), axis=1).max())
+        # One sample per SPARSE cell finds the closest region fast. Every sample is within
+        # self.cover of its sparse representative, so only those near the closest need checking.
+        cells = np.floor(self.points / SPARSE).astype(np.int64)
+        self.sparse = self.points[np.unique(cells, axis=0, return_index=True)[1]]
+        cover, self.representative = cKDTree(self.sparse).query(self.points, workers=-1)
+        self.cover = float(cover.max())
 
     def distance(self, across, angle):
+        """The gap, or a lower bound on it when it is beyond FAR."""
         poses = self.robot.poses({self.across: across, self.joint: angle})
         ro, oo = poses[self.obstacle]
         rl, ol = poses[self.link]
-        moved = self.points @ (ro.T @ rl).T + ro.T @ (ol - oo)
-        return float(self.tree.query(moved, distance_upper_bound=0.25, workers=-1)[0].min())
+        turn, shift = ro.T @ rl, ro.T @ (ol - oo)
+
+        def gaps(points):
+            moved = points @ turn.T + shift
+            if self.any_yaw:
+                moved = radial(moved)
+            return self.tree.query(moved, distance_upper_bound=FAR, workers=-1)[0]
+
+        sparse = gaps(self.sparse)
+        best = float(sparse.min())
+        if best >= FAR:
+            return FAR - self.cover
+        near = sparse[self.representative] < best + self.cover
+        return min(best, float(gaps(self.points[near]).min()), FAR - self.cover)
 
     def contact(self, across, sign):
         """Degrees the joint turns before contact, or None within half a turn."""
@@ -316,8 +354,6 @@ class Fold:
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('export', type=Path, help='JSON written by export_solidworks_assembly')
-    parser.add_argument('--fold-step', type=float, default=5.0,
-                        help='shoulder angle step of the elbow fold table in degrees')
     args = parser.parse_args()
     robot = Arm(args.export)
 
@@ -336,28 +372,33 @@ def main():
         upper, lower = (math.floor(angle - MARGIN) if angle is not None else 180 for angle in found)
         print(f'    limits ({-lower:.1f}, {upper:.1f})')
 
-    link, obstacle, joint, across = FOLD
-    fold = Fold(robot, link, obstacle, joint, across)
-    low, high = robot.joint(across)['limits']
-    print(f'Elbow fold against the shoulder, {MARGIN:.0f} degree short of contact:')
-    upper, lower = [], []
-    for index in range(int(round((high - low) / args.fold_step)) + 1):
-        shoulder = low + index * args.fold_step
-        values = []
-        for sign in (1, -1):
-            angle = fold.contact(math.radians(shoulder), sign)
-            values.append(sign * (math.floor((angle - MARGIN) * 10) / 10 if angle is not None
-                                  else 180.0))
-        upper.append(values[0])
-        lower.append(values[1])
-        print(f'  {across} {shoulder:+7.1f}: {joint} from {values[1]:+7.1f} to {values[0]:+7.1f}',
-              flush=True)
-    print('ELBOW_FOLD = (')
-    print(f'    {low:.1f}, {args.fold_step:.1f},')
-    for values in (upper, lower):
-        print(textwrap.fill(', '.join(f'{value:.1f}' for value in values) + '),', width=99,
-                            initial_indent='    (', subsequent_indent='     '))
-    print(')')
+    tables = {}
+    for link, obstacle, joint, across, step in FOLDS:
+        fold = Fold(robot, link, obstacle, joint, across)
+        low, high = robot.joint(across)['limits']
+        print(f'Elbow fold against {obstacle}, {MARGIN:.0f} degree short of contact:')
+        upper, lower = [], []
+        for index in range(int(round((high - low) / step)) + 1):
+            shoulder = low + index * step
+            values = []
+            for sign in (1, -1):
+                angle = fold.contact(math.radians(shoulder), sign)
+                values.append(sign * (math.floor((angle - MARGIN) * 10) / 10 if angle is not None
+                                      else 180.0))
+            upper.append(values[0])
+            lower.append(values[1])
+            print(f'  {across} {shoulder:+7.1f}: {joint} from {values[1]:+7.1f} to '
+                  f'{values[0]:+7.1f}', flush=True)
+        tables[obstacle] = (low, step, upper, lower)
+    print('ELBOW_FOLDS = {')
+    for obstacle, (low, step, upper, lower) in tables.items():
+        print(f"    '{obstacle}': (")
+        print(f'        {low:.1f}, {step:.1f},')
+        for values in (upper, lower):
+            print(textwrap.fill(', '.join(f'{value:.1f}' for value in values) + '),', width=99,
+                                initial_indent='        (', subsequent_indent='         '))
+        print('    ),')
+    print('}')
 
 
 if __name__ == '__main__':

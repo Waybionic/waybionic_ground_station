@@ -1,4 +1,4 @@
-"""The arm's collision boxes keep its links off the table and out of its own base."""
+"""The arm's collision shapes keep its links off the table and out of its own base."""
 
 import math
 from pathlib import Path
@@ -6,7 +6,7 @@ import re
 
 import pytest
 
-from waybionic_teleop.collision import _intrusion, _overlap, _rotation, ArmCollision
+from waybionic_teleop.collision import _intrusion, _rotation, ArmCollision
 from waybionic_teleop.gamepad import AXES, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
@@ -64,6 +64,33 @@ def test_the_fold_limit_follows_the_shoulder_angle():
         assert 'forearm_link: shoulder_link' in away.hits(pose(sign * 90, sign * 133, 0))
 
 
+@pytest.mark.parametrize('yaw', [0.0, math.radians(45)])
+def test_the_forearm_folds_onto_the_base_until_just_before_its_parts_touch(yaw):
+    # With the table out of the way, the CAD parts touch at these elbow angles at either yaw.
+    away = ArmCollision.from_urdf(URDF, table_z=-10.0)
+    for shoulder, touch in ((45, 130.2), (90, 97.2)):
+        assert away.hits(pose(shoulder, touch - 1.4, 0, yaw)) == []
+        assert 'forearm_link: base_link' in away.hits(pose(shoulder, touch + 0.3, 0, yaw))
+    # Folded back to the shoulder's limit, the forearm clears the base with the elbow bent up;
+    # bent down, it touches the base at -11 degrees.
+    for elbow in (60, 90, -9.5):
+        assert away.hits(pose(-135, elbow, 0, yaw)) == []
+    assert away.hits(pose(-135, -11.5, 0, yaw)) == ['forearm_link: base_link']
+
+
+@pytest.mark.parametrize('yaw', [0.0, math.radians(45)])
+def test_the_wrist_and_tool_stop_just_before_their_parts_touch_the_base(yaw):
+    # With the table out of the way, the CAD parts come within 1 mm of the base at these elbow
+    # angles at either yaw: the tool mount, the tool and the wrist's differential housing. The
+    # 2 mm clearance stops the elbow up to 1.3 degrees before them.
+    away = ArmCollision.from_urdf(URDF, table_z=-10.0)
+    for shoulder, wrist, touch, link in ((45, 60, 120.5, 'wrist_roll_link'),
+                                         (30, 90, 122.85, 'tool_link'),
+                                         (60, 45, 118.95, 'wrist_pitch_link')):
+        assert away.hits(pose(shoulder, touch - 1.3, wrist, yaw)) == []
+        assert f'{link}: base_link' in away.hits(pose(shoulder, touch + 0.3, wrist, yaw))
+
+
 @pytest.mark.parametrize('old, new', [
     ('across="joint_2"', 'across="joint_9"'), ('start="-135"', 'start="nan"'),
     ('step="5"', 'step="0"'), ('upper="147.3 ', 'upper="'), ('lower="-122.7', 'lower="inf'),
@@ -83,11 +110,11 @@ def test_table_height_and_clearance_are_configurable():
 
 
 def test_the_base_and_shoulder_have_their_own_smaller_clearance():
-    # The elbow bend is between 2 and 10 mm from the base's lid here.
-    joints = pose(-127, 60, 0, math.radians(5))
+    # The tool is between 2 and 10 mm from the base's lid here.
+    joints = pose(30, 121.5, 90, math.radians(45))
     assert ArmCollision.from_urdf(URDF).hits(joints) == []
     assert ArmCollision.from_urdf(URDF, self_clearance=0.01).hits(joints) == [
-        'forearm_link: base_link']
+        'tool_link: base_link']
 
 
 def test_a_urdf_without_collision_boxes_is_refused():
@@ -181,57 +208,92 @@ def test_teleop_refuses_a_step_that_presses_one_contact_deeper(parameters, check
     teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
                        LIMITS, ArmKinematics.from_urdf(URDF), check)
     # Folded flat onto the table. Lifting the elbow from here eases five of the six contacts
-    # by more than it costs, so a total would call it an escape, but the forearm itself is
-    # pressed about 3 mm further into the table.
-    start = pose(90, 90, 5)
-    before, after = check.check(start), check.check(pose(90, 85, 5))
+    # by more than it costs, so a total would call it an escape, but the tool itself is
+    # pressed more than 1 mm further into the table.
+    start = pose(90, 85, 40)
+    before, after = check.check(start), check.check(pose(90, 80, 40))
     assert set(after) == set(before) and sum(after.values()) < sum(before.values())
-    assert after['forearm_link: table'] > before['forearm_link: table'] + 0.002
+    assert after['tool_link: table'] > before['tool_link: table'] + 0.001
     for button in ('start', 'y'):
         teleop.update(*sample(button), start, DT)
         teleop.update(*sample(), start, DT)
     for _ in range(round(0.5 / DT)):
         teleop.update(*sample(left_y=-1.0), dict(teleop.targets), DT)
     assert teleop.targets['joint_3'] == start['joint_3']
-    assert teleop.blocked == ['forearm_link: table']
+    assert teleop.blocked == ['tool_link: table']
 
 
 def test_the_intrusion_is_the_volume_inside_the_grown_obstacle():
     square = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
-    obstacle = ((0.0, 0.0, 0.0), square, (0.1, 0.1, 0.1))
+    obstacle = ((0.0, 0.0, 0.0), square, (0.1, 0.1, 0.1), None)
     # 30 mm into one face of the obstacle grown by 10 mm, and flush with three others.
-    side = ((0.13, 0.0, 0.01), square, (0.05, 0.11, 0.1))
+    side = ((0.13, 0.0, 0.01), square, (0.05, 0.11, 0.1), None)
     assert _intrusion(side, obstacle, 0.01) == pytest.approx(0.03 * 0.22 * 0.2)
     turn = _rotation((0.0, 0.0, 1.0), 0.3)
-    inside = ((0.0, 0.02, 0.0), tuple(zip(*turn)), (0.01, 0.02, 0.03))
+    inside = ((0.0, 0.02, 0.0), tuple(zip(*turn)), (0.01, 0.02, 0.03), None)
     assert _intrusion(inside, obstacle, 0.01) == pytest.approx(8 * 0.01 * 0.02 * 0.03)
-    assert _intrusion(((0.5, 0.0, 0.0), square, (0.1, 0.1, 0.1)), obstacle, 0.01) == 0.0
+    assert _intrusion(((0.5, 0.0, 0.0), square, (0.1, 0.1, 0.1), None), obstacle, 0.01) == 0.0
 
 
-def test_teleop_refuses_to_slide_the_forearm_further_into_the_side_of_the_base(
-        parameters, check):
+@pytest.mark.parametrize('start, contact', [
+    (pose(45, 129.5, 0), 'forearm_link: base_link'),
+    (pose(45, 121.0, 60), 'wrist_roll_link: base_link'),
+])
+def test_teleop_never_presses_the_arm_further_into_the_base(parameters, start, contact):
+    away = ArmCollision.from_urdf(URDF, table_z=-10.0)
     teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
-                       LIMITS, ArmKinematics.from_urdf(URDF), check)
-    # Folded back with the shoulder near its limit, the elbow bend reaches into the base's lid.
-    # Turning the base towards zero slides it further in, while its smallest separating-axis
-    # overlap shrinks.
-    start, turned = pose(-130, 60, 0, math.radians(5)), pose(-130, 60, 0, math.radians(4.5))
-    assert check.hits(start) == check.hits(turned) == ['forearm_link: base_link']
-    assert separating_axis_depth(check, turned) < separating_axis_depth(check, start)
-    assert (check.check(turned)['forearm_link: base_link']
-            > check.check(start)['forearm_link: base_link'])
+                       LIMITS, ArmKinematics.from_urdf(URDF), away)
+    # Past the forearm's table, or with the tool mount in the base's round housing.
+    assert away.hits(start) == [contact]
     teleop.update(*sample('start'), start, DT)
     teleop.update(*sample(), start, DT)
-    for _ in range(round(0.5 / DT)):
-        teleop.update(*sample(left_x=-1.0), dict(teleop.targets), DT)
-    assert teleop.targets['joint_1'] == start['joint_1']
-    assert teleop.blocked == ['forearm_link: base_link']
-    # Raising the shoulder backs it out.
+    # The base is round, so turning it slides the arm round the base without pressing in.
+    for _ in range(round(0.25 / DT)):
+        teleop.update(*sample(left_x=1.0), dict(teleop.targets), DT)
+    assert teleop.targets['joint_1'] > start['joint_1'] + 0.05
+    assert away.check(teleop.targets)[contact] == pytest.approx(away.check(start)[contact])
+    teleop.update(*sample('y'), dict(teleop.targets), DT)
+    teleop.update(*sample(), dict(teleop.targets), DT)
+    assert teleop.active_group.name == 'upper'
+    before = dict(teleop.targets)
+    # Left stick up bends the elbow further in, which is refused.
     for _ in range(round(0.5 / DT)):
         teleop.update(*sample(left_y=1.0), dict(teleop.targets), DT)
-    assert teleop.targets['joint_2'] > start['joint_2'] + 0.1
-    assert (check.check(teleop.targets).get('forearm_link: base_link', 0.0)
-            < check.check(start)['forearm_link: base_link'])
+    assert teleop.targets['joint_3'] == before['joint_3']
+    assert contact in teleop.blocked
+    for _ in range(round(0.5 / DT)):
+        teleop.update(*sample(left_y=-1.0), dict(teleop.targets), DT)
+    assert teleop.targets['joint_3'] < before['joint_3'] - 0.05
+    assert away.check(teleop.targets).get(contact, 0.0) < away.check(before)[contact]
+
+
+def test_a_cylinder_counts_as_a_prism_turned_to_face_the_other_shape():
+    square = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+    cylinder = ((0.0, 0.0, 0.0), square, (0.1, 0.1, 0.05), 0.1)
+    # 20 mm into the side of the cylinder grown by 10 mm, square on to it, at any turn.
+    for angle in (0.0, 0.3, 1.0, 2.5):
+        turn = _rotation((0.0, 0.0, 1.0), angle)
+        side = ((0.13 * math.cos(angle), 0.13 * math.sin(angle), 0.0), tuple(zip(*turn)),
+                (0.04, 0.01, 0.01), None)
+        assert _intrusion(side, cylinder, 0.01) == pytest.approx(0.02 * 0.02 * 0.02)
+    deeper = ((0.12, 0.0, 0.0), square, (0.04, 0.01, 0.01), None)
+    assert _intrusion(deeper, cylinder, 0.01) == pytest.approx(0.03 * 0.02 * 0.02)
+    inside = ((0.0, 0.03, 0.0), square, (0.01, 0.02, 0.03), None)
+    assert _intrusion(inside, cylinder, 0.01) == pytest.approx(8 * 0.01 * 0.02 * 0.03)
+    for clear in ((0.2, 0.0, 0.0), (0.0, 0.0, 0.1)):
+        assert _intrusion((clear, square, (0.03, 0.03, 0.03), None), cylinder, 0.01) == 0.0
+    # A disc pressed into a box or a cylinder: spinning it about its own axis changes nothing,
+    # and pressing it further in adds to the volume.
+    box = ((0.0, 0.0, 0.0), square, (0.1, 0.1, 0.05), None)
+    for obstacle in (box, cylinder):
+        disc = ((0.125, 0.0, 0.0), square, (0.02, 0.02, 0.01), 0.02)
+        pressed = _intrusion(disc, obstacle, 0.01)
+        assert pressed > 0.0
+        for angle in (0.4, 1.3):
+            spun = (disc[0], tuple(zip(*_rotation((0.0, 0.0, 1.0), angle))), disc[2], disc[3])
+            assert _intrusion(spun, obstacle, 0.01) == pytest.approx(pressed)
+        further = ((0.12, 0.0, 0.0), square, disc[2], disc[3])
+        assert _intrusion(further, obstacle, 0.01) > pressed
 
 
 def test_the_check_reports_a_depth_for_every_collision_it_names(check):
@@ -244,14 +306,6 @@ def test_the_check_reports_a_depth_for_every_collision_it_names(check):
 
 def sample(*pressed, **axes):
     return [axes.get(name, 0.0) for name in AXES], [int(name in pressed) for name in BUTTONS]
-
-
-def separating_axis_depth(check, joints):
-    """Return the deepest overlap of a forearm part with the base across the separating axes."""
-    poses = check.poses(joints)
-    return max(_overlap(box, obstacle, check.self_clearance)
-               for box in check.world_boxes(poses, 'forearm_link')
-               for obstacle in check.world_boxes(poses, 'base_link'))
 
 
 def jaw_bottom(check, joints):

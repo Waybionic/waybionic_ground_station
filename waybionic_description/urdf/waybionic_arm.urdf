@@ -3,8 +3,9 @@
      Do not edit by hand; re-export the SolidWorks assembly and re-run the script.
      Joint zero is the upright pose from the mechanical fk.py (links along +Z,
      pitch about +Y). Saved CAD pose in degrees joint_1=-8.93, joint_2=-8.78, joint_3=45.14, joint_4=5.08, joint_5=0.00.
-     Each pitch joint stops about 1 degree before two parts touch; one collision box
-     per part. Effort and velocity are placeholders for display. -->
+     Each pitch joint stops about 1 degree before two parts touch. Each part has a
+     collision box, or a cylinder where it is round about a joint axis, with a box for
+     any side of it that is not. Effort and velocity are placeholders for display. -->
 <robot name="waybionic_arm">
   <link name="base_link">
     <visual>
@@ -12,11 +13,11 @@
     </visual>
     <collision name="bottom-base-assembly-1/BaseHousingLid-Shahmeen-Aug8-1">
       <origin xyz="0 0 0.05" rpy="0 0 0"/>
-      <geometry><box size="0.2 0.2 0.02"/></geometry>
+      <geometry><cylinder radius="0.10019" length="0.02"/></geometry>
     </collision>
     <collision name="bottom-base-assembly-1/base-housing-Shahmeen-aug1-c-clamp-1">
       <origin xyz="0 0 0.0225" rpy="0 0 0"/>
-      <geometry><box size="0.2 0.2 0.045"/></geometry>
+      <geometry><cylinder radius="0.10026" length="0.045"/></geometry>
     </collision>
     <collision name="m3-20long-1">
       <origin xyz="0 0.0402 0.1134" rpy="0 0 0"/>
@@ -28,11 +29,11 @@
     </collision>
     <collision name="stepper-base-1/base-housing-1">
       <origin xyz="0 0 0.0875" rpy="0 0 0"/>
-      <geometry><box size="0.1 0.1 0.055"/></geometry>
+      <geometry><cylinder radius="0.05022" length="0.055"/></geometry>
     </collision>
     <collision name="stepper-base-1/stepper_base_sweep-1">
       <origin xyz="0 0 0.12125" rpy="0 0 0"/>
-      <geometry><box size="0.1 0.1 0.0125"/></geometry>
+      <geometry><cylinder radius="0.05022" length="0.0125"/></geometry>
     </collision>
     <collision name="sweep_gearbox_redone-1/disc-bearing-sweep-1">
       <origin xyz="0.0005 0.0005 0.1435" rpy="0 0 0"/>
@@ -44,15 +45,15 @@
     </collision>
     <collision name="sweep_gearbox_redone-1/outer_ball_bearing_sweep-1">
       <origin xyz="0 0 0.131" rpy="0 0 0"/>
-      <geometry><box size="0.052 0.052 0.007"/></geometry>
+      <geometry><cylinder radius="0.02623" length="0.007"/></geometry>
     </collision>
     <collision name="sweep_gearbox_redone-1/shaft-sweep-1">
       <origin xyz="0 0 0.142" rpy="0 0 0"/>
-      <geometry><box size="0.013 0.013 0.023"/></geometry>
+      <geometry><cylinder radius="0.00673" length="0.023"/></geometry>
     </collision>
     <collision name="sweep_gearbox_redone-1/top-sweep-1">
       <origin xyz="0 0 0.1515" rpy="0 0 0"/>
-      <geometry><box size="0.062 0.062 0.012"/></geometry>
+      <geometry><cylinder radius="0.03124" length="0.012"/></geometry>
     </collision>
   </link>
   <link name="shoulder_link">
@@ -60,44 +61,52 @@
       <geometry><mesh filename="package://waybionic_description/meshes/arm/shoulder_link.dae"/></geometry>
     </visual>
     <collision name="j2_nema23_gearbox-2/NEMA23SHAFTAUG29-1">
-      <origin xyz="0 0.1355 0.088" rpy="0 0 0"/>
-      <geometry><box size="0.02 0.037 0.021"/></geometry>
+      <origin xyz="0 0.1355 0.088" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.01069" length="0.037"/></geometry>
     </collision>
     <collision name="j2_nema23_gearbox-2/basebearingmountnema23-2">
-      <origin xyz="0 0.1105 0.08775" rpy="0 0 0"/>
-      <geometry><box size="0.105 0.01 0.1045"/></geometry>
+      <origin xyz="0 0.1105 0.088" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.05274" length="0.01"/></geometry>
     </collision>
     <collision name="j2_nema23_gearbox-2/loose_disc_neg_0.1mm-1">
-      <origin xyz="0.0006 0.1314 0.0882" rpy="0 0 0"/>
-      <geometry><box size="0.0636 0.0084 0.0636"/></geometry>
+      <origin xyz="0 0.1314 0.088" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.03204" length="0.0084"/></geometry>
+    </collision>
+    <collision name="j2_nema23_gearbox-2/loose_disc_neg_0.1mm-1">
+      <origin xyz="0.0006 0.1314 0.1056" rpy="0 0 0"/>
+      <geometry><box size="0.0636 0.0084 0.0288"/></geometry>
     </collision>
     <collision name="j2_nema23_gearbox-2/loose_disc_neg_0.1mm-2">
       <origin xyz="-0.0006 0.1404 0.0882" rpy="0 0 0"/>
       <geometry><box size="0.0636 0.0072 0.0636"/></geometry>
     </collision>
     <collision name="j2_nema23_gearbox-2/outer-ring-bearing-1">
-      <origin xyz="0 0.12 0.08825" rpy="0 0 0"/>
-      <geometry><box size="0.072 0.009 0.0715"/></geometry>
+      <origin xyz="0 0.12 0.088" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.03624" length="0.009"/></geometry>
     </collision>
     <collision name="j2_nema23_gearbox-2/updatednema23bearingbraceaug29-1">
-      <origin xyz="0 0.1215 0.088" rpy="0 0 0"/>
-      <geometry><box size="0.056 0.012 0.056"/></geometry>
+      <origin xyz="0 0.1215 0.088" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.0282" length="0.012"/></geometry>
     </collision>
     <collision name="nema23_w_shoulder-1/23HS32-4004S-1">
       <origin xyz="0 0.069 0.094" rpy="0 0 0"/>
       <geometry><box size="0.056 0.103 0.068"/></geometry>
     </collision>
     <collision name="nema23_w_shoulder-1/basebearingmountnema23-1">
-      <origin xyz="0 0.1005 0.08775" rpy="0 0 0"/>
-      <geometry><box size="0.105 0.01 0.1045"/></geometry>
+      <origin xyz="0 0.1005 0.088" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.05274" length="0.01"/></geometry>
     </collision>
     <collision name="nema23_w_shoulder-1/j1shoulder-nema23_wMount-1">
-      <origin xyz="0 0.02525 0.0805" rpy="0 0 0"/>
-      <geometry><box size="0.105 0.1405 0.12"/></geometry>
+      <origin xyz="0 0.02692 0.088" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.053" length="0.13717"/></geometry>
+    </collision>
+    <collision name="nema23_w_shoulder-1/j1shoulder-nema23_wMount-1">
+      <origin xyz="0 0.02525 0.04025" rpy="0 0 0"/>
+      <geometry><box size="0.09 0.1405 0.0395"/></geometry>
     </collision>
     <collision name="outer_ring_sweep_loose-1">
       <origin xyz="0 0 0.01625" rpy="0 0 0"/>
-      <geometry><box size="0.08 0.08 0.0325"/></geometry>
+      <geometry><cylinder radius="0.04011" length="0.0325"/></geometry>
     </collision>
   </link>
   <link name="upper_arm_link">
@@ -109,36 +118,44 @@
       <geometry><box size="0.048 0.0635 0.042"/></geometry>
     </collision>
     <collision name="bottom-j2-nema23-v2_wHole-1">
-      <origin xyz="0 0.09125 0.02125" rpy="0 0 0"/>
-      <geometry><box size="0.105 0.1175 0.1475"/></geometry>
+      <origin xyz="0 0.09023 0" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.05315" length="0.11546"/></geometry>
+    </collision>
+    <collision name="bottom-j2-nema23-v2_wHole-1">
+      <origin xyz="0 0.09125 0.065" rpy="0 0 0"/>
+      <geometry><box size="0.08 0.1175 0.06"/></geometry>
     </collision>
     <collision name="j2shouldersplit-1/topj2-1">
-      <origin xyz="0 0.08375 0.14375" rpy="0 0 0"/>
-      <geometry><box size="0.08 0.1325 0.1225"/></geometry>
+      <origin xyz="0 0.07768 0.165" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.0407" length="0.12036"/></geometry>
+    </collision>
+    <collision name="j2shouldersplit-1/topj2-1">
+      <origin xyz="0 0.08375 0.12" rpy="0 0 0"/>
+      <geometry><box size="0.08 0.1325 0.075"/></geometry>
     </collision>
     <collision name="outer-ring-Nema23-1">
-      <origin xyz="0 0.02125 0" rpy="0 0 0"/>
-      <geometry><box size="0.095 0.0425 0.095"/></geometry>
+      <origin xyz="0 0.02125 0" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.04754" length="0.0425"/></geometry>
     </collision>
     <collision name="stepper_j2_sweep-3">
-      <origin xyz="0 0.01125 0.165" rpy="0 0 0"/>
-      <geometry><box size="0.085 0.0125 0.085"/></geometry>
+      <origin xyz="0 0.01125 0.165" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.04279" length="0.0125"/></geometry>
     </collision>
     <collision name="sweep_gearbox_redone-3/discs-sweep-1">
       <origin xyz="0 -0.0078 0.1644" rpy="0 0 0"/>
       <geometry><box size="0.048 0.0108 0.048"/></geometry>
     </collision>
     <collision name="sweep_gearbox_redone-3/outer_ball_bearing_sweep-1">
-      <origin xyz="0 0.0015 0.165" rpy="0 0 0"/>
-      <geometry><box size="0.052 0.007 0.052"/></geometry>
+      <origin xyz="0 0.0015 0.165" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.02616" length="0.007"/></geometry>
     </collision>
     <collision name="sweep_gearbox_redone-3/shaft-sweep-1">
-      <origin xyz="0 -0.0095 0.165" rpy="0 0 0"/>
-      <geometry><box size="0.012 0.023 0.013"/></geometry>
+      <origin xyz="0 -0.0095 0.165" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.00696" length="0.023"/></geometry>
     </collision>
     <collision name="sweep_gearbox_redone-3/top-sweep-1">
-      <origin xyz="0 -0.019 0.165" rpy="0 0 0"/>
-      <geometry><box size="0.062 0.012 0.062"/></geometry>
+      <origin xyz="0 -0.019 0.165" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.03124" length="0.012"/></geometry>
     </collision>
   </link>
   <link name="forearm_link">
@@ -146,12 +163,20 @@
       <geometry><mesh filename="package://waybionic_description/meshes/arm/forearm_link.dae"/></geometry>
     </visual>
     <collision name="3rd_joint_bend-1">
-      <origin xyz="0 -0.07625 0.02425" rpy="0 0 0"/>
-      <geometry><box size="0.09 0.1135 0.1365"/></geometry>
+      <origin xyz="0 -0.07049 0" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.04472" length="0.10198"/></geometry>
+    </collision>
+    <collision name="3rd_joint_bend-1">
+      <origin xyz="0 -0.07625 0.05625" rpy="0 0 0"/>
+      <geometry><box size="0.09 0.1135 0.0725"/></geometry>
     </collision>
     <collision name="diff_assem_sep18-1/CapForDifferentialV3_Sep8-1">
-      <origin xyz="0 -0.088 0.276" rpy="0 0 0"/>
-      <geometry><box size="0.096 0.096 0.099"/></geometry>
+      <origin xyz="0 -0.088 0.2855" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.04038" length="0.096"/></geometry>
+    </collision>
+    <collision name="diff_assem_sep18-1/CapForDifferentialV3_Sep8-1">
+      <origin xyz="0 -0.088 0.25325" rpy="0 0 0"/>
+      <geometry><box size="0.096 0.096 0.0535"/></geometry>
     </collision>
     <collision name="diff_assem_sep18-1/GT2 x 6mm Pully 5mm Bore-pulley-2">
       <origin xyz="0 -0.039 0.1245" rpy="0 0 0"/>
@@ -166,8 +191,8 @@
       <geometry><box size="0.0144 0.0048 0.0048"/></geometry>
     </collision>
     <collision name="outer_ring_sweep_loose-2">
-      <origin xyz="0 -0.01625 0" rpy="0 0 0"/>
-      <geometry><box size="0.08 0.0325 0.08"/></geometry>
+      <origin xyz="0 -0.01625 0" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.04011" length="0.0325"/></geometry>
     </collision>
   </link>
   <link name="wrist_pitch_link">
@@ -175,8 +200,12 @@
       <geometry><mesh filename="package://waybionic_description/meshes/arm/wrist_pitch_link.dae"/></geometry>
     </visual>
     <collision name="DifferentialHousing-1">
-      <origin xyz="0 0 0.0015" rpy="0 0 0"/>
-      <geometry><box size="0.08 0.082 0.083"/></geometry>
+      <origin xyz="0 0 0" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.04026" length="0.082"/></geometry>
+    </collision>
+    <collision name="DifferentialHousing-1">
+      <origin xyz="0 0 0.0355" rpy="0 0 0"/>
+      <geometry><box size="0.06 0.082 0.015"/></geometry>
     </collision>
   </link>
   <link name="wrist_left_gear_link">
@@ -184,16 +213,20 @@
       <geometry><mesh filename="package://waybionic_description/meshes/arm/wrist_left_gear_link.dae"/></geometry>
     </visual>
     <collision name="BevelGearShaftV2-3">
-      <origin xyz="-0.00125 0.0425 0" rpy="0 0 0"/>
-      <geometry><box size="0.0175 0.045 0.015"/></geometry>
+      <origin xyz="0 0.0425 0" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.00769" length="0.045"/></geometry>
+    </collision>
+    <collision name="BevelGearShaftV2-3">
+      <origin xyz="-0.00825 0.0425 -0.0005" rpy="0 0 0"/>
+      <geometry><box size="0.0035 0.045 0.008"/></geometry>
     </collision>
     <collision name="GT2 60T b5 (6mm)-2">
-      <origin xyz="0 0.0555 0" rpy="0 0 0"/>
-      <geometry><box size="0.04 0.016 0.04"/></geometry>
+      <origin xyz="0 0.0555 0" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.0203" length="0.016"/></geometry>
     </collision>
     <collision name="straight bevel pinion_iso-4">
-      <origin xyz="0 0.02925 0" rpy="0 0 0"/>
-      <geometry><box size="0.053 0.0235 0.053"/></geometry>
+      <origin xyz="0 0.02925 0" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.02668" length="0.0235"/></geometry>
     </collision>
   </link>
   <link name="wrist_right_gear_link">
@@ -201,16 +234,20 @@
       <geometry><mesh filename="package://waybionic_description/meshes/arm/wrist_right_gear_link.dae"/></geometry>
     </visual>
     <collision name="BevelGearShaftV2-4">
-      <origin xyz="0 -0.0435 -0.00125" rpy="0 0 0"/>
-      <geometry><box size="0.014 0.045 0.0165"/></geometry>
+      <origin xyz="0 -0.0435 0" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.00743" length="0.045"/></geometry>
+    </collision>
+    <collision name="BevelGearShaftV2-4">
+      <origin xyz="0.00086 -0.0435 -0.00725" rpy="0 0 0"/>
+      <geometry><box size="0.01229 0.045 0.0045"/></geometry>
     </collision>
     <collision name="GT2 60T b5 (6mm)-1">
-      <origin xyz="0 -0.0565 0" rpy="0 0 0"/>
-      <geometry><box size="0.04 0.016 0.04"/></geometry>
+      <origin xyz="0 -0.0565 0" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.02016" length="0.016"/></geometry>
     </collision>
     <collision name="straight bevel pinion_iso-2">
-      <origin xyz="0 -0.03025 0" rpy="0 0 0"/>
-      <geometry><box size="0.053 0.0235 0.053"/></geometry>
+      <origin xyz="0 -0.03025 0" rpy="-1.570796 0 0"/>
+      <geometry><cylinder radius="0.02667" length="0.0235"/></geometry>
     </collision>
   </link>
   <link name="wrist_roll_link">
@@ -219,11 +256,11 @@
     </visual>
     <collision name="Biomed Lock Mechanism_V3_HT_20260815-1/BiomedRing_V3_HT_20260829-2">
       <origin xyz="0 0 0.0365" rpy="0 0 0"/>
-      <geometry><box size="0.06 0.06 0.049"/></geometry>
+      <geometry><cylinder radius="0.03021" length="0.049"/></geometry>
     </collision>
     <collision name="Biomed Lock Mechanism_V3_HT_20260815-1/Bridget - base V6-1">
-      <origin xyz="0 0.00025 0.07725" rpy="0 0 0"/>
-      <geometry><box size="0.07 0.0695 0.0325"/></geometry>
+      <origin xyz="0 0 0.07725" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.03523" length="0.0325"/></geometry>
     </collision>
   </link>
   <link name="tool_link">
@@ -294,10 +331,13 @@
     <child link="tool_link"/>
     <origin xyz="0 0 0.093369" rpy="0 0 0"/>
   </joint>
-  <!-- Elbow limits in degrees against the shoulder angle, 1 degree before the forearm
-       meets the shoulder, for shoulder angles from -135 in steps of 5.
-       The teleop collision check reads this; other URDF tools ignore it. -->
+  <!-- Elbow limits in degrees against the shoulder angle, from start every step degrees,
+       1 degree before the forearm meets the shoulder or, at any yaw, the base.
+       The teleop collision check reads these; other URDF tools ignore them. -->
   <waybionic_fold link="forearm_link" obstacle="shoulder_link" joint="joint_3" across="joint_2" start="-135" step="5"
       upper="147.3 147.4 147.4 147.5 147.6 147.6 147.6 147.6 147.6 147.7 147.7 147.7 147.7 147.7 147.7 147.7 147.7 147.7 147.7 147.7 147.7 147.7 147.7 147.6 147.6 147.6 147.6 147.5 147.5 147.4 147.4 147.3 147.2 147.1 147 146.3 144.8 143.3 141.6 139.9 138.1 136.4 134.7 133.1 131.7 130.2 128.9 127.6 126.5 125.6 124.8 124.3 121.9 121.9 122.6"
       lower="-122.7 -121.9 -121.8 -124.3 -124.8 -125.6 -126.5 -127.6 -128.8 -130.1 -131.6 -133.2 -134.7 -136.4 -138.1 -139.8 -141.6 -143.3 -144.8 -146.3 -147 -147.1 -147.2 -147.3 -147.4 -147.4 -147.5 -147.5 -147.5 -147.6 -147.6 -147.6 -147.6 -147.6 -147.7 -147.7 -147.7 -147.7 -147.7 -147.7 -147.7 -147.7 -147.7 -147.7 -147.7 -147.6 -147.6 -147.6 -147.6 -147.6 -147.5 -147.5 -147.5 -147.4 -147.3"/>
+  <waybionic_fold link="forearm_link" obstacle="base_link" joint="joint_3" across="joint_2" start="-135" step="2.5"
+      upper="172.7 176 178.5 180 180 180 180 180 180 180 180 180 180 180 180 180 180 180 180 180 180 180 180 180 180 180 180 180 180 180 180 180 180 178.7 178.1 177.4 176.5 175.5 174.6 173.6 172.7 171.8 170.8 169.9 168.8 167.8 166.9 165.9 164.9 164 163 162 161.1 160.1 159.1 158.1 156.7 155.3 154.3 152 149.6 147.4 145.4 143.4 141.6 139.9 138.2 136.6 135 133.5 132 130.5 128.9 127.5 125.9 124.3 121.7 120.1 118.4 116.8 115 113.2 111.3 109.3 107.2 105.1 103 100.9 98.8 96.5 95.9 93.7 91.2 88.8 86.2 83.5 80.8 77.9 74.9 71.7 68.3 64 59.4 54.3 49.1 43.9 35.8 24.6 9.9"
+      lower="-9.9 -24.5 -35.8 -43.8 -49.1 -54.3 -59.4 -64 -68.3 -71.7 -74.9 -77.9 -80.8 -83.5 -86.2 -88.8 -91.2 -93.6 -95.9 -96.5 -98.8 -100.9 -103 -105.1 -107.3 -109.3 -111.3 -113.2 -115 -116.8 -118.4 -120.1 -121.7 -124.3 -125.9 -127.4 -128.9 -130.5 -132 -133.5 -135 -136.6 -138.2 -139.9 -141.6 -143.4 -145.4 -147.4 -149.6 -152.1 -154.3 -155.3 -156.7 -158.1 -159.1 -160.1 -161 -162 -163 -164 -164.9 -165.9 -166.9 -167.9 -168.8 -169.8 -170.7 -171.8 -172.7 -173.6 -174.6 -175.5 -176.5 -177.4 -178.1 -178.8 -180 -180 -180 -180 -180 -180 -180 -180 -180 -180 -180 -180 -180 -180 -180 -180 -180 -180 -180 -180 -180 -180 -180 -180 -180 -180 -180 -180 -180 -180 -178.5 -176 -172.7"/>
 </robot>
