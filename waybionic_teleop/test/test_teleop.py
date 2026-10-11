@@ -350,6 +350,7 @@ def test_invalid_motion_config_cannot_start(params, change):
 @pytest.mark.parametrize('field, value', [
     ('max_speed', -1.0), ('max_accel', -1.0), ('home_gain', math.nan), ('tool_speed', 0.0),
     ('speed_levels', [0.5, 2.0]), ('period', -0.01),
+    ('keep_in', ((-0.5, -0.5, 0.05), (0.5, 0.5, 0.05))),
 ])
 def test_teleop_refuses_a_config_with_unusable_motion_limits(params, field, value):
     config = config_from_parameters(params)
