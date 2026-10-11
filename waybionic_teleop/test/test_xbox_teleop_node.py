@@ -10,7 +10,7 @@ from rclpy.parameter import Parameter
 from sensor_msgs.msg import JointState, Joy
 from std_msgs.msg import Bool, Float32, String
 
-from waybionic_teleop import xbox_teleop_node
+from waybionic_teleop import mks_can, xbox_teleop_node
 from waybionic_teleop.gamepad import AXES, BUTTONS
 from waybionic_teleop.sim_arm_drives_node import SimArmDrives
 from waybionic_teleop.xbox_teleop_node import XboxTeleop
@@ -231,6 +231,66 @@ def test_rviz_label_shows_safety_and_provisional_voltage(node):
     summary = node.summary(False, time.monotonic())
     assert 'ESTOP-STALE' in summary
     assert 'SUPPLY-STALE' in summary
+
+
+def test_an_emergency_stop_disarms_the_drives_until_a_fresh_start(node, monkeypatch, parameters):
+    drives = SimArmDrives(context=node.context, parameter_overrides=[
+        Parameter(name, value=value)
+        for name, value in parameters('arm_drives.yaml', 'sim_arm_drives').items()])
+    monkeypatch.setattr(node.enable_publisher, 'publish', drives.on_enabled)
+    try:
+        drives.last_tick = time.monotonic() - drives.period
+        drives.tick()
+        drives.on_description(String(data=URDF))
+        ready(node)
+        assert drives.authorized
+        node.on_emergency_stop(Bool(data=True))
+        assert not drives.authorized and drives.stop_reason == 'Teleop disabled'
+        assert drives.last_command == [
+            mks_can.hex_frame(drive.can_id, mks_can.stop(drive.can_id, 0))
+            for drive in drives.map.drives]
+        tick(node)
+        tick(node, 'start')
+        assert not drives.authorized
+        node.on_emergency_stop(Bool(data=False))
+        tick(node, 'start')
+        assert not drives.authorized
+        tick(node)
+        tick(node, 'start')
+        assert drives.authorized
+    finally:
+        drives.destroy_node()
+
+
+def test_an_emergency_stop_ends_a_rumble_and_shows_on_the_label(node, monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(xbox_teleop_node, 'time', clock)
+    rumbles, labels = [], []
+    monkeypatch.setattr(node.feedback_publisher, 'publish',
+                        lambda message: rumbles.append(message.intensity))
+    monkeypatch.setattr(node.marker_publisher, 'publish', lambda message: labels.extend(
+        marker.text for marker in message.markers if marker.ns == 'status'))
+    node.load(String(data=URDF))
+    pose = dict.fromkeys(node.teleop.limits, 0.1)
+    pose['joint_3'] = node.teleop.limits['joint_3'][1]
+    node.last_tick, period = clock.now, node.config.period
+
+    def step(*pressed, **axes):
+        clock.now += period
+        node.on_joint_states(JointState(name=list(pose), position=list(pose.values())))
+        node.on_joy(joy(*pressed, **axes))
+        node.tick()
+
+    step()
+    step('start')
+    # The elbow is at its limit, so pushing it rumbles the controller.
+    step(right_y=1.0)
+    assert rumbles == [pytest.approx(xbox_teleop_node.RUMBLE_INTENSITY)]
+    node.on_emergency_stop(Bool(data=True))
+    for _ in range(round(xbox_teleop_node.RUMBLE_S / period) + 3):
+        step()
+    assert rumbles[-1] == 0.0
+    assert 'ESTOP-PRESSED' in labels[-1]
 
 
 def test_bad_description_and_mismatched_joint_map_fail_closed(node):

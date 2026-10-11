@@ -247,12 +247,12 @@ class XboxTeleop(Node):
                 self.teleop.note, self.teleop.warning = safety_block, True
             self.teleop.held = self.current_held_buttons(fresh)
             self.publish_enabled(False)
-            return
-        axes, buttons = (self.joy.axes, self.joy.buttons) if fresh else ((), ())
-        updated = self.teleop.update(axes, buttons, self.recent_measurement(now), dt)
-        self.publish_enabled(self.teleop.enabled and fresh)
-        if updated:
-            self.publish_command()
+        else:
+            axes, buttons = (self.joy.axes, self.joy.buttons) if fresh else ((), ())
+            updated = self.teleop.update(axes, buttons, self.recent_measurement(now), dt)
+            self.publish_enabled(self.teleop.enabled and fresh)
+            if updated:
+                self.publish_command()
         self.feel_limits(now)
         if self.ticks % 3 == 0:
             self.publish_markers(fresh)
