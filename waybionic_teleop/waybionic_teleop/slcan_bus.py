@@ -56,8 +56,7 @@ class SlcanBus:
         self.frames = self.bits = self.errors = self.refused = self.reopens = 0
         self.problem = ''
         self.outgoing, self.incoming, self.replies = bytearray(), bytearray(), deque()
-        # The lines in outgoing, then the lines written but not yet answered, in order: a
-        # frame's (can_id, data), or the command itself.
+        # Lines queued, then written but unanswered: a frame's (can_id, data) or a command.
         self.queued, self.pending = [], deque(maxlen=MAX_PENDING)
         self.refusals, self.bell = [], False
         self.heard = self.next_try = 0.0

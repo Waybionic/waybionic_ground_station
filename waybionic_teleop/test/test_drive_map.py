@@ -46,8 +46,7 @@ def test_gear_ratio_scales_counts_and_speed():
 def test_a_setpoint_that_jumped_ahead_is_chased_near_the_commanded_speed(arm_map):
     period = 1.0 / 120.0
     rates = {'joint_1': math.radians(60.0), 'joint_4': 0.5, 'joint_5': 0.2}
-    # A 100 ms host stall leaves the base setpoint 6 degrees ahead of its drive, which the
-    # 26:1 reducer makes more than the drive's top speed covers in one period.
+    # A 100 ms host stall leaves the base setpoint 6 degrees ahead: 3120 rpm for one period.
     ahead = {joint: rates.get(joint, 0.0) * 0.1 for joint in arm_map.joints}
     counts = arm_map.to_counts(dict.fromkeys(arm_map.joints, 0.0))
     top = mks_can.MAX_SPEED_RPM

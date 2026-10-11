@@ -85,8 +85,7 @@ def test_a_refusal_is_matched_to_the_frame_it_answers(bus, ports):
     for frame in frames:
         bus.send(*frame)
     assert bus.receive() is None
-    # C, S8 and O, then the first frame is taken and the second refused, with a drive's reply
-    # in between.
+    # C, S8, O; frame 1 taken; frame 2 refused, a drive's reply in between; frame 3 taken.
     ports[0].inbox += b'\r\r\r\r\at00183100000000000032\r\r\r'
     assert bus.receive() == (1, bytes.fromhex('3100000000000032'))
     assert bus.take_refused() == [frames[1]] and bus.take_refused() == []

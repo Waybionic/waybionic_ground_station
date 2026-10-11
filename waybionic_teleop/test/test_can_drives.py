@@ -34,9 +34,7 @@ URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
         / 'waybionic_arm.urdf').read_text(encoding='utf-8')
 # The arm's drives without the placeholder tool, whose joint has no URDF limit yet.
 ARM_DRIVES = ['base_yaw', 'shoulder', 'elbow', 'wrist_left', 'wrist_right']
-# Teleop keeps its setpoints a tick ahead of the drives. A target sent once and left must stay
-# within following_error_counts of the base's encoder (3390 of 4096 counts through its 26:1
-# reducer), or the drives stop it as a drive that stopped following.
+# A target sent once must stay within following_error_counts: 3390 of 4096 counts at 26:1.
 NEAR_TARGET = 0.05
 
 
@@ -372,8 +370,7 @@ def test_the_host_drives_the_arm_through_the_carrier(make_node, carrier_port, mo
     assert node.authorized, node.stop_reason
     assert move(node, executor, joint_1=0.3)
 
-    # Pressed mid-move, the e-stop stops every drive where it is, and Start waits for its
-    # release.
+    # Pressed mid-move, the e-stop stops every drive, and Start waits for its release.
     def pressed_mid_move():
         toward(node, joint_1=1.0)
         if positions(node)['joint_1'] > 0.5:
@@ -391,8 +388,7 @@ def test_the_host_drives_the_arm_through_the_carrier(make_node, carrier_port, mo
     press_start(node)
     assert node.authorized, node.stop_reason
 
-    # Unplugged, the drives fall silent, which stops the arm until it is zeroed again; the
-    # carrier is reopened once it is back.
+    # Unplugged, the drives fall silent and stop the arm; the carrier reopens once it is back.
     port.unplugged = True
     assert spin_until(executor, lambda: all(node.lost))
     assert not node.authorized and not any(node.zeroed)
@@ -409,8 +405,7 @@ def test_frames_the_carrier_refuses_go_out_again(make_node, carrier_port, monkey
     seen = set()
 
     def busy(can_id, data):
-        # Refuse every move, stop and zero the first time, as a carrier with a busy CAN
-        # controller would; resent, it goes out.
+        # A busy carrier refuses each move, stop and zero once; sent again, it goes out.
         if data[0] not in (mks_can.ABSOLUTE_AXIS, mks_can.SET_ZERO) or (can_id, data) in seen:
             return False
         seen.add((can_id, data))
@@ -426,8 +421,7 @@ def test_frames_the_carrier_refuses_go_out_again(make_node, carrier_port, monkey
     assert spin_until(executor, lambda: node.commanded is not None and not node.stopping)
     press_start(node)
     assert node.authorized, node.stop_reason
-    # A target is sent again only after its refusal, so without the resend the drives would
-    # never move.
+    # Every target is refused once, so the drives move only if refused ones go out again.
     assert move(node, executor, joint_1=0.3, joint_4=0.2)
     assert node.authorized, node.stop_reason
     node.report()
