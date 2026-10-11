@@ -31,8 +31,10 @@ BOOLEAN_OPTIONS = {
     'start_temporary_diagnostics_publisher': 'false',
     'demo_mode': 'false',
     'teleop': 'false',
+    'autoplay': 'false',
     'follow_camera': 'true',
     'use_sim_time': 'false',
+    'camera': 'false',
 }
 
 
@@ -178,7 +180,7 @@ def generate_launch_description():
         description='Controller input: device (local joystick), udp (host bridge) or none')
 
     autoplay_arg = DeclareLaunchArgument(
-        'autoplay', default_value='false',
+        'autoplay', default_value='false', choices=BOOLEAN_CHOICES,
         description='Play a scripted demo whenever the controller is left idle '
                     '(teleop with simulated drives only)')
 
@@ -199,7 +201,7 @@ def generate_launch_description():
         description='Use simulation time')
 
     camera_arg = DeclareLaunchArgument(
-        'camera', default_value='false',
+        'camera', default_value='false', choices=BOOLEAN_CHOICES,
         description='Show the doctor view sent by camera_bridge and report its delay')
 
     camera_bind_arg = DeclareLaunchArgument(

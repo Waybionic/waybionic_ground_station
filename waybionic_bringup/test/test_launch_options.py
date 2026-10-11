@@ -27,6 +27,7 @@ def context():
         'rvizconfig': str(ROOT / 'rviz/waybionic_unified.rviz'),
         'diagnostics_topic': '/diagnostics',
         'joy_source': 'none',
+        'drive_interface': 'sim',
     })
     return result
 
@@ -61,7 +62,8 @@ def test_carried_over_options_and_arm_default():
     args = declarations()
     for name in (
         'demo_mode', 'demo_speed', 'teleop', 'joy_source', 'joy_udp_bind',
-        'joy_udp_port', 'follow_camera', 'use_diagnostics',
+        'joy_udp_port', 'follow_camera', 'use_diagnostics', 'drive_interface',
+        'drive_channel', 'autoplay', 'camera', 'camera_bind', 'camera_log',
     ):
         assert name in args
     assert args['model'].default_value[0].text.endswith('waybionic_arm.urdf')
