@@ -12,6 +12,7 @@ import socket
 import time
 
 from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS, pack
+from waybionic_teleop.xinput_bridge import read_rumble, RUMBLE_S
 
 
 BUTTON_NAMES = {
@@ -68,6 +69,16 @@ class SDLBridge:
             self.controller.quit()
             self.controller = None
         self.ready = False
+
+    def rumble(self, intensity):
+        """Rumble the open controller like the Xbox bridge; zero stops it."""
+        if self.controller is None:
+            return
+        if intensity > 0:
+            self.controller.rumble(intensity, intensity,
+                                   round(RUMBLE_S * 1000))
+        else:
+            self.controller.stop_rumble()
 
     def poll(self, now):
         """Return axes, buttons, connection state, and a status message."""
@@ -146,7 +157,11 @@ def main():
     pygame.display.set_mode((1, 1), pygame.HIDDEN)
     sdl.init()
     bridge = SDLBridge(pygame, sdl, args.index)
+    # Replies come from the address packets go to; nothing else may rumble
+    # the controller.
+    receiver = (socket.gethostbyname(args.host), args.port)
     sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sender.setblocking(False)
     sequence, period, last_message, shown = 0, 1.0 / args.rate, None, ''
     print(f'Sending controller state to {args.host}:{args.port} '
           '(Ctrl+C to stop)')
@@ -158,8 +173,15 @@ def main():
                 print('\n' + message)
                 last_message = message
             sequence += 1
-            sender.sendto(pack(sequence, axes, buttons, connected),
-                          (args.host, args.port))
+            try:
+                sender.sendto(pack(sequence, axes, buttons, connected),
+                              receiver)
+            except BlockingIOError:
+                pass
+            # The ground station answers when a move stops at a limit.
+            intensity = read_rumble(sender, receiver)
+            if intensity is not None:
+                bridge.rumble(intensity)
             if connected and sequence % 30 == 0:
                 held = ' '.join(name for name, pressed in zip(BUTTONS, buttons)
                                 if pressed)
@@ -172,6 +194,8 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        # Never leave the controller vibrating after the bridge stops.
+        bridge.rumble(0.0)
         bridge.close()
         sender.close()
         sdl.quit()

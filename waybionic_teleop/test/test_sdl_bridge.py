@@ -1,5 +1,8 @@
 """DualSense input must match the teleop layout and fail safe on reconnect."""
 
+import socket
+import sys
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +18,7 @@ class FakeController:
         self.axes = {}
         self.buttons = {}
         self.connected = True
+        self.rumbles = []
 
     def get_axis(self, index):
         """Return a simulated SDL axis."""
@@ -27,6 +31,15 @@ class FakeController:
     def attached(self):
         """Report whether the simulated device is connected."""
         return self.connected
+
+    def rumble(self, low, high, duration):
+        """Record a simulated SDL rumble request."""
+        self.rumbles.append((low, high, duration))
+        return True
+
+    def stop_rumble(self):
+        """Record a simulated SDL rumble stop."""
+        self.rumbles.append('stop')
 
     def quit(self):  # noqa: A003
         """Match the SDL controller cleanup API."""
@@ -156,3 +169,59 @@ def test_missing_controller_reports_a_useful_status():
     assert message == ('No controller detected; connect a PS5 DualSense '
                        'controller')
     assert bridge.poll(0.5)[3] is None
+
+
+def test_rumble_reaches_only_an_open_controller():
+    """Rumble for a second per request like the Xbox bridge; zero stops it."""
+    sdl = FakeSDL()
+    bridge = sdl_bridge.SDLBridge(fake_pygame(sdl), sdl)
+    bridge.rumble(1.0)
+    pad = FakeController()
+    sdl.devices = [pad]
+    bridge.poll(0.0)
+    bridge.rumble(0.5)
+    bridge.rumble(0.0)
+    assert pad.rumbles == [(0.5, 0.5, 1000), 'stop']
+
+
+def test_rumble_replies_do_not_interrupt_the_controller_packets(monkeypatch):
+    """Only the ground station's replies rumble; the bridge keeps sending."""
+    sdl = FakeSDL()
+    pad = FakeController()
+    sdl.devices = [pad]
+    sdl.init = sdl.quit = lambda: None
+    pygame = fake_pygame(sdl)
+    pygame.HIDDEN = 0
+    pygame.display = SimpleNamespace(
+        init=lambda: None, set_mode=lambda size, flags: None,
+        quit=lambda: None)
+    monkeypatch.setitem(sys.modules, 'pygame', pygame)
+    monkeypatch.setitem(sys.modules, 'pygame._sdl2',
+                        SimpleNamespace(controller=sdl))
+    monkeypatch.setenv('SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS', '1')
+    station = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    stranger = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    station.bind(('127.0.0.1', 0))
+    station.settimeout(2.0)
+    packets = []
+
+    def sleep(seconds):
+        data, address = station.recvfrom(64)
+        packets.append(gamepad.unpack(data))
+        if len(packets) == 3:
+            stranger.sendto(gamepad.pack_rumble(1.0), address)
+            station.sendto(gamepad.pack_rumble(0.5), address)
+        elif len(packets) == 6:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(sdl_bridge, 'time', SimpleNamespace(
+        monotonic=time.monotonic, sleep=sleep))
+    monkeypatch.setattr(sys, 'argv', [
+        'sdl_bridge', '--port', str(station.getsockname()[1])])
+    try:
+        sdl_bridge.main()
+    finally:
+        station.close()
+        stranger.close()
+    assert [packet[1] for packet in packets] == [False] + [True] * 5
+    assert pad.rumbles == [(0.5, 0.5, 1000), 'stop']

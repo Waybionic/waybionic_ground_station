@@ -372,7 +372,8 @@ Bluetooth controllers are not listed in `/dev/input/by-id`; connect the controll
 On PS5 DualSense, **Options** replaces Start/Menu, **Circle** replaces B,
 **Triangle** replaces Y, **Cross** replaces A, and the left/right triggers are
 L2/R2. The sticks, D-pad, and shoulder buttons keep the same positions. After
-connecting, test each row above with those names. Turn the controller off while
+connecting, test each row above with those names, and check that the controller
+rumbles when a move stops at a limit. Turn the controller off while
 teleoperation is enabled: the arm should hold its pose and show disabled. After
 reconnecting, teleoperation must remain disabled until you release the controls
 and press Options again.
@@ -393,7 +394,7 @@ RViz label also turns red and names the cause, for example `STOPPED-joint_3` or
 `OUT-OF-REACH`. If the drives stop the arm while teleop is still enabled, for example after
 rejecting a target or losing encoder feedback, the label shows `DRIVES-STOPPED` and the
 drives' reason, and the controller rumbles once; press B, then Start, to continue. Rumble
-works with a controller plugged into the ground station and through the Windows bridge.
+works with a controller plugged into the ground station and through either Windows bridge.
 
 When the bridge reports that the controller disconnected, every control is released once,
 so the arm slows to a stop. After 0.5 s without controller input, teleop disables and holds
