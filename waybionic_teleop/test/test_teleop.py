@@ -221,6 +221,22 @@ def test_the_dpad_tilts_the_tool_about_its_tip(arm, cartesian):
                                                                       abs=math.radians(0.3))
 
 
+def test_the_tip_and_the_next_setpoint_stop_at_the_keep_in_floor(arm, cartesian):
+    floor = cartesian.config.keep_in[0][2]
+    for _ in range(round(6.0 / DT)):
+        cartesian.update(*sample(right_y=-1.0), DOWN, DT)
+        # The drives aim at the published setpoint, so it has to stay inside the box too.
+        for joints in (cartesian.targets, cartesian.command_targets):
+            assert arm.forward(joints)[0][2] >= floor - 1e-8
+    assert cartesian.blocked == ['keep_in']
+    tip = arm.forward(cartesian.targets)[0]
+    assert tip[2] == pytest.approx(floor, abs=1e-6)
+    for _ in range(round(0.5 / DT)):
+        cartesian.update(*sample('dpad_right', right_x=1.0), DOWN, DT)
+        for joints in (cartesian.targets, cartesian.command_targets):
+            assert arm.forward(joints)[0] == pytest.approx(tip, abs=1e-9)
+
+
 def test_releasing_a_after_homing_does_not_resume_the_last_move(arm, cartesian):
     for _ in range(round(0.5 / DT)):
         cartesian.update(*sample('dpad_right', left_x=1.0, right_x=1.0), DOWN, DT)

@@ -402,7 +402,7 @@ class ArmTeleop:
         if any(self.linear) or self.tilt or self.roll:
             future, _, _ = self.kinematics.jog(
                 after, self.linear, self.tilt, self.roll, config.period, self.limits,
-                config.max_speed)
+                config.max_speed, config.keep_in)
         else:
             future = after
         self.command_targets.update(future)
