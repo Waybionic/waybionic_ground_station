@@ -5,9 +5,9 @@ The real controller arrives on joy_operator and is passed on to teleop's joy top
 takes over joy as soon as teleop is ready, and again after idle_s seconds without a button,
 stick or trigger moving; the moment someone touches the controller, it stops, presses B so
 teleop is left disabled, and passes the controller through. It only plays while the drives
-report that they are simulated and ready and no other node publishes joy, presses Start only
-while the drives' command gate waits for it, and sends nothing while teleop's state, the joint
-states or the drives' report are out of date, so teleop times out.
+report that they are simulated and ready, the emergency stop is not pressed and no other node
+publishes joy, presses Start only while the drives' command gate waits for it, and sends nothing
+while teleop's state, the joint states or the drives' report are out of date, so teleop times out.
 The demo draws the tool tip's path and a caption in RViz.
 """
 
@@ -21,12 +21,13 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState, Joy
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 from visualization_msgs.msg import Marker, MarkerArray
 
 from waybionic_teleop.demo_script import (
     DemoPlayer, operator_active, PIVOT, STALE_S, TeleopState)
 from waybionic_teleop.kinematics import ArmKinematics
+from waybionic_teleop.safety_interface import EMERGENCY_STOP_TOPIC
 
 HOME_TOLERANCE_RAD = 0.01
 
@@ -45,6 +46,7 @@ class Autoplay(Node):
         self.joints = {}
         self.drive_interface, self.drives_reported = None, -math.inf
         self.unready = []
+        self.emergency_stop = False
         self.kinematics = None
         self.playing = False
         self.handover = None
@@ -58,6 +60,7 @@ class Autoplay(Node):
         self.create_subscription(Joy, 'joy_operator', self.on_operator, 10)
         self.create_subscription(JointState, 'joint_states', self.on_joint_states, 10)
         self.create_subscription(DiagnosticArray, topic, self.on_diagnostics, 10)
+        self.create_subscription(Bool, EMERGENCY_STOP_TOPIC, self.on_emergency_stop, latched)
         self.joy_publisher = self.create_publisher(Joy, 'joy', 10)
         self.marker_publisher = self.create_publisher(MarkerArray, 'waybionic/teleop/markers', 10)
         self.create_timer(1.0 / rate, self.tick)
@@ -98,6 +101,9 @@ class Autoplay(Node):
         self.state.drives_ready = bool(drives) and not self.unready
         self.state.gate_open = gate is not None and gate.level == DiagnosticStatus.OK
 
+    def on_emergency_stop(self, message):
+        self.emergency_stop = message.data
+
     def on_operator(self, message):
         if operator_active(message.axes, message.buttons, self.deadzone):
             self.last_used = time.monotonic()
@@ -112,6 +118,8 @@ class Autoplay(Node):
 
     def blocked(self, now):
         """Return why the demo cannot play now, or None when it can."""
+        if self.emergency_stop:
+            return 'the emergency stop is pressed'
         if (self.kinematics is None or not self.state.fresh(now)
                 or now - self.drives_reported > STALE_S):
             return 'waiting for teleop, the joint states and the drives to report'

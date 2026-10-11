@@ -7,7 +7,7 @@ from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 import pytest
 import rclpy
 from sensor_msgs.msg import JointState, Joy
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 
 from waybionic_teleop import autoplay_node
 from waybionic_teleop.demo_script import SILENCE_S, STALE_S
@@ -182,6 +182,18 @@ def test_the_demo_sends_nothing_on_stale_reports_then_starts_over(bench, quiet):
     silent_from = bench.clock.now
     # Teleop times out once nothing more is sent.
     assert all(at <= silent_from + STALE_S + 1e-6 for at, _ in bench.run(3.0, **{quiet: None}))
+    resumed = bench.clock.now
+    sent = bench.run(3.0)
+    assert sent[0][0] >= resumed + SILENCE_S - 1e-6
+    assert pressed(sent, 'start')
+
+
+def test_the_demo_holds_while_the_emergency_stop_is_pressed(bench):
+    assert pressed(bench.run(3.0), 'start')
+    bench.node.on_emergency_stop(Bool(data=True))
+    # Teleop refuses Start until the E-stop is released, so the demo must not keep pressing it.
+    assert bench.run(10.0) == []
+    bench.node.on_emergency_stop(Bool(data=False))
     resumed = bench.clock.now
     sent = bench.run(3.0)
     assert sent[0][0] >= resumed + SILENCE_S - 1e-6
