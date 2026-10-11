@@ -6,17 +6,15 @@ from pathlib import Path
 import pytest
 
 from waybionic_teleop.gamepad import AXES, BUTTONS
-from waybionic_teleop.kinematics import ArmKinematics
+from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
-LIMITS = {'joint_1': (-math.pi, math.pi), 'joint_2': (-1.5708, 1.5708),
-          'joint_3': (-1.5708, 1.5708), 'joint_4': (-1.5708, 1.5708),
-          'joint_5': (-1.5708, 1.5708)}
+URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
+        / 'waybionic_arm.urdf').read_text(encoding='utf-8')
+LIMITS = joint_limits(URDF, ['joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5'])
 HOME = dict.fromkeys([*LIMITS, 'tool_grip'], 0.0)
 # Tool pointing straight down in front of the base, where straight cuts start.
 DOWN = {**HOME, 'joint_1': 0.1, 'joint_2': 0.5, 'joint_3': 1.4, 'joint_4': math.pi - 1.9}
-URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
-        / 'waybionic_arm.urdf').read_text(encoding='utf-8')
 DT = 0.02
 
 
@@ -139,7 +137,7 @@ def test_b_stop_needs_a_fresh_start_with_centered_sticks_to_rearm(teleop):
 def test_joint_limits_stop_motion_and_are_reported(teleop):
     press(teleop, 'start')
     run(teleop, 6.0, left_y=1.0)
-    assert teleop.targets['joint_2'] == pytest.approx(1.5708)
+    assert teleop.targets['joint_2'] == pytest.approx(LIMITS['joint_2'][1])
     assert teleop.blocked == ['joint_2']
 
 

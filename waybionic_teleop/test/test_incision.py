@@ -10,17 +10,15 @@ from waybionic_teleop.gamepad import AXES, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
-LIMITS = {'joint_1': (-math.pi, math.pi), 'joint_2': (-1.5708, 1.5708),
-          'joint_3': (-1.5708, 1.5708), 'joint_4': (-1.5708, 1.5708),
-          'joint_5': (-1.5708, 1.5708)}
+URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
+        / 'waybionic_arm.urdf').read_text(encoding='utf-8')
+LIMITS = joint_limits(URDF, ['joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5'])
 # The tool leaning forward and down, about 45 degrees from vertical.
 LEANING = {'joint_1': 0.3, 'joint_2': 0.4, 'joint_3': 1.2, 'joint_4': 0.8, 'joint_5': 0.0,
            'tool_grip': 0.0}
 # The tool leaning forward and down, its tip about 60 mm above the table.
 NEAR_TABLE = {'joint_1': 0.2, 'joint_2': 0.87, 'joint_3': 1.5, 'joint_4': -0.17, 'joint_5': 0.0,
               'tool_grip': 0.0}
-URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
-        / 'waybionic_arm.urdf').read_text(encoding='utf-8')
 DT = 1.0 / 120.0
 
 
