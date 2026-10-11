@@ -11,18 +11,39 @@ import time
 
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 import rclpy
+from rclpy._rclpy_pybind11 import RCLError
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
-from sensor_msgs.msg import JointState, Joy
-from std_msgs.msg import String
+from sensor_msgs.msg import JointState, Joy, JoyFeedback
+from std_msgs.msg import Bool, String
 from visualization_msgs.msg import Marker, MarkerArray
 
+from waybionic_teleop.collision import ArmCollision
+from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
 JAW_SIZE = (0.006, 0.014, 0.03)
 JAW_OPEN_GAP = 0.024
+# One short rumble each time a move is stopped at a limit.
+RUMBLE_INTENSITY = 0.6
+RUMBLE_S = 0.25
+# A stick wavering at the deadzone edge against a limit would otherwise rumble every other tick.
+RUMBLE_REFRACTORY_S = 1.0
+
+
+def stop_reason(blocked):
+    """Name what stopped a move, one word per line for the RViz label."""
+    return '\n'.join('OUT-OF-REACH' if item == 'reach'
+                     else 'STOPPED-' + item.replace(': ', '-').replace(' ', '-')
+                     for item in blocked[:2])
+
+
+def drive_stop_reason(reason):
+    """Name why the drives stopped the arm, one word per line for the RViz label."""
+    words = reason.split(':')[0].split()
+    return 'DRIVES-STOPPED' + ('\n' + '-'.join(words) if words else '')
 
 
 def status(name, level, value, unit, message):
@@ -33,37 +54,68 @@ def status(name, level, value, unit, message):
 class XboxTeleop(Node):
     """Turn controller input into streamed joint targets while the operator has it enabled."""
 
-    def __init__(self):
-        super().__init__('xbox_teleop', automatically_declare_parameters_from_overrides=True)
+    def __init__(self, **kwargs):
+        super().__init__('xbox_teleop', automatically_declare_parameters_from_overrides=True,
+                         **kwargs)
         params = {name: self.get_parameter(name).value
                   for name in self.list_parameters([], 0).names}
         self.config = config_from_parameters(params)
         self.timeout = float(params['input_timeout_s'])
+        if not 0 < self.timeout < math.inf:
+            raise ValueError('input_timeout_s must be positive and finite')
         self.tool_frame = params['tool_frame']
         self.base_frame = params['base_frame']
+        self.table_height = float(params.get('table_height', 0.0))
+        self.clearance = float(params.get('collision_clearance', 0.01))
         self.teleop = None
         self.problem = 'Waiting for robot_description'
         self.joy = None
         self.joy_time = None
         self.joy_count = 0
         self.measured = {}
+        self.measured_at = {}
         self.ticks = 0
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(String, 'robot_description', self.load, latched)
         self.create_subscription(Joy, 'joy', self.on_joy, 10)
         self.create_subscription(JointState, 'joint_states', self.on_joint_states, 10)
         self.command_publisher = self.create_publisher(JointState, 'joint_commands', 10)
+        self.enable_publisher = self.create_publisher(Bool, 'teleop_enabled', latched)
+        # game_controller_node rumbles a local controller; joy_udp_receiver passes it on.
+        self.feedback_publisher = self.create_publisher(JoyFeedback, 'joy/set_feedback', 10)
+        self.rumble_until = None
+        self.rumble_started = -math.inf
+        self.rumble_due = False
+        self.was_blocked = False
+        # Set once the drives accept this enable, so an older stopped row is not a new stop.
+        self.gate_open = False
+        self.drive_stop = ''
         self.marker_publisher = self.create_publisher(MarkerArray, 'waybionic/teleop/markers', 10)
-        self.diagnostics_publisher = self.create_publisher(
-            DiagnosticArray, params.get('diagnostics_topic', '/diagnostics'), 10)
+        diagnostics_topic = params.get('diagnostics_topic', '/diagnostics')
+        self.diagnostics_publisher = self.create_publisher(DiagnosticArray, diagnostics_topic, 10)
+        # The drives report their command gate here, including stops that teleop did not make.
+        self.create_subscription(DiagnosticArray, diagnostics_topic, self.on_diagnostics, 10)
         self.last_tick = self.report_time = time.monotonic()
         self.create_timer(1.0 / float(params['rate_hz']), self.tick)
         self.create_timer(0.5, self.report)
 
     def load(self, message):
+        # Disable before accepting a replacement description. A hold from stale joint feedback
+        # must not be forwarded to a drive after the model changes.
+        self.publish_enabled(False)
+        if self.teleop is not None and self.teleop.enabled:
+            self.teleop.disable(self.measured, 'Robot description changed')
+            self.publish_command()
+            self.get_logger().warning('Robot description changed: teleop disabled, arm held')
+        self.measured.clear()
+        self.measured_at.clear()
         joints = {joint for group in self.config.groups for joint in group.joints}
         try:
             limits = joint_limits(message.data, joints)
+            # The collision boxes are the only thing keeping the arm off the table and out of
+            # its own base, so a description without them leaves teleop off rather than
+            # running it unprotected.
+            collision = ArmCollision.from_urdf(message.data, self.table_height, self.clearance)
         except ValueError as error:
             self.teleop, self.problem = None, str(error)
             self.get_logger().error(f'Teleop disabled: {error}')
@@ -74,44 +126,111 @@ class XboxTeleop(Node):
             kinematics = None
             self.get_logger().warning(f'Cartesian group unavailable: {error}')
         try:
-            self.teleop, self.problem = ArmTeleop(self.config, limits, kinematics), ''
+            self.teleop = ArmTeleop(self.config, limits, kinematics, collision)
         except ValueError as error:
             self.teleop, self.problem = None, str(error)
             self.get_logger().error(f'Teleop disabled: {error}')
             return
+        self.problem = ''
         self.get_logger().info('Xbox teleop ready (press Start to enable): ' + '; '.join(
             f'{group.name}: {group.describe()}' for group in self.teleop.groups))
 
     def on_joy(self, message):
+        if (len(message.axes) != len(AXES) or len(message.buttons) != len(BUTTONS)
+                or any(not math.isfinite(value) or abs(value) > 1 for value in message.axes)
+                or any(button not in (0, 1) for button in message.buttons)):
+            self.joy, self.joy_time = None, None
+            if self.teleop is not None and self.teleop.enabled:
+                self.teleop.disable(self.recent_measurement(time.monotonic()),
+                                    'Malformed controller input; press Start to enable',
+                                    warning=True)
+                self.publish_enabled(False)
+                self.publish_command()
+            return
         self.joy, self.joy_time = message, time.monotonic()
         self.joy_count += 1
 
     def on_joint_states(self, message):
-        self.measured.update((name, position) for name, position
-                             in zip(message.name, message.position) if math.isfinite(position))
+        now = time.monotonic()
+        for name, position in zip(message.name, message.position):
+            if math.isfinite(position):
+                self.measured[name] = position
+                self.measured_at[name] = now
+
+    def on_diagnostics(self, message):
+        for row in message.status:
+            if row.name != 'arm.command_gate' or self.teleop is None or not self.teleop.enabled:
+                continue
+            if any(item.key == 'value' and item.value == 'enabled' for item in row.values):
+                self.gate_open = True
+            elif self.gate_open:
+                self.gate_open, self.drive_stop, self.rumble_due = False, row.message, True
+
+    def recent_measurement(self, now):
+        return {joint: position for joint, position in self.measured.items()
+                if now - self.measured_at[joint] <= self.timeout}
 
     def fresh(self, now):
         return self.joy_time is not None and now - self.joy_time <= self.timeout
 
     def tick(self):
         now = time.monotonic()
-        dt, self.last_tick = min(now - self.last_tick, 0.1), now
+        elapsed, self.last_tick = now - self.last_tick, now
+        # A late tick moves the targets at most two periods, so the drives never chase a jump.
+        dt = min(max(elapsed, 0.0), 2.0 * self.config.period)
         self.ticks += 1
         if self.teleop is None:
+            self.publish_enabled(False)
             return
         fresh = self.fresh(now)
+        if elapsed >= self.timeout and self.teleop.enabled:
+            self.teleop.disable(self.recent_measurement(now),
+                                'Host paused; release Start and press it again', warning=True)
+            # A Start held through the pause must not count as a new press on the next tick.
+            self.teleop.held = {
+                name for name, index in BUTTON.items()
+                if fresh and self.joy.buttons[index]
+            }
+            self.publish_enabled(False)
+            self.publish_command()
+            return
         if not fresh and self.teleop.enabled:
-            self.teleop.disable(self.measured, 'Controller lost; press Start (Menu) to enable',
-                                warning=True)
+            self.teleop.disable(self.recent_measurement(now),
+                                'Controller lost; press Start (Menu) to enable', warning=True)
+            self.publish_enabled(False)
             self.publish_command()
         axes, buttons = (self.joy.axes, self.joy.buttons) if fresh else ((), ())
-        if self.teleop.update(axes, buttons, self.measured, dt):
+        updated = self.teleop.update(axes, buttons, self.recent_measurement(now), dt)
+        self.publish_enabled(self.teleop.enabled and fresh)
+        if updated:
             self.publish_command()
+        self.feel_limits(now)
         if self.ticks % 3 == 0:
             self.publish_markers(fresh)
 
+    def publish_enabled(self, enabled):
+        self.enable_publisher.publish(Bool(data=enabled))
+
+    def feel_limits(self, now):
+        enabled = self.teleop.enabled
+        if not enabled:
+            self.gate_open, self.drive_stop = False, ''
+        blocked = enabled and bool(self.teleop.blocked)
+        self.rumble_due = enabled and (self.rumble_due or (blocked and not self.was_blocked))
+        self.was_blocked = blocked
+        if self.rumble_due and now - self.rumble_started >= RUMBLE_REFRACTORY_S:
+            self.rumble(RUMBLE_INTENSITY)
+            self.rumble_started, self.rumble_until, self.rumble_due = now, now + RUMBLE_S, False
+        elif self.rumble_until is not None and now >= self.rumble_until:
+            self.rumble(0.0)
+            self.rumble_until = None
+
+    def rumble(self, intensity):
+        self.feedback_publisher.publish(
+            JoyFeedback(type=JoyFeedback.TYPE_RUMBLE, id=0, intensity=intensity))
+
     def publish_command(self):
-        targets = self.teleop.targets
+        targets = self.teleop.command_targets
         if not targets:
             return
         message = JointState(name=list(targets), position=list(targets.values()),
@@ -124,6 +243,10 @@ class XboxTeleop(Node):
         teleop = self.teleop
         if teleop.enabled:
             state = 'ENABLED'
+            if self.drive_stop:
+                state += '\n' + drive_stop_reason(self.drive_stop)
+            elif teleop.blocked:
+                state += '\n' + stop_reason(teleop.blocked)
         else:
             state = 'DISABLED\nPRESS-MENU' if fresh else 'NO-CONTROLLER'
         return f'{teleop.active_group.name.upper()}\n{self.speed_percent():.0f}%\n{state}'
@@ -156,8 +279,19 @@ class XboxTeleop(Node):
         label.scale.z = 0.04
         enabled = self.teleop.enabled and fresh
         label.color.r, label.color.g, label.color.b, label.color.a = (
-            (0.5, 1.0, 0.5, 1.0) if enabled else (1.0, 0.8, 0.3, 1.0))
+            (1.0, 0.35, 0.3, 1.0) if enabled and (self.teleop.blocked or self.drive_stop)
+            else (0.5, 1.0, 0.5, 1.0) if enabled else (1.0, 0.8, 0.3, 1.0))
         markers.markers.append(label)
+        incision = self.teleop.incision if self.teleop.active_group.mode == 'incision' else None
+        point = Marker(ns='incision', id=0, type=Marker.SPHERE,
+                       action=Marker.ADD if incision else Marker.DELETE)
+        point.header.frame_id = self.base_frame
+        point.pose.orientation.w = 1.0
+        if incision:
+            point.pose.position.x, point.pose.position.y, point.pose.position.z = incision
+        point.scale.x = point.scale.y = point.scale.z = 0.016
+        point.color.r, point.color.g, point.color.b, point.color.a = 1.0, 0.2, 0.6, 0.8
+        markers.markers.append(point)
         self.marker_publisher.publish(markers)
 
     def report(self):
@@ -176,9 +310,12 @@ class XboxTeleop(Node):
             group = teleop.active_group
             cartesian = group.mode == 'cartesian'
             hint = 'B stops, Y switches group, A holds to go home'
+            if group.mode == 'incision':
+                hint = ('Tilt stays in the arm plane; going home is off here; B stops; '
+                        'Y switches once the tool is withdrawn')
             note = teleop.note or ('At limit: ' + ', '.join(teleop.blocked) if teleop.blocked
                                    else ('LB moves along one axis; ' if cartesian else '') + hint)
-            speed = (f'{1000.0 * teleop.linear_speed:.1f} mm/s' if cartesian
+            speed = (f'{1000.0 * teleop.linear_speed:.1f} mm/s' if group.mode != 'joint'
                      else f'{math.degrees(teleop.speed):.0f} deg/s')
             low, high = self.config.tool_limits
             closed = (self.measured.get(self.config.tool_joint, low) - low) / (high - low)
@@ -204,6 +341,15 @@ def main():
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
+    except RCLError as error:
+        # SIGINT can shut down the context before spin recreates its wait set.
+        if rclpy.ok() or 'the given context is not valid' not in str(error):
+            raise
+    except RuntimeError as error:
+        # Jazzy may surface this binding error when SIGINT invalidates a subscription.
+        if (rclpy.ok() or not str(error).startswith(
+                "Unable to convert call argument '0' to Python object")):
+            raise
     finally:
         node.destroy_node()
         rclpy.try_shutdown()
