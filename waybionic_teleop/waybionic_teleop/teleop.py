@@ -485,7 +485,7 @@ class ArmTeleop:
                   in zip(self.incision, kinematics.axis(joints, pitch + self.tilt * dt))]
         velocity = [(goal - now) / dt for goal, now in zip(target, tip)]
         return kinematics.jog(joints, velocity, self.tilt, self.roll, dt, self.limits,
-                              self.config.max_speed)
+                              self.config.max_speed, self.config.keep_in)
 
     def stick(self, axes, name):
         value = self.axis(axes, name)

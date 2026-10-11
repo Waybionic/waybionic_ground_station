@@ -170,8 +170,10 @@ def test_moving_into_a_joint_limit_sends_targets_within_the_urdf_limits(
 def test_an_incision_move_into_the_table_is_refused_but_backing_out_is_not(
         parameters, arm, into, back, contact):
     check = ArmCollision.from_urdf(URDF)
-    teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
-                       LIMITS, arm, check)
+    # Floor the keep-in box at the table, so the table check is what stops these moves.
+    params = {**parameters('xbox_teleop.yaml', 'xbox_teleop'),
+              'keep_in_min_mm': [-550.0, -550.0, 0.0]}
+    teleop = ArmTeleop(config_from_parameters(params), LIMITS, arm, check)
     for button in ('start', 'y', 'y', 'y'):
         teleop.update(*sample(button), NEAR_TABLE, DT)
         teleop.update(*sample(), NEAR_TABLE, DT)
@@ -200,6 +202,25 @@ def test_an_incision_move_into_the_table_is_refused_but_backing_out_is_not(
         assert teleop.blocked == []
     assert max(abs(teleop.targets[joint] - stopped_at[joint]) for joint in arm.joints) > 0.05
     assert through(arm, teleop.targets, first)[0] < 1e-6
+
+
+def test_an_insertion_stops_at_the_keep_in_floor_with_the_tool_on_its_axis(parameters, arm):
+    teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
+                       LIMITS, arm)
+    for button in ('start', 'y', 'y', 'y'):
+        teleop.update(*sample(button), NEAR_TABLE, DT)
+        teleop.update(*sample(), NEAR_TABLE, DT)
+    floor = teleop.config.keep_in[0][2]
+    # The tip starts 12 mm above the floor, about 21 mm along the tool axis.
+    for _ in range(round(1.5 / DT)):
+        teleop.update(*sample(left_y=1.0), dict(teleop.targets), DT)
+        for targets in (teleop.targets, teleop.command_targets):
+            assert arm.forward(targets)[0][2] >= floor - 1e-8
+            assert through(arm, targets, teleop.incision)[0] < 1e-9
+    assert teleop.blocked == ['keep_in']
+    assert arm.forward(teleop.targets)[0][2] == pytest.approx(floor, abs=1e-6)
+    run(teleop, 0.5, left_y=-1.0)
+    assert teleop.blocked == [] and arm.forward(teleop.targets)[0][2] > floor + 0.003
 
 
 def test_re_enabling_away_from_the_incision_point_moves_nothing(teleop, arm):
