@@ -76,6 +76,10 @@ def main():
         if (rclpy.ok() or not str(error).startswith(
                 "Unable to convert call argument '0' to Python object")):
             raise
+    except TypeError as error:
+        # tf2 can no longer read the lookup time once SIGINT has invalidated the context.
+        if rclpy.ok() or not str(error).startswith('time must have sec and nanosec'):
+            raise
     finally:
         node.destroy_node()
         rclpy.try_shutdown()
