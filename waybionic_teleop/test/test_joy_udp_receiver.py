@@ -1,148 +1,111 @@
-"""Controller link diagnostics tests using synthetic UDP controller packets."""
+"""Controller packets from the host bridge in, /joy out."""
 
-from unittest.mock import MagicMock
+import select
+import socket
 
-from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 import pytest
 import rclpy
+from rclpy.parameter import Parameter
+from sensor_msgs.msg import JoyFeedback
 
-from waybionic_teleop import gamepad, joy_udp_receiver
+from waybionic_teleop import gamepad
 from waybionic_teleop.joy_udp_receiver import JoyUdpReceiver
 
-
-class FakeSocket:
-    """A queued UDP socket substitute for receiver tests."""
-
-    def __init__(self):
-        self.packets = []
-
-    def bind(self, address):
-        self.address = address
-
-    def setblocking(self, value):
-        self.blocking = value
-
-    def recvfrom(self, _size):
-        if not self.packets:
-            raise BlockingIOError
-        return self.packets.pop(0)
-
-    def close(self):
-        pass
-
-
-@pytest.fixture(scope='module', autouse=True)
-def ros_context():
-    rclpy.init()
-    yield
-    rclpy.shutdown()
+STICK = [0.5, -0.25, 0.0, 1.0, 0.0, -0.75]
+START = [int(name == 'start') for name in gamepad.BUTTONS]
+NEUTRAL = [0.0] * len(gamepad.AXES), [0] * len(gamepad.BUTTONS)
 
 
 @pytest.fixture
 def receiver(monkeypatch):
-    fake_socket = FakeSocket()
-    monkeypatch.setattr(
-        joy_udp_receiver.socket, 'socket', lambda *_args: fake_socket)
-    node = JoyUdpReceiver()
-    monkeypatch.setattr(joy_udp_receiver.time, 'monotonic', lambda: 100.0)
-    node.report_time = 99.5
-    node.diagnostics_publisher.publish = MagicMock()
-    node.joy_publisher.publish = MagicMock()
-    yield node, fake_socket
+    monkeypatch.setenv('ROS_AUTOMATIC_DISCOVERY_RANGE', 'OFF')
+    context = rclpy.Context()
+    rclpy.init(context=context)
+    # Port 0 binds a free port, so a running ground station cannot interfere.
+    node = JoyUdpReceiver(context=context, parameter_overrides=[Parameter('port', value=0)])
+    yield node
+    node.socket.close()
     node.destroy_node()
+    rclpy.try_shutdown(context=context)
 
 
-def add_packet(fake_socket, sequence, connected):
-    packet = gamepad.pack(
-        sequence, [0.0] * len(gamepad.AXES),
-        [0] * len(gamepad.BUTTONS), connected=connected)
-    fake_socket.packets.append((packet, ('127.0.0.1', 47300)))
+@pytest.fixture
+def joys(receiver, monkeypatch):
+    published = []
+    monkeypatch.setattr(receiver.joy_publisher, 'publish', published.append)
+    return published
 
 
-def report_status(node):
-    node.report()
-    message = node.diagnostics_publisher.publish.call_args.args[0]
-    return message.status[0]
+@pytest.fixture
+def send(receiver):
+    sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    def deliver(data):
+        sender.sendto(data, receiver.socket.getsockname())
+        assert select.select([receiver.socket], [], [], 2.0)[0], 'the packet never arrived'
+        receiver.poll()
+
+    yield deliver
+    sender.close()
 
 
-def values(status):
-    return {value.key: value.value for value in status.values}
+def test_a_lost_controller_releases_every_control_once_then_goes_quiet(receiver, joys, send):
+    send(gamepad.pack(1, *NEUTRAL))
+    centred = joys[-1]
+    send(gamepad.pack(2, STICK, START))
+    for sequence in range(3, 7):
+        send(gamepad.pack(sequence, STICK, START, connected=False))
+    assert receiver.sequence == 6 and len(joys) == 3
+    released = joys[-1]
+    assert list(released.axes) == list(centred.axes) == [0.0] * len(gamepad.AXES)
+    assert list(released.buttons) == list(centred.buttons) == [0] * len(gamepad.BUTTONS)
+    assert released.header.frame_id == centred.header.frame_id
+    send(gamepad.pack(7, STICK, START))
+    assert len(joys) == 4 and list(joys[-1].buttons) == START
 
 
-def test_connected_state_and_input_rate(receiver):
-    node, fake_socket = receiver
-    add_packet(fake_socket, 1, connected=True)
-    node.poll()
-    add_packet(fake_socket, 2, connected=True)
-    node.poll()
-
-    status = report_status(node)
-
-    assert status.name == 'controller.link'
-    assert status.level == DiagnosticStatus.OK
-    assert values(status)['state'] == 'CONNECTED'
-    assert values(status)['value'] == '4'
-    assert values(status)['unit'] == 'Hz'
-    assert node.joy_publisher.publish.call_count == 2
+def test_old_and_repeated_packets_are_dropped(receiver, joys, send):
+    send(gamepad.pack(10, STICK, START))
+    send(gamepad.pack(10, *NEUTRAL))
+    send(gamepad.pack(9, *NEUTRAL))
+    assert receiver.sequence == 10 and len(joys) == 1 and list(joys[-1].buttons) == START
+    send(gamepad.pack(11, *NEUTRAL))
+    assert len(joys) == 2 and not any(joys[-1].buttons)
 
 
-def test_no_controller_from_explicit_packet_flag(receiver):
-    node, fake_socket = receiver
-    add_packet(fake_socket, 1, connected=False)
-    node.poll()
-
-    status = report_status(node)
-
-    assert values(status)['state'] == 'NO_CONTROLLER'
-    assert status.level == DiagnosticStatus.WARN
-    assert 'no controller is connected' in status.message
-    assert status.name == 'controller.link'
-    node.joy_publisher.publish.assert_not_called()
+def test_a_restarted_bridge_is_accepted_after_the_timeout(receiver, joys, send):
+    send(gamepad.pack(500, STICK, START))
+    send(gamepad.pack(1, *NEUTRAL))
+    assert receiver.sequence == 500 and len(joys) == 1
+    # The bridge was quiet for longer than the timeout, so its count may restart.
+    receiver.last_packet -= receiver.timeout + 0.01
+    send(gamepad.pack(1, *NEUTRAL))
+    assert receiver.sequence == 1 and len(joys) == 2
 
 
-def test_missing_bridge_packets_are_stale(receiver):
-    node, _fake_socket = receiver
-
-    status = report_status(node)
-
-    assert values(status)['state'] == 'BRIDGE_NOT_RUNNING'
-    assert status.level == DiagnosticStatus.STALE
-
-
-def test_stale_teleop_input_is_reported_when_bridge_is_connected(receiver):
-    node, fake_socket = receiver
-    add_packet(fake_socket, 1, connected=True)
-    node.poll()
-    node.on_diagnostics(DiagnosticArray(status=[DiagnosticStatus(
-        name='teleop.input', level=DiagnosticStatus.STALE)]))
-
-    status = report_status(node)
-
-    assert values(status)['state'] == 'INPUT_STALE'
-    assert status.level == DiagnosticStatus.STALE
-    assert 'No fresh /joy input' in status.message
+def test_oversize_packets_are_rejected(receiver, joys, send):
+    packet = gamepad.pack(1, STICK, START)
+    send(packet + b'\x00')
+    send(packet + bytes(100))
+    assert receiver.rejected == 2 and not joys
+    send(packet)
+    assert len(joys) == 1
 
 
-def test_bridge_timeout_precedes_no_controller_state(receiver):
-    node, fake_socket = receiver
-    add_packet(fake_socket, 1, connected=False)
-    node.poll()
-    node.last_packet = 99.49
-
-    status = report_status(node)
-
-    assert values(status)['state'] == 'BRIDGE_NOT_RUNNING'
-    assert status.level == DiagnosticStatus.STALE
-
-
-def test_no_controller_precedes_stale_teleop_input(receiver):
-    node, fake_socket = receiver
-    add_packet(fake_socket, 1, connected=False)
-    node.poll()
-    node.on_diagnostics(DiagnosticArray(status=[DiagnosticStatus(
-        name='teleop.input', level=DiagnosticStatus.STALE)]))
-
-    status = report_status(node)
-
-    assert values(status)['state'] == 'NO_CONTROLLER'
-    assert status.level == DiagnosticStatus.WARN
+def test_rumble_goes_back_to_the_bridge_until_its_link_times_out(receiver):
+    bridge = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    rumble = JoyFeedback(type=JoyFeedback.TYPE_RUMBLE, id=0, intensity=0.6)
+    try:
+        bridge.sendto(gamepad.pack(1, *NEUTRAL), receiver.socket.getsockname())
+        assert select.select([receiver.socket], [], [], 2.0)[0], 'the packet never arrived'
+        receiver.poll()
+        receiver.on_feedback(rumble)
+        assert select.select([bridge], [], [], 2.0)[0], 'the rumble never came back'
+        assert gamepad.unpack_rumble(bridge.recv(64)) == pytest.approx(0.6)
+        receiver.last_packet -= receiver.timeout + 0.01
+        receiver.poll()
+        assert receiver.sender is None
+        receiver.on_feedback(rumble)
+        assert not select.select([bridge], [], [], 0.2)[0], 'rumble sent over a timed-out link'
+    finally:
+        bridge.close()

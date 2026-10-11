@@ -1,9 +1,14 @@
 x-tested-image: &tested-image
-  image: waybionic-ground-station:jazzy
+  # CI publishes main's tested image here; local builds reuse its layers.
+  image: ghcr.io/waybionic/waybionic_ground_station:jazzy
   build:
     context: .
     dockerfile: docker/Dockerfile
     target: test
+    cache_from:
+      - ghcr.io/waybionic/waybionic_ground_station:jazzy
+    args:
+      BUILDKIT_INLINE_CACHE: "1"
 
 services:
   demo:
@@ -34,6 +39,8 @@ services:
       context: .
       dockerfile: docker/Dockerfile
       target: development
+      cache_from:
+        - ghcr.io/waybionic/waybionic_ground_station:jazzy
     init: true
     command: [sleep, infinity]
     volumes:
@@ -43,7 +50,7 @@ services:
         bind:
           selinux: z
 
-  linux-gui:
+  linux-gui: &linux-gui
     <<: *tested-image
     profiles: [linux-gui]
     init: true
@@ -81,6 +88,42 @@ services:
         colcon build --symlink-install &&
         source /waybionic_ws/install/setup.bash &&
         exec ros2 launch waybionic_bringup ground_station.launch.py
+
+  # linux-gui with teleop; start it with scripts/linux-gui.sh --controller, which adds only the
+  # game controllers' event devices (an override file under its temporary directory).
+  linux-gui-teleop:
+    <<: *linux-gui
+    profiles: [linux-gui-teleop]
+    volumes:
+      - type: bind
+        source: .
+        target: /waybionic_ws/src/waybionic_ground_station
+      - type: bind
+        source: /tmp/.X11-unix
+        target: /tmp/.X11-unix
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${WAYBIONIC_XAUTHORITY:-/tmp/waybionic-missing.xauth}
+        target: /tmp/waybionic.xauth
+        read_only: true
+        bind:
+          create_host_path: false
+      # SDL finds controllers through udev.
+      - type: bind
+        source: /run/udev
+        target: /run/udev
+        read_only: true
+        bind:
+          create_host_path: false
+    command:
+      - bash
+      - -c
+      - |
+        colcon build --symlink-install &&
+        source /waybionic_ws/install/setup.bash &&
+        exec ros2 launch waybionic_bringup ground_station.launch.py teleop:=true
 
   wslg: &wslg
     <<: *tested-image
@@ -132,3 +175,19 @@ services:
       - teleop:=true
       - joy_source:=udp
       - joy_udp_bind:=0.0.0.0
+
+  # The teleop demo that plays itself whenever the controller is left idle.
+  wslg-demo:
+    <<: *wslg
+    profiles: [wslg-demo]
+    ports:
+      - 127.0.0.1:47300:47300/udp
+    command:
+      - ros2
+      - launch
+      - waybionic_bringup
+      - ground_station.launch.py
+      - teleop:=true
+      - joy_source:=udp
+      - joy_udp_bind:=0.0.0.0
+      - autoplay:=true

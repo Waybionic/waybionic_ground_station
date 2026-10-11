@@ -89,9 +89,12 @@ their headless tests. A build or test failure fails the Docker build. The first
 build downloads ROS and Qt dependencies; later builds can reuse cached layers.
 Rebuild after source changes because this image contains a snapshot of the source.
 
-[CI](.github/workflows/ros2_build_test.yml) runs this Compose test build on native
-x86-64 and ARM64 Linux runners. A passing container build does not verify RViz
-windows, camera access, USB devices, GPU acceleration, or networking with a robot.
+[CI](.github/workflows/ros2_build_test.yml) builds and tests on native x86-64
+and ARM64 Linux runners for pull requests, including stacked PRs. Existing
+stacked target branches with the old main-only event filter must pick up this
+workflow from main before they receive these checks. A passing container
+build does not verify RViz windows, camera access, USB devices, GPU
+acceleration, or networking with a robot.
 
 #### Headless Demo
 
@@ -161,13 +164,37 @@ frozen dependency lock. Keep the built image when reproducing a problem; record
 its identifier with:
 
 ```console
-docker image inspect waybionic-ground-station:jazzy --format '{{.Id}}'
+docker image inspect ghcr.io/waybionic/waybionic_ground_station:jazzy --format '{{.Id}}'
 ```
 
-CI currently builds and tests images; it does not publish a shared development
-image. Sharing an immutable, verified project image is a follow-up once the
-container build has been validated. Base-image updates must pass both CI
-architectures before adoption.
+After a successful push-to-main build on both native runners, CI publishes
+one x86-64/ARM64 image index from the digests returned by the tested image
+pushes. It tags the index with the commit's short hash, and also as
+`ghcr.io/waybionic/waybionic_ground_station:jazzy` if that commit is still the
+newest on main. Publish builds don't reuse the registry cache. Pull requests
+build and test with read-only tokens and do not publish.
+
+Tags are mutable. For a reproducible run, record the image index digest
+shown by:
+
+```console
+docker buildx imagetools inspect ghcr.io/waybionic/waybionic_ground_station:jazzy
+```
+
+Before the first successful main publish, there is no shared cache. GHCR may
+keep the first package private. An owner must make it public for anonymous
+pulls and cache imports; otherwise users need package read access and
+`docker login ghcr.io`. Push jobs also require package write access, which
+read-only PR checks cannot verify. Once the image is readable, local builds
+can reuse dependency layers. To run main without building, pull and start:
+
+```console
+docker compose pull demo
+docker compose up demo
+```
+
+Build your branch (`docker compose up --build demo`) to test your own changes.
+Base-image updates must pass both CI architectures before adoption.
 
 The default container configuration is **headless**. For RViz, use the Linux GUI or
 Windows WSLg demo below, or a native path. Do not add privileged containers or broad
@@ -268,7 +295,8 @@ can report exit code `-2`, indicating the requested SIGINT interruption.
 ## Xbox Controller (Simulated Arm)
 
 `teleop:=true` drives the arm with an Xbox controller through simulated CAN drives;
-nothing is sent to hardware. The controller mapping is in
+nothing is sent to hardware unless you choose a drive bus, as described in
+[Real MKS drives over CAN](#real-mks-drives-over-can). The controller mapping is in
 `waybionic_teleop/config/xbox_teleop.yaml`, and the placeholder joint-to-drive map
 (MKS SERVO42D/57D CAN IDs, gear ratios and the wrist differential) is in
 `waybionic_teleop/config/arm_drives.yaml`.
@@ -294,11 +322,20 @@ Press **Ctrl+C** in each window to stop.
 **Linux (native ROS):** with the controller plugged in, run
 `ros2 launch waybionic_bringup ground_station.launch.py teleop:=true`.
 
+**Linux (Docker):** plug the controller in by USB first, then run
+`./scripts/linux-gui.sh --controller`. This starts teleop in the
+[Linux GUI](#linux-gui-demo) container. The script gives the container only the game
+controllers listed as `/dev/input/by-id/*-event-joystick`, not all of `/dev/input`:
+access to keyboards, mice and touchpads would let any process in the container read
+what you type in other windows. The devices are fixed when the container starts, so
+after unplugging or reconnecting the controller, stop the container and start it again.
+Bluetooth controllers are not listed in `/dev/input/by-id`; connect the controller by USB.
+
 | Input | Action |
 | --- | --- |
 | Start (Xbox Menu button, three lines) | Enable or disable; the arm starts disabled |
 | B | Stop and hold the current pose |
-| Y | Switch group: base (joints 1-3), upper (joints 2-5) or Cartesian (tool tip) |
+| Y | Switch group: base (joints 1-3), upper (joints 2-5), Cartesian (tool tip) or incision |
 | Base group: left stick | Base yaw (left/right) and shoulder (up/down) |
 | Base group: right stick up/down | Elbow |
 | Upper group: left stick | Shoulder (left/right) and elbow (up/down) |
@@ -307,28 +344,248 @@ Press **Ctrl+C** in each window to stop.
 | Cartesian group: right stick | Tool roll (left/right) and tool tip up/down |
 | Cartesian group: LB (hold) | Move along one axis only: the stick direction pushed furthest |
 | Cartesian group: D-pad left/right | Tilt the tool about its tip; the tip stays still |
+| Incision group: left stick up/down | Insert or withdraw the tool along its own axis |
+| Incision group: right stick up/down | Tilt the tool about the incision point |
+| Incision group: right stick left/right | Tool roll |
 | RT / LT | Close / open the placeholder end effector |
-| D-pad up/down | Speed: 10, 25, 50 or 100% of 60 deg/s, or of 50 mm/s and 30 deg/s of tilt in the Cartesian group |
-| A (hold) | Return to the zero pose |
+| D-pad up/down | Speed: 10, 25, 50 or 100% of 60 deg/s, or of 50 mm/s and 30 deg/s of tilt in the Cartesian and incision groups |
+| A (hold) | Return to the zero pose (not in the incision group) |
 
-Start is refused until the sticks are centred and the triggers released. The
-diagnostics panel shows the teleop state, each joint, each drive's last CAN frame
-and the simulated bus load.
+Start is refused until the sticks are centred and the triggers and motion buttons released;
+after Y changes groups with motion held, the new group waits until the controls are neutral.
+Stick and trigger movement inside the 15% deadzone is ignored, so a trigger that does not
+fully return does not move the tool. The simulated drives accept complete finite joint
+commands only after receiving a valid URDF and a fresh teleop enable, which teleop repeats
+on every update. If the enable stops for 0.5 s (for example because teleop stopped), the
+drives stop. A host pause past the 500 ms drive heartbeat also stops the simulated servos.
+In both cases teleop must be disabled and Start released and pressed again before motion
+resumes. The diagnostics panel shows the command gate, teleop state, each joint, each
+drive's last CAN frame and the simulated bus load.
 
-The Cartesian group moves the tool tip along straight lines in the base frame and
-keeps the tool's tilt: every joint moves together, and the tip stops at the edge
-of the workspace instead of leaving the line. The roll also stops the tool spinning
-about its own axis as the base turns, so a tool pointing straight down keeps its
-heading. Tilting with the D-pad moves the shoulder, elbow and wrist around the tip,
-which stays in place.
+When a move stops at a limit, the controller rumbles briefly, at most once a second. The
+RViz label also turns red and names the cause, for example `STOPPED-joint_3` or
+`OUT-OF-REACH`. If the drives stop the arm while teleop is still enabled, for example after
+rejecting a target or losing encoder feedback, the label shows `DRIVES-STOPPED` and the
+drives' reason, and the controller rumbles once; press B, then Start, to continue. Rumble
+works with a controller plugged into the ground station and through the Windows bridge.
+
+When the bridge reports that the controller disconnected, every control is released once,
+so the arm slows to a stop. After 0.5 s without controller input, teleop disables and holds
+the arm where it is. Reconnect the controller and press Start to continue.
+
+The Cartesian group computes its next setpoint with the same limit-aware solver used for
+the current tool-tip pose. Diagonal moves are limited to the same 50 mm/s as moves along
+one axis. The simulated drives are assigned speeds for a common nominal arrival time, with
+tracking error from encoder quantization and acceleration. Tilt moves the shoulder, elbow
+and wrist around the tool tip. Roll counters spin about the tool axis; a downward-pointing
+blade retains its heading in this model.
+
+The incision group is for working through a keyhole. The incision point is where the
+tip was when you selected the group, shown as a pink dot in RViz. The tool always
+passes through that point, whether you insert it, withdraw it or tilt it, and the
+return to the zero pose is off so the tool is never dragged sideways through the
+incision. With five joints, the tool can only tilt in the arm's vertical plane:
+tilting sideways about the incision point would need a sixth joint.
+
+Y does not leave the incision group while the tool is inserted past the incision
+point; withdraw it first. Selecting the group again keeps the incision point while
+the tool axis still passes within 2 mm of it, and otherwise sets a new one at the tip.
+If the arm is re-enabled with the tool axis passing within 2 mm of the incision point,
+the point moves onto the axis instead of the arm moving. Further away, the group stops
+rather than pull the tool back: press Y, withdraw the tool in another group, then
+select the incision group again to set a new incision point.
+
+The current arm URDF has provisional joint limits, and the collision checks below model
+each link as a box; they have been tested with simulated drives only. The simulated
+CAN map is not a powered-arm safety case. Do not change a wrist bound or operate powered
+motors until Mechanical identifies the URDF joint and measures signed travel from upright
+zero, including any cable or gear stop.
+
+In simulation, a zero-velocity joint command (including B and controller timeout)
+sends an MKS F5 frame with zero speed and zero acceleration to each moving drive.
+An out-of-range encoder target stops all drives instead of updating only part of
+the arm. The placeholder drive speed is capped at 300 RPM; the MKS manual warns
+against immediate software stops above 1000 RPM. Each drive also runs no faster
+than 1.5 times its commanded speed plus 1 RPM, and teleop never advances its
+targets by more than two updates at once, so after a pause the drives do not catch
+up faster than the teleop speed limits. This checks simulated behavior only. Do
+not connect powered drives or treat it as a hardware E-stop test; drive
+identities, wiring, zeroing and electrical safety still need hardware verification.
+
+Every group stops a move before any part of the arm comes within 10 mm of the
+table or folds into the arm's own base. The checks use a box around each link,
+which you can see by ticking **Collision Enabled** on RViz's RobotModel display.
+The tool's box is a placeholder around the RViz jaws, which reach 30 mm past
+`tool_link`, until the real tool is modelled; a longer tool needs a longer box.
+When a move stops, the diagnostics panel names the part, for example
+`At limit: forearm_link: table`. If the arm stands on a raised mount, set
+`table_height` in `waybionic_teleop/config/xbox_teleop.yaml` to the table's height
+above the bottom of the base. `collision_clearance` in the same file sets the 10 mm
+margin. If the arm is already touching something, the only moves still allowed are
+the ones that back out of it: a move that presses any contact further in is
+refused, even if it would ease another contact at the same time.
+
+The boxes are what makes any of this work. A `robot_description` without a
+collision box for the base, shoulder, upper arm, forearm, wrist, wrist roll or tool
+leaves teleop disabled, and the diagnostics panel names the missing links.
+A description reload while teleop is enabled disables teleop and holds the arm where
+it is, and the drives stop on any `robot_description` change, so Start has to be
+released and pressed again under the new model. This path has been tested with
+simulated drives; powered hardware has not been tested.
 
 The RViz camera follows the tool as the arm moves; drag to orbit and scroll to zoom
 as usual, or add `follow_camera:=false` to the launch command for a fixed view.
 
-If the arm stops responding and the bridge's axis values stop changing while you
-move the sticks, Windows has stopped updating the controller. Turn the controller
-off and on (or unplug and replug it), then press Start again; the bridge
-reconnects by itself.
+If the arm stops responding or keeps moving after you release the sticks, and the
+bridge's axis values stop changing while you move them, Windows has stopped
+updating the controller. The bridge keeps sending the last state it read, so the
+controller cannot stop the arm, not even with B. Press **Ctrl+C** in the bridge
+window; with no controller input, teleop disables and holds the arm after the
+0.5 s input timeout. Turn the controller off and on (or unplug and replug it),
+start the bridge again and press Start. Real drives need a stop that does not
+depend on the controller.
+
+### Self-Running Demo
+
+`autoplay:=true` plays a scripted demo as soon as the ground station is ready, and again
+whenever the controller has been left alone for 30 seconds. The demo lifts the arm, draws a square and a vertical line with the tool
+tip, and tilts the tool about its tip, showing the path and a caption in RViz.
+Touching any button, stick or trigger stops the demo at once and leaves teleop disabled;
+press Start to drive the arm yourself.
+Leave the controller alone for 30 seconds and the demo starts again. Autoplay runs
+only with simulated drives.
+
+**Windows, in one step:** double-click `scripts\windows-demo.cmd`. It does three things:
+
+- starts Docker Desktop if it isn't running;
+- opens the controller bridge in its own window, if Python 3 is installed;
+- starts the ground station.
+
+Press **Ctrl+C** in its window to stop.
+
+**Linux:** `ros2 launch waybionic_bringup ground_station.launch.py teleop:=true autoplay:=true`.
+
+## Real MKS Drives over CAN
+
+`drive_interface` sends the same frames to real MKS SERVO42D/57D drives through a
+[python-can](https://python-can.readthedocs.io/) interface. The drive map in
+`waybionic_teleop/config/arm_drives.yaml` is still a placeholder: check each CAN ID,
+gear ratio and direction before the first powered test, and start with the motors
+unloaded. Set every drive to the bitrate in that file (1 Mbit/s; the MKS default is
+500 kbit/s). On a real bus every drive joint needs a URDF limit before the host holds or
+moves anything (`unmodeled_joints` applies to simulation only), so remove the placeholder
+`tool` drive from the map, or give its joint a limit in the URDF.
+
+The computer running ROS needs the USB CAN adapter. Docker Desktop on Windows and
+macOS cannot reach USB devices, so use native ROS on Linux or macOS (RoboStack), or
+Docker on Linux with `--network host`.
+
+Linux, SocketCAN adapter (candleLight firmware):
+
+```bash
+sudo ip link set can0 up type can bitrate 1000000
+ros2 launch waybionic_bringup ground_station.launch.py teleop:=true drive_interface:=socketcan drive_channel:=can0
+```
+
+macOS or Linux, serial-line (slcan) adapter:
+
+```bash
+ros2 launch waybionic_bringup ground_station.launch.py teleop:=true drive_interface:=slcan drive_channel:=/dev/tty.usbmodem1101
+```
+
+**Zeroing.** The encoders count from where the drives were powered on, so the host
+publishes no joint states and moves nothing until the arm is zeroed. Put the arm in
+the zero pose (the pose RViz shows before anything moves), leave teleop disabled, and
+run:
+
+```bash
+ros2 service call /sim_arm_drives/zero std_srvs/srv/Trigger
+```
+
+Then press Start. Real drives take commands through the same gate as the simulated ones.
+If a drive stops answering, for example because the E-stop cut its power, or its encoder
+count jumps further than `max_rpm` allows between two readings, as after a brief power
+loss, every drive stops and the arm must be zeroed again. The same happens when a drive
+reports a failed move (as when its stall protection releases the motor) or an end-limit
+stop, or stays more than `following_error_counts` from its target for
+`following_error_ticks` ticks; both are provisional values in `arm_drives.yaml`. If the
+joint commands stop for 0.5 s, every drive stops where it is, and if the host stops, the
+drives' heartbeat stops them. A stop frame the adapter refuses is sent again on every
+tick, and Start is refused until it has gone out. After any stop, disable teleop and press
+Start again.
+
+**Without hardware.** `mks_drive_sim` answers on a CAN interface the way the drives
+do, so the host can be tested end to end over a virtual CAN interface on Linux:
+
+```bash
+sudo ip link add dev vcan0 type vcan && sudo ip link set up vcan0
+ros2 run waybionic_teleop mks_drive_sim --interface socketcan --channel vcan0
+```
+
+In a second terminal, launch with `drive_interface:=socketcan drive_channel:=vcan0`
+and zero as above. CI runs `waybionic_teleop/test/test_can_drives.py` over `vcan0`.
+
+## Doctor View Camera
+
+Until the doctor's camera is chosen, a USB webcam stands in for it. `camera_bridge`
+captures the webcam on the computer it is plugged into and sends JPEG frames to the
+ground station, each stamped with its capture time. The ground station publishes
+them on `/doctor_view/left/image_raw/compressed` with `/doctor_view/left/camera_info`.
+The diagnostics panel's `camera.doctor_view` entry shows the frame rate and the delay
+from capture to arrival: mean, minimum, maximum and jitter.
+
+**Windows (Docker):** first install OpenCV for the bridge with
+`python -m pip install opencv-python`. Python 3.13 or newer is recommended for the
+bridge: on Windows, older versions read the clock in 15.6 ms steps, which can add up
+to 15.6 ms to the measured delay. Then start the ground station with the camera
+port, from the repository root:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin\docker.exe" compose run --rm --build -p 127.0.0.1:47310:47310 wslg ros2 launch waybionic_bringup ground_station.launch.py camera:=true camera_bind:=0.0.0.0
+```
+
+In a second PowerShell window, start the bridge from the repository root:
+
+```powershell
+cd waybionic_camera
+python -m waybionic_camera.camera_bridge
+```
+
+Finally, tick **Doctor View** in RViz's Displays panel.
+
+**Bridge options:**
+
+- `--camera 1` uses another camera.
+- `--width 1280 --height 720` changes the resolution.
+- On Windows, `--backend dshow` often opens a webcam faster.
+
+**Linux (native ROS):** run
+`ros2 launch waybionic_bringup ground_station.launch.py camera:=true`. Then, from
+`waybionic_camera`, run `python3 -m waybionic_camera.camera_bridge`; it needs
+`python3-opencv`.
+
+**Measuring the delay.**
+
+- **What the reported delay covers:** from when OpenCV hands the bridge a frame to
+  when the frame reaches ROS. It leaves out the time spent inside the camera and on
+  the display.
+- **Full delay:** point the camera at a millisecond stopwatch on the same screen as
+  RViz, then compare the live stopwatch with the one in the Doctor View.
+- **Logging each frame:** add `camera_log:=` with a CSV path to the launch command to
+  log every frame's capture time, arrival time and delay. `frame` counts the frames
+  that arrived, so a dropped frame shows as a longer gap in `captured_s`. With native
+  ROS, any path works, such as `camera_log:=/tmp/camera.csv`. In Docker, `--rm`
+  deletes the container and its files when it stops, so log to a Windows folder
+  mounted into the container instead. This writes `camera.csv` to `camera-logs` in
+  your user folder:
+
+  ```powershell
+  & "$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin\docker.exe" compose run --rm --build -p 127.0.0.1:47310:47310 -v "$HOME\camera-logs:/camera-logs" wslg ros2 launch waybionic_bringup ground_station.launch.py camera:=true camera_bind:=0.0.0.0 camera_log:=/camera-logs/camera.csv
+  ```
+
+- **Clocks:** the bridge stamps frames with the camera computer's clock, so the two
+  clocks must agree. Docker Desktop keeps them within a few milliseconds. If the
+  delay looks negative or keeps growing after the PC sleeps, restart Docker Desktop.
 
 ## Native Ubuntu Setup for RViz
 
@@ -524,52 +781,174 @@ source ~/waybionic_ws/install/setup.bash
 
 ## macOS (Apple Silicon)
 
-The workspace runs natively through RoboStack. Docker and XQuartz are not required.
-Intel macOS is not currently verified.
+The workspace runs natively through RoboStack. Docker and XQuartz are not
+required. Intel macOS is not verified.
 
-### Prerequisites
+### First-time setup
 
-Install the Xcode command-line tools, Git, and Miniforge:
+1. Install the prerequisites:
 
-```bash
-xcode-select --install
-brew install git
-brew install --cask miniforge
-```
+   ```bash
+   xcode-select --install
+   brew install git
+   brew install --cask miniforge
+   conda init "$(basename "$SHELL")"
+   ```
 
-Reopen the terminal if `mamba` or `conda` is not immediately available.
+   If Homebrew is missing, install it from [brew.sh](https://brew.sh/) first.
+   If Xcode reports that its tools are already installed, continue.
 
-### Setup and launch
+2. Close Terminal, open a new Terminal window, and verify Miniforge:
 
-For a new clone, run:
+   ```bash
+   mamba --version
+   ```
 
-```bash
-git clone https://github.com/Waybionic/waybionic_ground_station.git && cd waybionic_ground_station && ./scripts/macos.sh setup
-```
+3. Clone the repository:
 
-For an existing clone, run `./scripts/macos.sh setup` from the repository root.
-The command creates or updates the `waybionic_robostack` environment and builds
-the workspace.
+   ```bash
+   mkdir -p ~/waybionic
+   cd ~/waybionic
+   git clone https://github.com/Waybionic/waybionic_ground_station.git
+   cd waybionic_ground_station
+   ```
 
-Launch RViz and Joint State Publisher GUI:
+   For an existing clone, skip the clone commands and change to that
+   repository's root directory.
+
+4. Create the RoboStack environment and build the workspace:
+
+   ```bash
+   ./scripts/macos.sh setup
+   ```
+
+   Wait for `Setup complete` before continuing.
+
+### Launch
+
+From the repository root, run:
 
 ```bash
 ./scripts/macos.sh launch
 ```
 
-Other useful commands:
+Keep this Terminal window open. Within a few seconds:
+
+- The RViz splash screen is replaced by the main window.
+- `DiagnosticsPanel` displays **WayBionic Engineering Monitor** and
+  **Current State: NORMAL**.
+- Joint State Publisher displays the `joint_1` to `joint_5` sliders. Move them
+  to check base yaw, shoulder, elbow, wrist pitch, and wrist roll.
+
+To stop the application, return to the launch Terminal and press
+<kbd>Control</kbd>+<kbd>C</kbd>.
+
+Always use `scripts/macos.sh`. It selects the macOS SDK and Cyclone DDS and
+loads the workspace correctly. Do not source `install/setup.bash` from zsh or
+replace the helper with direct `colcon` or `ros2 launch` commands.
+
+`setup` installs Cyclone DDS explicitly. Builds pass the selected SDK to
+CMake as `CMAKE_OSX_SYSROOT`; an existing `CONDA_BUILD_SYSROOT` takes precedence
+over `xcrun --show-sdk-path`.
+
+### Verify ROS nodes
+
+While the application is running, open a second Terminal, change to the
+repository root, and run:
 
 ```bash
-./scripts/macos.sh build                 # rebuild the workspace
-./scripts/macos.sh run ros2 topic list   # run any overlaid ROS command
+RMW_IMPLEMENTATION=rmw_cyclonedds_cpp ./scripts/macos.sh run ros2 node list
 ```
 
-After pulling repository changes, update and rebuild with:
+The output must include:
+
+```text
+/joint_state_publisher
+/robot_state_publisher
+/rviz2
+```
+
+### Update or rebuild
+
+After pulling repository changes:
 
 ```bash
-git pull && ./scripts/macos.sh setup
+git pull
+./scripts/macos.sh setup
 ```
 
-If RViz reports a missing workspace package, rerun `./scripts/macos.sh build`.
-Do not source `install/setup.bash` directly from zsh; the helper handles the
-workspace overlay through Bash.
+To rebuild without updating the environment:
+
+```bash
+./scripts/macos.sh build
+```
+
+### Troubleshooting
+
+Run these commands from the repository root. After applying a fix, use the
+single command in the **Launch** section.
+
+#### `mamba` is not found
+
+Close and reopen Terminal. If `mamba --version` still fails, reinstall
+Miniforge and reopen Terminal again:
+
+```bash
+brew reinstall --cask miniforge
+```
+
+#### Setup cannot solve the environment or reports missing ROS tools
+
+Use this for `Could not solve for environment specs`, `colcon: not found`,
+`xacro: not found`, or a missing Joint State Publisher.
+
+First confirm that `waybionic_robostack` appears in:
+
+```bash
+mamba env list
+```
+
+If it exists, repair and rebuild it:
+
+```bash
+mamba install --yes --name waybionic_robostack --freeze-installed \
+  --channel conda-forge --channel robostack-jazzy \
+  colcon-common-extensions ros-jazzy-xacro \
+  ros-jazzy-joint-state-publisher-gui
+./scripts/macos.sh build
+```
+
+If the environment does not exist, rerun the first-time setup command instead.
+
+#### CMake reports a missing OpenGL framework header
+
+If the error names
+`/System/Library/Frameworks/OpenGL.framework/Headers`, update and rebuild:
+
+```bash
+git pull
+./scripts/macos.sh build
+```
+
+#### RViz remains on `Initializing`
+
+Stop the application with <kbd>Control</kbd>+<kbd>C</kbd>, remove any Fast DDS
+override, and use the launch command above:
+
+```bash
+unset RMW_IMPLEMENTATION
+```
+
+#### `DiagnosticsPanel` reports `_PyExc_RuntimeError`
+
+Stop the application, clean the plugin's CMake cache, and rebuild it:
+
+```bash
+./scripts/macos.sh run colcon build \
+  --packages-select waybionic_rviz_plugins \
+  --cmake-clean-cache --symlink-install \
+  --cmake-args "-DCMAKE_OSX_SYSROOT=${CONDA_BUILD_SYSROOT:-$(xcrun --show-sdk-path)}"
+```
+
+The panel should display **WayBionic Engineering Monitor** after the next
+launch.
