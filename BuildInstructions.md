@@ -330,7 +330,9 @@ cd waybionic_teleop
 python -m waybionic_teleop.sdl_bridge
 ```
 
-Run only one Windows bridge at a time. The SDL bridge uses the first recognized
+Run only one Windows bridge at a time; the
+[self-running demo](#self-running-demo) opens the Xbox bridge, so close its window
+before starting the SDL bridge. The SDL bridge uses the first recognized
 controller by default; use `--index 1` (or another SDL index) if multiple controllers
 are connected. It waits for all controls to be released when the controller first
 connects or reconnects. Windows must show the controller as connected, and the bridge
