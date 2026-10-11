@@ -6,7 +6,7 @@ import time
 import unittest
 
 from ament_index_python.packages import get_package_share_directory
-from diagnostic_msgs.msg import DiagnosticArray
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 import launch
 from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -16,7 +16,7 @@ import pytest
 import rclpy
 from sensor_msgs.msg import JointState
 
-from waybionic_teleop import gamepad
+from waybionic_teleop import gamepad, mks_can
 
 PORT = 47391
 
@@ -67,13 +67,21 @@ class TestTeleop(unittest.TestCase):
 
         try:
             deadline = time.monotonic() + 30.0
-            while 'tool_grip' not in joints and time.monotonic() < deadline:
-                rclpy.spin_once(node, timeout_sec=0.1)
+            # Press Start only once teleop (the group row) and the drives (a gate waiting for
+            # Start, not a model) have the robot description and teleop receives the controller,
+            # or the press is lost on a slow machine.
+            while time.monotonic() < deadline and not (
+                    'tool_grip' in joints and 'teleop.group' in diagnostics
+                    and diagnostics['teleop.input'].level == DiagnosticStatus.OK
+                    and 'arm.command_gate' in diagnostics
+                    and diagnostics['arm.command_gate'].level == DiagnosticStatus.WARN):
+                hold(0.1)
             self.assertIn('tool_grip', joints, 'the simulated drives never reported positions')
-            deadline = time.monotonic() + 15.0
-            while 'teleop.state' not in diagnostics and time.monotonic() < deadline:
-                rclpy.spin_once(node, timeout_sec=0.1)
-            self.assertIn('teleop.state', diagnostics, 'teleop did not become ready')
+            self.assertIn('teleop.group', diagnostics, 'teleop never loaded the robot description')
+            self.assertEqual(diagnostics['teleop.input'].level, DiagnosticStatus.OK,
+                             'teleop never received the controller packets')
+            self.assertEqual(diagnostics['arm.command_gate'].level, DiagnosticStatus.WARN,
+                             'the drives never loaded the robot description')
             hold(1.0, left_x=1.0)
             self.assertAlmostEqual(joints['joint_1'], 0.0, places=3, msg='moved while disabled')
             hold(0.2, 'start')
@@ -88,12 +96,86 @@ class TestTeleop(unittest.TestCase):
             self.assertGreater(joints['tool_grip'], 0.3)
             hold(0.2, 'b')
             pitch = joints['joint_4']
-            hold(0.5, right_y=1.0)
+            hold(0.75, right_y=1.0)
             self.assertAlmostEqual(joints['joint_4'], pitch, places=2, msg='moved after B')
             self.assertEqual(diagnostics['teleop.state'].values[0].value, 'disabled')
+            for drive in ('base_yaw', 'shoulder', 'elbow', 'wrist_left', 'wrist_right', 'tool'):
+                values = {item.key: item.value for item in diagnostics[f'drive.{drive}'].values}
+                can_id = int(values['can_id'])
+                stop = mks_can.hex_frame(can_id, mks_can.absolute_axis(can_id, 0, 0, 0))
+                self.assertEqual(values['last_command'], stop, f'{drive} did not stop')
+            hold(0.2, 'start')
+            hold(0.9, right_y=1.0)
+            self.assertGreater(joints['joint_4'], pitch + 0.05, 'Start did not re-arm')
+            self.assertEqual(diagnostics['teleop.state'].values[0].value, 'enabled')
             self.assertEqual(diagnostics['can.bus'].level, b'\x00')
             self.assertEqual(diagnostics['drive.wrist_left'].level, b'\x00')
         finally:
+            sender.close()
+            node.destroy_node()
+            rclpy.shutdown()
+
+    def test_pushing_into_a_limit_rumbles_the_controller(self):
+        rclpy.init()
+        node = rclpy.create_node('rumble_test')
+        diagnostics = {}
+        node.create_subscription(
+            DiagnosticArray, '/diagnostics',
+            lambda message: diagnostics.update(
+                (status.name, status) for status in message.status), 10)
+        sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sender.setblocking(False)
+        # Ahead of the other test's packets, which the receiver may still remember.
+        sequence, rumbles = 1_000_000, []
+
+        def hold(seconds, *pressed, **axes):
+            nonlocal sequence
+            packet_axes = [axes.get(name, 0.0) for name in gamepad.AXES]
+            buttons = [int(name in pressed) for name in gamepad.BUTTONS]
+            end = time.monotonic() + seconds
+            while time.monotonic() < end:
+                sequence += 1
+                sender.sendto(gamepad.pack(sequence, packet_axes, buttons), ('127.0.0.1', PORT))
+                rclpy.spin_once(node, timeout_sec=0.02)
+                try:
+                    rumbles.append(gamepad.unpack_rumble(sender.recv(64)))
+                except BlockingIOError:
+                    pass
+
+        def group():
+            # Only a report sent after the last press counts.
+            diagnostics.pop('teleop.group', None)
+            deadline = time.monotonic() + 5.0
+            while 'teleop.group' not in diagnostics and time.monotonic() < deadline:
+                hold(0.05)
+            self.assertIn('teleop.group', diagnostics, 'teleop stopped reporting its group')
+            return diagnostics['teleop.group'].values[0].value
+
+        try:
+            deadline = time.monotonic() + 30.0
+            while time.monotonic() < deadline and not (
+                    'teleop.group' in diagnostics
+                    and diagnostics['teleop.input'].level == DiagnosticStatus.OK):
+                hold(0.1)
+            # Whatever ran before, start disabled in the upper group.
+            hold(0.2, 'b')
+            for _ in range(3):
+                if group() == 'upper':
+                    break
+                hold(0.2, 'y')
+            else:
+                self.fail('Y never selected the upper group')
+            hold(0.2, 'start')
+            # The upper group's left stick bends the elbow until it stops at a limit.
+            deadline = time.monotonic() + 10.0
+            while not rumbles and time.monotonic() < deadline:
+                hold(0.1, left_y=1.0)
+            hold(0.5)
+            self.assertTrue(rumbles, 'the controller never rumbled')
+            self.assertGreater(rumbles[0], 0.0)
+            self.assertEqual(rumbles[-1], 0.0)
+        finally:
+            hold(0.2, 'b')
             sender.close()
             node.destroy_node()
             rclpy.shutdown()

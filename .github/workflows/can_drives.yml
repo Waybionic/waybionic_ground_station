@@ -1,0 +1,37 @@
+name: CAN Drives over vcan
+
+on:
+  push:
+    branches: [ "main" ]
+    paths: [ "waybionic_teleop/**", "docker/**", ".github/workflows/can_drives.yml" ]
+  pull_request:
+    paths: [ "waybionic_teleop/**", "docker/**", ".github/workflows/can_drives.yml" ]
+
+permissions:
+  contents: read
+
+jobs:
+  can-drives-vcan:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Create vcan0
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y "linux-modules-extra-$(uname -r)"
+          sudo modprobe vcan
+          sudo ip link add dev vcan0 type vcan
+          sudo ip link set up vcan0
+
+      - name: Build the Workspace Image
+        run: docker build --progress plain --target build --tag waybionic-can-drives --file docker/Dockerfile .
+
+      # The host network namespace holds vcan0.
+      - name: Drive Simulated MKS Drives over vcan0
+        run: >
+          docker run --rm --network host --env WAYBIONIC_CAN_TEST=socketcan:vcan0
+          waybionic-can-drives python3 -m pytest -v -p no:cacheprovider
+          src/waybionic_ground_station/waybionic_teleop/test/test_can_drives.py
