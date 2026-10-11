@@ -81,8 +81,10 @@ def check_files_exist(context, *args, **kwargs):
             raise RuntimeError('autoplay only runs with simulated drives')
 
     use_diagnostics = IfCondition(LaunchConfiguration('use_diagnostics')).evaluate(context)
+    camera = IfCondition(LaunchConfiguration('camera')).evaluate(context)
     topic = LaunchConfiguration('diagnostics_topic').perform(context)
-    if use_diagnostics:
+    # Demo mode, teleop and the camera publish on the topic even without the panel.
+    if use_diagnostics or demo_mode or teleop or camera:
         try:
             validate_full_topic_name(expand_topic_name(topic, 'rviz2', '/'))
         except (ValueError, RuntimeError) as exc:

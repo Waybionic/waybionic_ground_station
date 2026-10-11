@@ -101,6 +101,16 @@ def test_unused_topic_is_not_validated(context):
     MODULE.check_files_exist(context)
 
 
+@pytest.mark.parametrize('switch', ['demo_mode', 'teleop', 'camera'])
+def test_topic_used_without_the_panel_is_validated(context, switch):
+    context.launch_configurations.update({
+        'use_diagnostics': 'false', 'launch_rviz': 'false',
+        'diagnostics_topic': '/invalid topic', switch: 'true',
+    })
+    with pytest.raises(ValueError, match='diagnostics_topic'):
+        MODULE.check_files_exist(context)
+
+
 def test_invalid_model(context, tmp_path):
     model = tmp_path / 'broken.urdf'
     model.write_text('<robot>')
