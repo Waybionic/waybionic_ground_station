@@ -87,10 +87,17 @@ def test_missing_required_file(context, argument):
         MODULE.check_files_exist(context)
 
 
-def test_invalid_topic(context):
-    context.launch_configurations['diagnostics_topic'] = '/invalid topic'
-    with pytest.raises(ValueError, match='diagnostics_topic'):
+@pytest.mark.parametrize('topic', ['/invalid topic', '/bad//topic',
+                                   '~/diagnostics', 'diagnostics'])
+def test_invalid_topic(context, topic):
+    context.launch_configurations['diagnostics_topic'] = topic
+    with pytest.raises(ValueError, match='Invalid diagnostics_topic'):
         MODULE.check_files_exist(context)
+
+
+def test_fully_qualified_topic(context):
+    context.launch_configurations['diagnostics_topic'] = '/robot/diagnostics'
+    MODULE.check_files_exist(context)
 
 
 def test_unused_topic_is_not_validated(context):

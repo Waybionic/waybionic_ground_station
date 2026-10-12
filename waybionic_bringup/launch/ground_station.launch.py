@@ -15,7 +15,7 @@ from launch.substitutions import (
     NotSubstitution, OrSubstitution)
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
-from rclpy.expand_topic_name import expand_topic_name
+from rclpy.exceptions import InvalidTopicNameException
 from rclpy.validate_full_topic_name import validate_full_topic_name
 
 import xacro
@@ -86,8 +86,10 @@ def check_files_exist(context, *args, **kwargs):
     # Demo mode, teleop and the camera publish on the topic even without the panel.
     if use_diagnostics or demo_mode or teleop or camera:
         try:
-            validate_full_topic_name(expand_topic_name(topic, 'rviz2', '/'))
-        except (ValueError, RuntimeError) as exc:
+            if not topic.startswith('/'):
+                raise ValueError('topic must be fully qualified (start with /)')
+            validate_full_topic_name(topic)
+        except (ValueError, InvalidTopicNameException) as exc:
             raise ValueError(f"Invalid diagnostics_topic '{topic}': {exc}") from exc
 
     actions = [
