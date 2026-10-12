@@ -31,12 +31,12 @@ def check():
 
 
 @pytest.mark.parametrize('joints', [
-    pose(0, 0, 0), pose(28.6, 80.2, 71.1, 0.1), pose(90, 0, 0)])
+    pose(0, 0, 0), pose(28.6, 80.2, 71.1, 0.1), pose(90, 0, 0), pose(-30, -90, -90)])
 def test_working_poses_are_clear(check, joints):
     assert check.hits(joints) == []
 
 
-@pytest.mark.parametrize('joints', [pose(60, 60, 60, 2.0), pose(-30, -90, -90)])
+@pytest.mark.parametrize('joints', [pose(60, 60, 60, 2.0)])
 def test_the_larger_clamp_detects_table_contact(check, joints):
     """Poses that cleared the old placeholder now contact the table."""
     assert 'tool_link: table' in check.hits(joints)
@@ -55,9 +55,9 @@ def test_folding_back_into_the_base_is_caught_past_todays_joint_limits(check):
 
 
 def test_table_height_and_clearance_are_configurable():
-    # This pose's tool tip is 175 mm above the bottom of the base.
+    # Shortening the mount lifts this collision box just above the table.
     joints = pose(28.6, 80.2, 71.1, 0.1)
-    assert ArmCollision.from_urdf(URDF, table_z=0.02).hits(joints)
+    assert ArmCollision.from_urdf(URDF, table_z=0.05).hits(joints)
     assert not ArmCollision.from_urdf(URDF, table_z=0.0).hits(joints)
     assert ArmCollision.from_urdf(URDF, table_z=0.0, clearance=0.1).hits(joints)
 

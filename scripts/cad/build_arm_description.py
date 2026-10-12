@@ -49,7 +49,7 @@ LINKS = {
     'wrist_pitch_link': ('DifferentialHousing-1',),
     'wrist_left_gear_link': ('straight bevel pinion_iso-4', 'BevelGearShaftV2-3', 'GT2 60T b5 (6mm)-2'),
     'wrist_right_gear_link': ('straight bevel pinion_iso-2', 'BevelGearShaftV2-4', 'GT2 60T b5 (6mm)-1'),
-    'wrist_roll_link': ('straight bevel pinion_iso-3', 'Biomed Lock Mechanism_V3_HT_20260815-1'),
+    'wrist_roll_link': ('straight bevel pinion_iso-3',),
 }
 
 # name, parent, child, axis mate, origin plane mate, SolidWorks rotor, limits in degrees.
@@ -70,9 +70,10 @@ DESCRIPTIONS = {
     'joint_4': 'wrist pitch (differential housing)', 'joint_5': 'wrist roll (output bevel)',
 }
 GEAR_LINKS = ('wrist_left_gear_link', 'wrist_right_gear_link')
-# Placeholder box around the jaws xbox_teleop draws at tool_link (36 mm across when open, 14 mm
-# thick, 30 mm long) as (centre, size), until the real tool is modelled.
-TOOL_BOX = ((0.0, 0.0, 0.015), (0.036, 0.014, 0.03))
+# The old Mechanical holder is replaced by Julie's clamp; retain the output bevel.
+SUPERSEDED_PARTS = ('Biomed Lock Mechanism_V3_HT_20260815-1',)
+# Conservative collision box for Julie's provisional clamp preview.
+TOOL_BOX = ((0.0, 0.0, 0.07625), (0.08, 0.08, 0.1525))
 BEVELS = ('straight bevel pinion_iso-2', 'straight bevel pinion_iso-3', 'straight bevel pinion_iso-4')
 # Threaded screws and the enclosed cycloidal discs dominate the triangle count.
 COARSE_PARTS = ('m3-', 'discs-sweep', 'loose_disc')
@@ -274,7 +275,7 @@ def check_components(export):
     worst_part = 0.0
     placement = []
     for name, component in export.components.items():
-        if not component.get('faces'):
+        if not component.get('faces') or name.split('/')[0] in SUPERSEDED_PARTS:
             continue
         link = owner_link(name)
         if link is None:
@@ -628,7 +629,7 @@ def write_urdf(model, source, boxes):
             '  </link>']
     lines += [
         '  <link name="tool_link">',
-        '    <!-- Placeholder around the RViz jaws until the real tool is modelled. -->',
+        "    <!-- Provisional box around Julie's clamp at the preview open/closed poses. -->",
         *collision_lines(*TOOL_BOX),
         '  </link>']
     for joint in model.joints:

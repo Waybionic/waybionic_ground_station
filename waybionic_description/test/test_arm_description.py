@@ -87,6 +87,21 @@ def test_every_mesh_is_inside_its_collision_box(robot):
             assert max(points) <= center[axis] + size[axis] / 2 + 1e-4
 
 
+def test_old_mechanical_holder_is_replaced_without_removing_output_bevel(robot):
+    """Keep the wrist bevel but mount Julie's clamp where the old holder began."""
+    wrist = robot.find("link[@name='wrist_roll_link']")
+    uri = wrist.find('visual/geometry/mesh').get('filename')
+    mesh = ET.parse(PACKAGE / uri[len('package://waybionic_description/'):]).getroot()
+    groups = mesh.findall(f'.//{COLLADA}triangles')
+    assert sum(int(group.get('count')) for group in groups) == 2905
+    values = [float(value) for value in mesh.find(f'.//{COLLADA}float_array').text.split()]
+    assert max(values[2::3]) == pytest.approx(0.061)
+    tool = robot.find("joint[@name='tool_joint']")
+    assert tool.find('parent').get('link') == 'wrist_roll_link'
+    assert tool.find('child').get('link') == 'tool_link'
+    assert float(tool.find('origin').get('xyz').split()[2]) == pytest.approx(0.061)
+
+
 def test_the_tool_box_encloses_the_assembled_clamp(robot):
     """The collision box must cover Julie's parts in their assembled pose."""
     boxes = robot.find("link[@name='tool_link']").findall('collision')

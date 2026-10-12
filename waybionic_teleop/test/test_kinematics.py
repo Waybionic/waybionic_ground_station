@@ -79,7 +79,7 @@ def arm():
 def test_geometry_is_read_from_the_urdf(arm):
     assert arm.joints == ('joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5')
     assert (arm.height, arm.offset, arm.upper, arm.fore, arm.tool) == pytest.approx(
-        (0.2155, 0.0329, 0.165, 0.2855, 0.093369))
+        (0.2155, 0.0329, 0.165, 0.2855, 0.061))
 
 
 @pytest.mark.parametrize('joints', random_poses(200))

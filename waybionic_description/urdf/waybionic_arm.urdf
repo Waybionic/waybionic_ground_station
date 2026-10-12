@@ -73,8 +73,8 @@
       <geometry><mesh filename="package://waybionic_description/meshes/arm/wrist_roll_link.dae"/></geometry>
     </visual>
     <collision>
-      <origin xyz="0 0.0003 0.0527" rpy="0 0 0"/>
-      <geometry><box size="0.07 0.0695 0.0815"/></geometry>
+      <origin xyz="0 0 0.0365" rpy="0 0 0"/>
+      <geometry><box size="0.06 0.06 0.049"/></geometry>
     </collision>
   </link>
   <link name="tool_link">
@@ -143,6 +143,6 @@
   <joint name="tool_joint" type="fixed">
     <parent link="wrist_roll_link"/>
     <child link="tool_link"/>
-    <origin xyz="0 0 0.093369" rpy="0 0 0"/>
+    <origin xyz="0 0 0.061" rpy="0 0 0"/>
   </joint>
 </robot>
