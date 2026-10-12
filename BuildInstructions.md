@@ -330,6 +330,16 @@ cd waybionic_teleop
 python -m waybionic_teleop.sdl_bridge
 ```
 
+To enable Bluetooth rumble, restart the bridge with:
+
+```powershell
+python -m waybionic_teleop.sdl_bridge --bluetooth-rumble
+```
+
+This opt-in uses SDL extended reports. It can temporarily stop non-SDL
+DirectInput apps from using the controller; power-cycle the controller to restore
+normal DirectInput behavior. USB rumble does not need this option.
+
 Run only one Windows bridge at a time; the
 [self-running demo](#self-running-demo) opens the Xbox bridge, so close its window
 before starting the SDL bridge. The SDL bridge uses the first recognized

@@ -175,21 +175,30 @@ def test_rumble_reaches_only_an_open_controller():
     """Rumble for a second per request like the Xbox bridge; zero stops it."""
     sdl = FakeSDL()
     bridge = sdl_bridge.SDLBridge(fake_pygame(sdl), sdl)
-    bridge.rumble(1.0)
+    assert bridge.rumble(1.0) is False
     pad = FakeController()
     sdl.devices = [pad]
     bridge.poll(0.0)
-    bridge.rumble(0.5)
-    bridge.rumble(0.0)
+    assert bridge.rumble(0.5) is True
+    assert bridge.rumble(0.0) is True
     assert pad.rumbles == [(0.5, 0.5, 1000), 'stop']
+    pad.rumble = lambda low, high, duration: False
+    assert bridge.rumble(0.5) is False
 
 
-def test_rumble_replies_do_not_interrupt_the_controller_packets(monkeypatch):
+@pytest.mark.parametrize('bluetooth_rumble', [False, True])
+def test_rumble_replies_do_not_interrupt_the_controller_packets(
+        monkeypatch, bluetooth_rumble):
     """Only the ground station's replies rumble; the bridge keeps sending."""
     sdl = FakeSDL()
     pad = FakeController()
     sdl.devices = [pad]
-    sdl.init = sdl.quit = lambda: None
+
+    def init():
+        expected = '1' if bluetooth_rumble else None
+        assert sdl_bridge.os.environ.get('SDL_JOYSTICK_HIDAPI_PS5_RUMBLE') == expected
+    sdl.init = init
+    sdl.quit = lambda: None
     pygame = fake_pygame(sdl)
     pygame.HIDDEN = 0
     pygame.display = SimpleNamespace(
@@ -199,6 +208,7 @@ def test_rumble_replies_do_not_interrupt_the_controller_packets(monkeypatch):
     monkeypatch.setitem(sys.modules, 'pygame._sdl2',
                         SimpleNamespace(controller=sdl))
     monkeypatch.setenv('SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS', '1')
+    monkeypatch.delenv('SDL_JOYSTICK_HIDAPI_PS5_RUMBLE', raising=False)
     station = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     stranger = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     station.bind(('127.0.0.1', 0))
@@ -216,8 +226,10 @@ def test_rumble_replies_do_not_interrupt_the_controller_packets(monkeypatch):
 
     monkeypatch.setattr(sdl_bridge, 'time', SimpleNamespace(
         monotonic=time.monotonic, sleep=sleep))
-    monkeypatch.setattr(sys, 'argv', [
-        'sdl_bridge', '--port', str(station.getsockname()[1])])
+    arguments = ['sdl_bridge', '--port', str(station.getsockname()[1])]
+    if bluetooth_rumble:
+        arguments.append('--bluetooth-rumble')
+    monkeypatch.setattr(sys, 'argv', arguments)
     try:
         sdl_bridge.main()
     finally:

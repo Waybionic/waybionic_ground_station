@@ -73,12 +73,12 @@ class SDLBridge:
     def rumble(self, intensity):
         """Rumble the open controller like the Xbox bridge; zero stops it."""
         if self.controller is None:
-            return
+            return False
         if intensity > 0:
-            self.controller.rumble(intensity, intensity,
-                                   round(RUMBLE_S * 1000))
-        else:
-            self.controller.stop_rumble()
+            return self.controller.rumble(intensity, intensity,
+                                          round(RUMBLE_S * 1000))
+        self.controller.stop_rumble()
+        return True
 
     def poll(self, now):
         """Return axes, buttons, connection state, and a status message."""
@@ -137,6 +137,9 @@ def main():
                         help='packets per second')
     parser.add_argument('--index', type=int,
                         help='SDL controller index (default: first)')
+    parser.add_argument('--bluetooth-rumble', action='store_true',
+                        help='enable DualSense Bluetooth rumble; may disrupt non-SDL '
+                             'controller apps until the controller is power-cycled')
     args = parser.parse_args()
     if (args.rate <= 0 or not 1 <= args.port <= 65535
             or (args.index is not None and args.index < 0)):
@@ -145,6 +148,10 @@ def main():
 
     # SDL must keep updating input while the operator is looking at RViz.
     os.environ.setdefault('SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS', '1')
+    # SDL 2 uses basic Bluetooth reports by default, which cannot rumble a DualSense.
+    # The opt-in hint must be set before pygame imports and initializes SDL.
+    if args.bluetooth_rumble:
+        os.environ['SDL_JOYSTICK_HIDAPI_PS5_RUMBLE'] = '1'
     try:
         import pygame
         from pygame._sdl2 import controller as sdl
@@ -163,8 +170,12 @@ def main():
     sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sender.setblocking(False)
     sequence, period, last_message, shown = 0, 1.0 / args.rate, None, ''
+    rumble_warning_shown = False
     print(f'Sending controller state to {args.host}:{args.port} '
           '(Ctrl+C to stop)')
+    if args.bluetooth_rumble:
+        print('DualSense Bluetooth rumble enabled; power-cycle the controller '
+              'before using non-SDL controller apps.')
     try:
         while True:
             started = time.monotonic()
@@ -181,7 +192,11 @@ def main():
             # The ground station answers when a move stops at a limit.
             intensity = read_rumble(sender, receiver)
             if intensity is not None:
-                bridge.rumble(intensity)
+                accepted = bridge.rumble(intensity)
+                if intensity > 0 and not accepted and not rumble_warning_shown:
+                    print('\nSDL rejected controller rumble; for Bluetooth, restart '
+                          'with --bluetooth-rumble.')
+                    rumble_warning_shown = True
             if connected and sequence % 30 == 0:
                 held = ' '.join(name for name, pressed in zip(BUTTONS, buttons)
                                 if pressed)
