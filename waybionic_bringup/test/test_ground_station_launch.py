@@ -24,7 +24,6 @@ def generate_test_description():
         launch_arguments={
             'launch_rviz': '0',
             'use_joint_state_publisher_gui': '0',
-            'start_temporary_diagnostics_publisher': 'true',
             'use_diagnostics': '0',
             'follow_camera': 'False'
         }.items()
