@@ -16,6 +16,7 @@ SET_RESPONSE = 0x8C
 SET_HEARTBEAT = 0x98
 ENABLE = 0xF3
 ABSOLUTE_AXIS = 0xF5
+EMERGENCY_STOP = 0xF7
 
 MODE_SR_VFOC = 0x05
 RUN_STATUS = {0: 'run failed', 1: 'running', 2: 'run complete', 3: 'stopped at end limit'}
@@ -87,3 +88,8 @@ def set_heartbeat(can_id, milliseconds):
 def enable(can_id, on=True):
     """Lock (on) or release the motor shaft (F3h)."""
     return frame(can_id, ENABLE, [int(on)])
+
+
+def emergency_stop(can_id):
+    """Stop the motor immediately (F7h); this is not a substitute for the physical E-stop."""
+    return frame(can_id, EMERGENCY_STOP)

@@ -19,11 +19,11 @@ const char * const kHelp[] = {
   "  enable <id> | disable <id>     F3h ENABLE 01 / 00",
   "  move <id> <axis> <rpm> <acc>   F5h ABSOLUTE_AXIS (all four required)",
   "  stop <id> [acc]                F5h with speed 0 = stop (default acc 0 = at once)",
-  "  estop <id>                     TODO: F7h is not defined in the repo sources",
+  "  estop <id>                     F7h EMERGENCY_STOP (immediate)",
   "  mode <id>                      82h SET_MODE 05 (SR_vFOC); writes a drive setting",
   "  response <id> <0|1> <0|1>      8Ch SET_RESPONSE respond, active; writes a setting",
   "  heartbeat <id> <ms>            98h SET_HEARTBEAT (0 = off); writes a setting",
-  "  raw <ID#HEX>                   send bytes exactly as typed (F3h/F5h refused)",
+  "  raw <ID#HEX>                   send a known read-only code exactly (31h only)",
   "  ck <ID#HEX>                    print the frame with its MKS checksum; sends nothing",
   "  drives | policy | help",
   "ids are 1-2047 (0 = broadcast is refused); numbers may be decimal or 0x hex",
@@ -248,10 +248,7 @@ bool BringupConsole::handleLine(char * line, const uint32_t now_ms)
   } else if (strcmp(verb, "stop") == 0) {
     cmdStop(args, argc, now_ms);
   } else if (strcmp(verb, "estop") == 0) {
-    out_.line("ERR estop: F7h emergency stop is NOT implemented and nothing was sent.");
-    out_.line("    Its layout is not in mks_can.py, its tests or any MKS manual in the repo.");
-    out_.line("    Use the PHYSICAL E-stop. 'stop <id>' (F5h speed 0) and 'disable <id>'");
-    out_.line("    are software stops only.");
+    cmdEmergencyStop(args, argc, now_ms);
   } else if (strcmp(verb, "mode") == 0) {
     cmdMode(args, argc, now_ms);
   } else if (strcmp(verb, "response") == 0) {
@@ -327,7 +324,7 @@ void BringupConsole::cmdMove(char ** args, const uint8_t count, const uint32_t n
   }
   Frame frame;
   if (!mks::absoluteAxis(id, axis, rpm, acc, frame)) {
-    emit("ERR outside mks_can.py limits: axis -8388607..8388607, rpm 0-3000, acc 0-255");
+    emit("ERR outside mks_can.py limits: axis -8388608..8388607, rpm 0-3000, acc 0-255");
     return;
   }
   if (rpm == 0) {
@@ -395,6 +392,20 @@ void BringupConsole::cmdStop(char ** args, const uint8_t count, const uint32_t n
   transmit(frame, now_ms, "ABSOLUTE_AXIS speed 0 (stop)");
 }
 
+void BringupConsole::cmdEmergencyStop(
+  char ** args, const uint8_t count, const uint32_t now_ms)
+{
+  uint16_t id = 0;
+  Frame frame;
+  if (count != 1) {
+    emit("ERR usage: estop <id>");
+  } else if (parseDriveId(args[0], id) && mks::emergencyStop(id, frame)) {
+    emit("MOTION F7h EMERGENCY_STOP id=%u (immediate software stop; not the physical E-stop)",
+      static_cast<unsigned>(id));
+    transmit(frame, now_ms, "EMERGENCY_STOP");
+  }
+}
+
 void BringupConsole::cmdMode(char ** args, const uint8_t count, const uint32_t now_ms)
 {
   uint16_t id = 0;
@@ -450,8 +461,10 @@ void BringupConsole::cmdRaw(char ** args, const uint8_t count, const uint32_t no
     emit("ERR raw needs ID 1-7FF (no broadcast) and 1-8 data bytes");
     return;
   }
-  if (frame.data[0] == mks::kAbsoluteAxis || frame.data[0] == mks::kEnable) {
-    emit("ERR raw F3h/F5h refused: use enable/move/stop so the safety checks apply");
+  // Keep raw useful for malformed-checksum/read diagnostics without giving it a path around
+  // motion limits or access to persistent drive configuration.
+  if (frame.data[0] != mks::kReadEncoder) {
+    emit("ERR raw permits only known read-only code 31h; use a checked console command");
     return;
   }
   emit("WARN raw frame: bytes are sent exactly as typed, with no MKS checksum added or checked");
@@ -539,7 +552,7 @@ void BringupConsole::printPolicy()
     static_cast<unsigned>(policy_.max_rpm), static_cast<unsigned>(policy_.min_acc),
     static_cast<unsigned>(policy_.max_acc), static_cast<long>(policy_.max_step_counts),
     static_cast<unsigned long>(policy_.encoder_fresh_ms));
-  emit("protocol limits (mks_can.py): axis -8388607..8388607, rpm 0-3000, acc 0-255");
+  emit("protocol limits (mks_can.py): axis -8388608..8388607, rpm 0-3000, acc 0-255");
 }
 
 void BringupConsole::printDrives(const uint32_t now_ms)

@@ -31,8 +31,8 @@ public:
   // Extended (29-bit) frames are dropped and counted: every protocol here uses 11-bit IDs.
   bool receive(Frame & frame, uint32_t timeout_ms) override;
 
-  // Latest controller error event (bus-off, error passive, ...) reported by Arduino_CAN.
-  // These are CAN-controller faults, unrelated to the MKS application checksum.
+  // Consume the latest callback-latched controller error event (bus-off, error passive, ...).
+  // A loop pass with no new event does not increment errorEvents().
   bool takeError(int & code);
   // Same, but at most once per second; suppressed counts the events folded into this report.
   // A bus nobody ACKs (drive unpowered, wrong bitrate, open bus) raises events continuously.

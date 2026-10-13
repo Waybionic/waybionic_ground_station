@@ -53,6 +53,7 @@ TEST(MksFrame, FramesMatchTheManual)
     {built(mks::readEncoder(1, f), f), "3132"},
     {built(mks::setMode(1, mks::kModeSrVfoc, f), f), "820588"},
     {built(mks::enable(1, true, f), f), "F301F5"},
+    {built(mks::emergencyStop(1, f), f), "F7F8"},
     {built(mks::setResponse(1, true, false, f), f), "8C01008E"},
     {built(mks::setHeartbeat(1, 500, f), f), "98000001F48E"},
   };

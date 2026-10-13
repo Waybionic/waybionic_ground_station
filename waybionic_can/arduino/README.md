@@ -31,8 +31,9 @@ For the supervised session with all five arm drives, use the
   (`benchPolicy()` / `MotionPolicy`). Change them only with the leads, then re-upload.
 - The human-readable bench sketches stay at the drive's factory **500 kbit/s**. The
   `feature/real-arm` carrier/host selects **1 Mbit/s CAN** after each drive is configured.
-- `F7h` emergency stop, drive-ID (8Bh), and bitrate (8Ah) commands are owned by the real-arm
-  Python host. The bench console's `estop` deliberately still sends nothing.
+- `estop <id>` sends the manual's F7h immediate emergency-stop command. It is a software
+  command and does not replace the physical E-stop. Drive-ID (8Bh) and bitrate (8Ah) are not
+  implemented in the merged `mks_can.py` or this shared library.
 
 ## Hardware topology
 
@@ -100,7 +101,9 @@ Use `arduino:renesas_uno:minima` for a Minima. Swap `single_drive_bringup` for `
 
 **Arduino IDE 2:** set *File > Preferences > Sketchbook location* to this `waybionic_can/arduino` folder, so the IDE finds `libraries/WaybionicCan`. Then open a sketch, choose the board and upload. Alternatively, copy `libraries/WaybionicCan` into your own sketchbook's `libraries/` folder.
 
-All four sketches have been compiled successfully in Arduino IDE for **Arduino UNO R4 WiFi**. Nothing has been uploaded to a board yet, and no powered motor test has been run. Powered testing still needs Yassin or Mujtaba present.
+All four sketches compile for **Arduino UNO R4 WiFi and Minima**. Nothing has been uploaded to
+a board yet, and no powered motor test has been run. Powered testing still needs Yassin or
+Mujtaba present.
 
 ## First drive: step-by-step
 
@@ -144,7 +147,7 @@ Do this with one SERVO42D on the bus and Yassin or Mujtaba present.
    ```
    Then `read 1` again and compare: the simulator assumes the 31h value and F5h axis share one
    coordinate (0x4000 per turn). The hardware session must confirm that assumption.
-7. **Stop:** `stop 1` sends F5h with speed 0 (`001#F5000000000000F6`), which the manual and `sim_drives.py` define as a stop (acc 0 = at once; `stop 1 4` gives the manual vector `001#F5000004000000FA`). `disable 1` (`001#F300F4`) releases the shaft. **`estop` does nothing yet** because F7h is undefined. Once the F7h bytes are confirmed from the manual, test them with `raw`. You can use `ck 001#F7...` to append the checksum before sending.
+7. **Stop:** `stop 1` sends F5h with speed 0 (`001#F5000000000000F6`), which the manual and `sim_drives.py` define as a stop (acc 0 = at once; `stop 1 4` gives the manual vector `001#F5000004000000FA`). `disable 1` (`001#F300F4`) releases the shaft. `estop 1` sends the manual section 9.2.3 immediate-stop frame `001#F7F8`. None of these software commands replaces the physical E-stop.
 8. **Save the log** (next section) and compare every byte.
 
 Command reference (`help` prints it):
@@ -155,11 +158,11 @@ Command reference (`help` prints it):
 | `enable <id>` / `disable <id>` | F3h 01 / 00 | `move` needs the enable reply |
 | `move <id> <axis> <rpm> <acc>` | F5h | All four values are required; bench limits apply |
 | `stop <id> [acc]` | F5h, speed 0 | Always allowed |
-| `estop <id>` | - | TODO: F7h is undefined, so nothing is sent |
+| `estop <id>` | F7h | Immediate software emergency stop; always allowed |
 | `mode <id>` | 82h 05 | SR_vFOC only; writes a setting |
 | `response <id> <0/1> <0/1>` | 8Ch | Writes a setting |
 | `heartbeat <id> <ms>` | 98h | 0 = off; writes a setting |
-| `raw <ID#HEX>` | as typed | No checksum added; F3h/F5h are refused; for byte checks |
+| `raw <ID#HEX>` | as typed | No checksum added; only read-only 31h is allowed |
 | `ck <ID#HEX>` | - | Prints the frame with its MKS checksum; nothing is sent |
 | `status`, `drives`, `policy`, `help` | - | Status also shows the E-stop and supply placeholders, the bus load and the error counters |
 
@@ -209,7 +212,7 @@ Save the serial output of all four boards for each test, one `Tee-Object` monito
 | Unplugged receiver | Unplug node 3's CAN_H/CAN_L (or its power), then `read 3` | The gateway logs `node 3 OFFLINE` after 500 ms. The other nodes keep answering. After replugging and a fresh `read 3`, node 3 comes back `ONLINE` but must be configured again. | `SilentReceiverGoesOfflineExactlyAfterTheTimeout`, `RestartedReceiverMustBeConfiguredAgain` |
 | Stop during a move | Set `kMoveMs` to a few seconds on node 2, start `move 2 4096 30 2`, then type `stop 2` before it finishes | Node 2 replies `status=1` and logs `moving=0`, with no `run complete`. Another node's move carries on. | `SpeedZeroStopHaltsOnlyTheAddressedMove` |
 
-The stop here is F5h with speed 0. F7h is not implemented (see [Protocol status](#protocol-status)).
+The stop here is F5h with speed 0. F7h is also covered by the unit and vcan tests.
 
 ## Carrier bridge (SLCAN subset)
 
@@ -233,21 +236,23 @@ Only part of SLCAN is supported:
 | `S4` `S5` `S6` `S8` | 125k / 250k / 500k / 1M, only while closed. Other `Sn` codes answer BELL (the UNO R4 API only offers these four). |
 | `O` | Start CAN (500 kbit/s unless `Sn` was sent) and forward frames both ways |
 | `C` | Stop forwarding. The controller itself stays started, so changing bitrate after the first `O` needs a board reset (`Arduino_CAN`'s `begin()` re-registers interrupts and a restart isn't known to be safe). |
-| `tIIILDD..` | Send a standard data frame; no reply on success, BELL if refused |
+| `tIIILDD..` | Queue a standard data frame; no reply on success, BELL if malformed, reserved ID `0x7F0`, or the 16-frame queue is full |
 | `V`, `N` | `V0100`, `NWB01` |
 | empty line | OK (python-can sends one after `Sn`) |
 | received frames | sent to the host as `tIIILDD..\r` while open |
 | `L`, `s`, `T`, `r`, `R`, `F`, `Z`, `d`/`D`/`b`/`B`, anything else | BELL (not supported: no listen-only mode or remote frames in `Arduino_CAN`, no extended IDs or CAN FD, no status flags or timestamps) |
 
 While open, the bridge sends a host-only status frame from standard ID `0x7F0` ten times per
-second. It never transmits that frame on CAN. Its eight bytes are sequence, flags, supply mV,
-CAN error-event count, failed writes, and refused serial lines; the exact layout is documented
-in `SlcanBridge.h`. The flags distinguish an unwired/unknown E-stop or supply input from a
-released E-stop or a measured voltage.
+second. It never transmits that frame on CAN, and drops bus frames using that reserved ID. Its
+eight bytes are sequence, flags, supply mV, CAN error-event count, failed writes, and refused
+serial lines; counter fields wrap so the host can take modulo differences. The exact layout is
+documented in `SlcanBridge.h`.
 
 The bridge does **not** check MKS checksums or apply motion limits; the host software is
-responsible for that. Successful transmitted lines are silent because the real-arm host batches
-a control tick and treats non-frame lines as an end-of-read marker. It has been tested through
+responsible for that. A 16-frame queue absorbs a complete control tick while the UNO R4's
+single standard-frame mailbox is busy; entries older than 10 ms are dropped and `C` clears the
+queue. Successful transmitted lines are silent because the real-arm host batches a control tick
+and treats non-frame lines as an end-of-read marker. It has been tested through
 `slcan_sim` and python-can; it has **not** been tested on the UNO R4/TJA1051T or real drives.
 
 **E-stop and supply telemetry:** `BenchTelemetry.h` has the interface, but currently returns
@@ -258,8 +263,8 @@ must remain effective with the carrier absent or failed.
 ## Adding drives one at a time
 
 1. Bring up each drive **alone** because all five ship as ID 1.
-2. Using the `feature/real-arm` `mks_setup` command, assign base 1, shoulder 2, elbow 3,
-   wrist-left/pitch 4, and wrist-right/roll 5; then set that isolated drive to 1 Mbit/s.
+2. Using the drive setup tooling, assign base 1, shoulder 2, elbow 3, left wrist motor 4,
+   and right wrist motor 5; then set that isolated drive to 1 Mbit/s.
 3. Add it to the shared bus with power off. Move the termination so the 120 Ω resistors stay
    at the two physical ends.
 4. Replug the carrier and scan IDs 1-5 at 1 Mbit/s. Every ID must produce exactly one `31h`
@@ -284,9 +289,9 @@ must remain effective with the carrier absent or failed.
 | 98h SET_HEARTBEAT | Implemented and verified | same |
 | F3h ENABLE | Implemented and verified | same |
 | F5h ABSOLUTE_AXIS (speed 0 = stop) | Implemented and verified | same, plus `sim_drives.py` for the speed-0 stop |
-| **F7h emergency stop** | Intentionally absent from the bench console; implemented by `feature/real-arm` host | MKS CAN manual V1.0.9 via PR #31 stack |
-| **Set CAN ID (8Bh)** | Host-owned; implemented by `feature/real-arm` `mks_setup` | same |
-| **Set CAN bitrate (8Ah)** | Host-owned; implemented by `feature/real-arm` `mks_setup` | same |
+| **F7h emergency stop** | Implemented and verified | MKS CAN manual V1.0.9 section 9.2.3 |
+| **Set CAN ID (8Bh)** | Not implemented in this subset or merged `mks_can.py` | MKS CAN manual |
+| **Set CAN bitrate (8Ah)** | Not implemented in this subset or merged `mks_can.py` | MKS CAN manual |
 | Broadcast ID 0, other MKS commands | Not implemented | - |
 
 "Verified" means checked against the repo's reference implementation and its manual vectors. The real-hardware check is the frame log from the bench session.
@@ -298,7 +303,7 @@ must remain effective with the carrier absent or failed.
 | Shared library logic (framing, receiver, gateway, console, SLCAN, bus load) | Unit-tested on the host with gtest |
 | Frame bytes vs merged `mks_can.py` | Cross-check command documented; rerun results belong in the PR/test report |
 | SLCAN bridge vs python-can's `slcan` driver | Tested against `../sim/slcan_sim` on a pseudo-terminal |
-| Sketches compiled for UNO R4 WiFi (`arduino:renesas_uno:unor4wifi`) | **Pass.** All four sketches compile in Arduino IDE: `single_drive_bringup`, `four_node_bench/gateway`, `four_node_bench/receiver` and `carrier_bridge`. |
+| Sketches compiled for UNO R4 WiFi and Minima | **Pass.** All four sketches compile for `unor4wifi` and `minima`: `single_drive_bringup`, `four_node_bench/gateway`, `four_node_bench/receiver` and `carrier_bridge`. CI repeats this matrix. |
 | Upload to a board in this assignment | **Not performed.** No hardware was flashed in this software session. |
 | Any acceptance test on the UNO R4, TJA1051T or MKS drives | **Not performed.** No new bench logs, measurements, photos or video were produced. |
 | Frame bytes vs the MKS manual | **Not directly in this package.** The manual is not committed; merged host vectors are checked. |

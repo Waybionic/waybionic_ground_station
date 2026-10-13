@@ -37,6 +37,26 @@ jobs:
       - name: Build and Test with Docker Compose
         run: docker compose --progress plain build test
 
+  vcan:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Build the CAN integration test
+        run: docker build --progress plain --target build --tag waybionic-vcan-test .
+
+      - name: Run the vcan integration test
+        run: |
+          docker run --rm --privileged --user root waybionic-vcan-test bash -lc '
+            apt-get update
+            apt-get install -y --no-install-recommends iproute2
+            ip link add dev vcan0 type vcan
+            ip link set up vcan0
+            /waybionic_ws/build/waybionic_can/test_vcan_four_node
+          '
+
   # Pushes to main build and test the same way, then push the tested image under this commit.
   publish-amd64:
     if: github.event_name == 'push'

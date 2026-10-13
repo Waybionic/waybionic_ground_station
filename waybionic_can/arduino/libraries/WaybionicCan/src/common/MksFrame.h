@@ -25,8 +25,7 @@ constexpr uint8_t kSetResponse = 0x8C;
 constexpr uint8_t kSetHeartbeat = 0x98;
 constexpr uint8_t kEnable = 0xF3;
 constexpr uint8_t kAbsoluteAxis = 0xF5;
-// F7h emergency stop is intentionally host-owned in feature/real-arm. Add it to this shared
-// bench subset only if the console/node simulation needs the same confirmed contract.
+constexpr uint8_t kEmergencyStop = 0xF7;
 
 constexpr uint8_t kModeSrVfoc = 0x05;
 
@@ -76,6 +75,7 @@ bool setMode(uint16_t can_id, uint8_t mode, Frame & out);
 bool setResponse(uint16_t can_id, bool respond, bool active, Frame & out);
 bool setHeartbeat(uint16_t can_id, uint32_t milliseconds, Frame & out);
 bool enable(uint16_t can_id, bool on, Frame & out);
+bool emergencyStop(uint16_t can_id, Frame & out);
 
 // Reply builders used by receiver nodes.
 bool statusReply(uint16_t can_id, uint8_t code, uint8_t status, Frame & out);

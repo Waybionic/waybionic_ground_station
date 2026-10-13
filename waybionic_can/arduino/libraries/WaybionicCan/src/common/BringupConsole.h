@@ -18,7 +18,7 @@ public:
 };
 
 // Bench safety policy for the first powered tests. These are team limits, not protocol: the
-// mks_can.py limits (axis +/-0x7FFFFF, 0-3000 rpm, acc 0-255) are always enforced on top by the
+// mks_can.py limits (axis -0x800000..0x7FFFFF, 0-3000 rpm, acc 0-255) are enforced on top by the
 // frame builders. Change them only with Yassin or Mujtaba, then rebuild.
 struct MotionPolicy
 {
@@ -86,6 +86,7 @@ private:
   void cmdEnable(char ** args, uint8_t count, bool on, uint32_t now_ms);
   void cmdMove(char ** args, uint8_t count, uint32_t now_ms);
   void cmdStop(char ** args, uint8_t count, uint32_t now_ms);
+  void cmdEmergencyStop(char ** args, uint8_t count, uint32_t now_ms);
   void cmdMode(char ** args, uint8_t count, uint32_t now_ms);
   void cmdResponse(char ** args, uint8_t count, uint32_t now_ms);
   void cmdHeartbeat(char ** args, uint8_t count, uint32_t now_ms);

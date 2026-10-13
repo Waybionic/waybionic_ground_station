@@ -5,9 +5,8 @@
   host opens it at 1,000,000 baud over USB serial and selects the CAN bus bitrate separately.
 
   Standard 11-bit data frames only. The CAN controller stays off until the host sends 'O', so
-  the board puts nothing on the bus by itself. It forwards whatever the host sends without MKS
-  checks or motion limits: safety is the host's job, and powered motion needs Yassin or
-  Mujtaba present.
+  the board puts nothing on the bus by itself. Host frames wait in a bounded queue while the
+  UNO R4's single standard-frame transmit mailbox is busy.
 
   Nothing else is printed on the serial port, because any extra text would corrupt the SLCAN
   stream. Use single_drive_bringup for a human-readable console. Ten times a second the host
@@ -51,10 +50,11 @@ void setup()
 void loop()
 {
   while (Serial.available() > 0) {
-    bridge.handleChar(static_cast<char>(Serial.read()));
+    bridge.handleChar(static_cast<char>(Serial.read()), millis());
   }
+  bridge.drainTransmit(millis());
   bridge.pollCan();
-  // Clear controller error events; errorEvents() counts them for the status frame.
+  // Consume each callback-latched controller error event once for the status counter.
   int code = 0;
   can.takeError(code);
 

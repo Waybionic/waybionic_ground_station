@@ -132,13 +132,15 @@ protected:
   std::string startReceiver(uint16_t id, std::vector<std::string> extra = {}, std::string name = "")
   {
     name = name.empty() ? "receiver" + std::to_string(id) : name;
+    const std::string log_path = logPath(name);
+    unlink(log_path.c_str());
     std::vector<std::string> args{"--id", std::to_string(id), "--iface", interfaceName(),
       "--move-ms", std::to_string(kMoveMs)};
     args.insert(args.end(), extra.begin(), extra.end());
-    processes_[name] = spawn(RECEIVER_EXE, args, logPath(name));
+    processes_[name] = spawn(RECEIVER_EXE, args, log_path);
     // The socket is bound before this line is printed, so no frame can be missed after it.
     const auto deadline = std::chrono::steady_clock::now() + 3s;
-    while (readFile(logPath(name)).find("listening") == std::string::npos &&
+    while (readFile(log_path).find("listening") == std::string::npos &&
       std::chrono::steady_clock::now() < deadline)
     {
       std::this_thread::sleep_for(10ms);
@@ -408,10 +410,15 @@ TEST_F(VcanFourNode, GatewayProcessDrivesTheReceivers)
   EXPECT_NE(readFile(logPath("receiver2")).find("rejected: bad checksum"), std::string::npos);
 }
 
-TEST_F(VcanFourNode, EmergencyStopIsPending)
+TEST_F(VcanFourNode, EmergencyStopHaltsTheAddressedReceiver)
 {
-  GTEST_SKIP() << "TODO(MKS manual): F7h emergency stop is not defined in "
-    "waybionic_teleop/mks_can.py; add it from the manual before testing it";
+  configure(2);
+  mks::absoluteAxis(2, 0x4000, 600, 2, f);
+  EXPECT_EQ(requestStatus(f), mks::kStatusOk);
+  mks::emergencyStop(2, f);
+  EXPECT_EQ(requestStatus(f), mks::kStatusOk);
+  EXPECT_TRUE(listen(kMoveMs + 100).empty());
+  EXPECT_EQ(encoder(2), 0);
 }
 
 }  // namespace

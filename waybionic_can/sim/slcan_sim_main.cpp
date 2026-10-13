@@ -52,7 +52,8 @@ public:
   }
   bool send(const Frame & frame) override
   {
-    if (!started_) {
+    // Match the UNO R4: all standard frames share one transmit mailbox.
+    if (!started_ || !sent.empty()) {
       return false;
     }
     sent.push_back(frame);
@@ -161,10 +162,11 @@ int main(int argc, char ** argv)
       char chunk[256];
       const ssize_t count = read(master, chunk, sizeof(chunk));
       for (ssize_t i = 0; i < count; ++i) {
-        bridge.handleChar(chunk[i]);
+        bridge.handleChar(chunk[i], waybionic::monotonicMs());
       }
     }
     const uint32_t now = waybionic::monotonicMs();
+    bridge.drainTransmit(now);
     while (!bus.sent.empty()) {
       const Frame frame = bus.sent.front();
       bus.sent.pop_front();

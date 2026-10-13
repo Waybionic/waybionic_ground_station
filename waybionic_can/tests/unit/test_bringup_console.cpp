@@ -269,7 +269,7 @@ TEST_F(ConsoleTest, AxisBoundsMatchMksCan)
 {
   arm();
   run("move 1 8388608 60 2");
-  run("move 1 -8388608 60 2");
+  run("move 1 -8388609 60 2");
   EXPECT_EQ(sentCount(), 0u);
   EXPECT_TRUE(out.contains("outside mks_can.py limits"));
 }
@@ -335,20 +335,25 @@ TEST_F(ConsoleTest, StopIsAlwaysAllowedAndUsesSpeedZero)
   EXPECT_EQ(sentCount(), 2u);
 }
 
-TEST_F(ConsoleTest, EstopSendsNothingBecauseF7hIsUndefined)
+TEST_F(ConsoleTest, EstopSendsTheManualFrameWithoutMotionGates)
 {
   run("estop 1");
-  EXPECT_EQ(sentCount(), 0u);
-  EXPECT_TRUE(out.contains("F7h emergency stop is NOT implemented"));
-  EXPECT_TRUE(out.contains("PHYSICAL E-stop"));
+  ASSERT_EQ(sentCount(), 1u);
+  EXPECT_EQ(lastSent(), "001#F7F8");
+  EXPECT_TRUE(out.contains("MOTION F7h EMERGENCY_STOP"));
 }
 
-TEST_F(ConsoleTest, RawSendsBytesExactlyButNotMotionCodes)
+TEST_F(ConsoleTest, RawAllowsOnlyKnownReadOnlyCodes)
 {
   run("raw 001#3133");  // deliberately bad checksum
   EXPECT_EQ(lastSent(), "001#3133");
-  run("raw 001#F5025802004000");
-  run("raw 001#F301F5");
+  for (const char * command : {
+      "raw 001#F301F5", "raw 001#F4", "raw 001#F5025802004000", "raw 001#F6",
+      "raw 001#F7F8", "raw 001#FD", "raw 001#FE", "raw 001#91", "raw 001#80",
+      "raw 001#FF", "raw 001#8A", "raw 001#8B", "raw 001#3F"})
+  {
+    run(command);
+  }
   run("raw 000#3131");
   run("raw 001#");
   run("raw 800#31");

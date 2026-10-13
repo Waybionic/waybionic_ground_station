@@ -25,8 +25,16 @@ public:
   }
   bool send(const Frame & frame) override
   {
+    ++send_calls;
+    if (busy_calls > 0) {
+      --busy_calls;
+      return false;
+    }
+    if (!send_ok) {
+      return false;
+    }
     sent.push_back(frame);
-    return send_ok;
+    return true;
   }
   bool receive(Frame & frame, uint32_t) override
   {
@@ -43,6 +51,8 @@ public:
   std::deque<Frame> inbox;
   bool start_ok = true;
   bool send_ok = true;
+  int busy_calls = 0;
+  uint32_t send_calls = 0;
 };
 
 class StringOutput : public SlcanOutput
@@ -64,10 +74,10 @@ protected:
   SlcanTest()
   : bridge(can, can, out) {}
 
-  std::string feed(const std::string & bytes)
+  std::string feed(const std::string & bytes, uint32_t now_ms = 0)
   {
     for (const char c : bytes) {
-      bridge.handleChar(c);
+      bridge.handleChar(c, now_ms);
     }
     return out.take();
   }
@@ -136,6 +146,8 @@ TEST_F(SlcanTest, TransmitSendsTheExactFrame)
   openLikePythonCan();
   // Successful sends are silent; only refusals are answered.
   EXPECT_EQ(feed("t00123132\r"), "");
+  EXPECT_TRUE(can.sent.empty());
+  bridge.drainTransmit(0);
   ASSERT_EQ(can.sent.size(), 1u);
   EXPECT_EQ(can.sent[0].id, 1u);
   EXPECT_EQ(can.sent[0].dlc, 2u);
@@ -143,10 +155,12 @@ TEST_F(SlcanTest, TransmitSendsTheExactFrame)
   EXPECT_EQ(can.sent[0].data[1], 0x32);
   // python-can formats IDs and data in upper case; lower case is accepted too.
   EXPECT_EQ(feed("t7ff8f502580200400092\r"), "");
+  bridge.drainTransmit(0);
   EXPECT_EQ(can.sent[1].id, 0x7FF);
   EXPECT_EQ(can.sent[1].dlc, 8u);
   EXPECT_EQ(can.sent[1].data[7], 0x92);
   EXPECT_EQ(feed("t0010\r"), "");
+  bridge.drainTransmit(0);
   EXPECT_EQ(can.sent[2].dlc, 0u);
 }
 
@@ -176,11 +190,43 @@ TEST_F(SlcanTest, MalformedTransmitIsRefused)
   EXPECT_TRUE(can.sent.empty());
 }
 
-TEST_F(SlcanTest, ControllerWriteFailureIsAnError)
+TEST_F(SlcanTest, BusyControllerIsRetriedWithoutBell)
 {
   openLikePythonCan();
-  can.send_ok = false;
-  EXPECT_EQ(feed("t00123132\r"), "\a");
+  can.busy_calls = 3;
+  EXPECT_EQ(feed("t00123132\r"), "");
+  for (uint32_t now = 0; now < 3; ++now) {
+    bridge.drainTransmit(now);
+    EXPECT_EQ(bridge.queuedFrames(), 1u);
+  }
+  bridge.drainTransmit(3);
+  EXPECT_EQ(bridge.queuedFrames(), 0u);
+  ASSERT_EQ(can.sent.size(), 1u);
+  EXPECT_EQ(can.send_calls, 4u);
+}
+
+TEST_F(SlcanTest, QueueIsBoundedAndCloseClearsIt)
+{
+  openLikePythonCan();
+  std::string tick;
+  for (size_t i = 0; i < SlcanBridge::kTransmitQueueCapacity; ++i) {
+    tick += "t00123132\r";
+  }
+  EXPECT_EQ(feed(tick), "");
+  EXPECT_EQ(bridge.queuedFrames(), SlcanBridge::kTransmitQueueCapacity);
+  EXPECT_EQ(feed("t00223133\r"), "\a");
+  EXPECT_EQ(feed("C\r"), "\r");
+  EXPECT_EQ(bridge.queuedFrames(), 0u);
+}
+
+TEST_F(SlcanTest, StaleQueuedFramesAreDropped)
+{
+  openLikePythonCan();
+  EXPECT_EQ(feed("t00123132\rt00223133\r", 100), "");
+  bridge.drainTransmit(111);
+  EXPECT_TRUE(can.sent.empty());
+  EXPECT_EQ(bridge.queuedFrames(), 0u);
+  EXPECT_EQ(bridge.expiredFrames(), 2u);
 }
 
 TEST_F(SlcanTest, UnsupportedCommandsAnswerBell)
@@ -228,6 +274,22 @@ TEST_F(SlcanTest, ReceivedFramesAreForwardedOnlyWhileOpen)
   EXPECT_EQ(out.take(), "t001831FFFFFFFFFFF01D\rt0013F301F5\r");
 }
 
+TEST_F(SlcanTest, CarrierStatusIdIsReservedOnSerialAndCan)
+{
+  openLikePythonCan();
+  EXPECT_EQ(feed("t7F023132\r"), "\a");
+  EXPECT_EQ(bridge.queuedFrames(), 0u);
+
+  Frame forged;
+  forged.id = SlcanBridge::kCarrierStatusId;
+  forged.dlc = 2;
+  forged.data[0] = 0x31;
+  forged.data[1] = 0x32;
+  can.inbox.push_back(forged);
+  bridge.pollCan();
+  EXPECT_EQ(out.take(), "");
+}
+
 TEST_F(SlcanTest, LineFeedsAreIgnoredAndOverlongLinesRejected)
 {
   EXPECT_EQ(feed("V\r\n"), "V0100\r");
@@ -254,10 +316,10 @@ TEST_F(SlcanTest, StatusGoesOnlyToTheHostAndOnlyWhileOpen)
   status.estop_wired = true;
   status.supply_wired = true;
   status.supply_millivolts = 24000;
-  status.can_errors = 70000;  // saturates at FFFF
-  status.failed_writes = 3;
+  status.can_errors = 0x10002;  // low-order counter bytes wrap on wire
+  status.failed_writes = 0x103;
   bridge.reportStatus(status);
-  EXPECT_EQ(out.take(), "t7F0800055DC0FFFF0301\r");
+  EXPECT_EQ(out.take(), "t7F0800055DC000020301\r");
   status = CarrierStatus{};
   status.estop_wired = true;
   status.estop_pressed = true;

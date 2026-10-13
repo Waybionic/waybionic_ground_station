@@ -81,6 +81,9 @@ bool NodeLogic::handleMessage(
     mks::AbsoluteAxisArgs move;
     mks::decodeAbsoluteAxis(message, move);
     status = startMove(move, now_ms);
+  } else if (message.code == mks::kEmergencyStop && count == 0) {
+    actuator_.stop(now_ms);
+    move_pending_ = false;
   } else {
     return false;
   }

@@ -2,7 +2,7 @@
 // (see tests/cross_check/cross_check_mks.py). One request per stdin line, one answer per line:
 //
 //   absolute_axis <id> <axis> <rpm> <acc>   -> data hex, or ERR
-//   read_encoder <id> | enable <id> <0|1> | set_mode <id> <mode>
+//   read_encoder <id> | enable <id> <0|1> | emergency_stop <id> | set_mode <id> <mode>
 //   set_response <id> <0|1> <0|1> | set_heartbeat <id> <ms>
 //   parse <id> <hex>                        -> "<code hex> <arguments hex>", or ERR
 //   encoder_value <12 hex digits>           -> signed decimal, or ERR
@@ -93,6 +93,8 @@ std::string answer(const std::string & line)
     ok = mks::readEncoder(can_id, frame);
   } else if (verb == "enable" && in >> a) {
     ok = mks::enable(can_id, a != 0, frame);
+  } else if (verb == "emergency_stop") {
+    ok = mks::emergencyStop(can_id, frame);
   } else if (verb == "set_mode" && in >> a && a >= 0 && a <= 255) {
     ok = mks::setMode(can_id, static_cast<uint8_t>(a), frame);
   } else if (verb == "set_response" && in >> a >> b) {

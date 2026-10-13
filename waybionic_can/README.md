@@ -52,14 +52,13 @@ The portable code lives in the Arduino library `arduino/libraries/WaybionicCan/s
 
 ## Protocol source
 
-The merged Xbox teleop implementation (`waybionic_teleop/mks_can.py`, from PR #28) defines the
-shared command subset, and `sim_drives.py` defines simulated replies. The C++ tests repeat its
-manual vectors byte for byte. PR #31 / `feature/real-arm` extends the host with drive-ID,
-bitrate, zeroing, and emergency-stop frames; this package does not duplicate those host-owned
-commands.
+The merged Xbox teleop implementation (`waybionic_teleop/mks_can.py`) defines the shared
+command subset, and `sim_drives.py` defines simulated replies. The C++ tests repeat its manual
+vectors byte for byte. F7h emergency stop comes directly from section 9.2.3 of the MKS manual.
+Drive-ID (8Bh) and bitrate (8Ah) commands are not implemented in `mks_can.py`.
 
 - The frame's CAN ID is the motor ID, and data is `code, big-endian arguments, checksum`. The checksum is `(CAN ID + sum(body)) & 0xFF`. Replies use the same layout and the same ID.
-- The implemented commands are 31h READ_ENCODER, 82h SET_MODE, 8Ch SET_RESPONSE, 98h SET_HEARTBEAT, F3h ENABLE and F5h ABSOLUTE_AXIS.
+- The implemented commands are 31h READ_ENCODER, 82h SET_MODE, 8Ch SET_RESPONSE, 98h SET_HEARTBEAT, F3h ENABLE, F5h ABSOLUTE_AXIS and F7h EMERGENCY_STOP.
 - Setting commands reply `status=1`. F5h replies `0` (refused) unless the drive is enabled and in SR_vFOC mode (05h). Otherwise it replies `1` (running), and later sends an unprompted `2` (run complete) if `active` is set. Speed 0 means stop. Speed is clamped to 3000 rpm.
 - Bad checksums, bad DLCs, unknown codes and wrong argument counts get no reply.
 - SET_RESPONSE `respond=0` silences status replies but not encoder data.
@@ -76,8 +75,6 @@ sudo ip link set up vcan0
 ```
 
 You can also run the existing `scripts/setup_vcan.sh` at the repository root. `sudo apt install can-utils` gives you `candump vcan0` for watching the bus.
-
-The stock WSL2 kernel does not ship the `vcan` module. There, the vcan integration tests are skipped and the demo cannot run.
 
 ## Build and test
 
@@ -154,8 +151,9 @@ Here is what an exchange looks like. Receivers 1 and 3 log `ignored (addressed t
   in-memory multi-node bus.
 - `test_bringup_console`: checks command parsing, motion gates, status/error output, and the
   documented startup vectors.
-- `test_slcan_bridge`: checks SLCAN parsing, bitrate/open state, rejected-line accounting,
-  forwarding, and carrier status serialization without putting status on CAN.
+- `test_slcan_bridge`: checks SLCAN parsing, bitrate/open state, queued/retried/expired
+  transmission, reserved status-ID filtering, rejected-line accounting, forwarding, and
+  wrapping carrier status counters without putting status on CAN.
 - `test_bus_load`: checks classic-CAN lower/worst-case bit estimates and reporting windows.
 - `test_vcan_four_node`: launches real gateway/receiver processes over Linux `vcan`.
 - `cross_check_mks.py`: compares C++ frames with Python over edge and randomized cases.
@@ -164,9 +162,8 @@ Here is what an exchange looks like. Receivers 1 and 3 log `ignored (addressed t
 
 ## Hardware status and TODOs
 
-- **F7h emergency stop, set CAN ID, set bitrate:** intentionally absent from this package's
-  bench console and shared C++ subset. The Arduino `estop` command sends nothing. PR #31 /
-  `feature/real-arm` implements these in the host from MKS CAN manual V1.0.9.
+- **Set CAN ID and bitrate:** 8Bh and 8Ah are not implemented in the shared C++ or merged
+  `mks_can.py` subset. F7h emergency stop is implemented from MKS manual section 9.2.3.
 - **Broadcast ID 0 and other MKS commands:** not implemented in the C++ bench subset.
 - **Physical receiver actuator:** the bench receivers use `SoftwareActuator`. A hobby-servo `IActuator` would need a defined mapping from MKS axis counts to angles and of what READ_ENCODER reports.
 - **Carrier telemetry hardware:** status ID `0x7F0` reports unknown E-stop/supply plus CAN error

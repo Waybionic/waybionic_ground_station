@@ -97,7 +97,7 @@ void SlcanBridge::formatFrame(const Frame & frame, char * out, const size_t out_
   out[p] = '\0';
 }
 
-void SlcanBridge::handleChar(const char c)
+void SlcanBridge::handleChar(const char c, const uint32_t now_ms)
 {
   if (c == '\n') {
     return;
@@ -107,7 +107,7 @@ void SlcanBridge::handleChar(const char c)
       error();
     } else {
       line_[length_] = '\0';
-      handleLine(line_, length_);
+      handleLine(line_, length_, now_ms);
     }
     length_ = 0;
     overflow_ = false;
@@ -120,7 +120,14 @@ void SlcanBridge::handleChar(const char c)
   }
 }
 
-void SlcanBridge::handleLine(const char * line, const size_t length)
+void SlcanBridge::clearTransmitQueue()
+{
+  tx_head_ = 0;
+  tx_count_ = 0;
+}
+
+void SlcanBridge::handleLine(
+  const char * line, const size_t length, const uint32_t now_ms)
 {
   if (length == 0) {
     ok();
@@ -148,14 +155,22 @@ void SlcanBridge::handleLine(const char * line, const size_t length)
     case 'C':
       if (length == 1) {
         open_ = false;
+        clearTransmitQueue();
         ok();
       } else {
         error();
       }
       return;
     case 't':
-      if (!(open_ && parseTransmit(line, length, frame) && can_.send(frame))) {
+      if (!open_ || !parseTransmit(line, length, frame) || frame.id == kCarrierStatusId ||
+        tx_count_ == kTransmitQueueCapacity)
+      {
         error();
+      } else {
+        const size_t tail = (tx_head_ + tx_count_) % kTransmitQueueCapacity;
+        tx_queue_[tail].frame = frame;
+        tx_queue_[tail].queued_ms = now_ms;
+        ++tx_count_;
       }
       return;
     case 'V':
@@ -178,12 +193,26 @@ void SlcanBridge::handleLine(const char * line, const size_t length)
   }
 }
 
+void SlcanBridge::drainTransmit(const uint32_t now_ms)
+{
+  while (tx_count_ > 0 && now_ms - tx_queue_[tx_head_].queued_ms > kTransmitMaxAgeMs) {
+    tx_head_ = (tx_head_ + 1) % kTransmitQueueCapacity;
+    --tx_count_;
+    ++expired_;
+  }
+  if (tx_count_ == 0 || !open_ || !can_.send(tx_queue_[tx_head_].frame)) {
+    return;
+  }
+  tx_head_ = (tx_head_ + 1) % kTransmitQueueCapacity;
+  --tx_count_;
+}
+
 void SlcanBridge::pollCan()
 {
   Frame frame;
   char text[24];
   while (can_.receive(frame, 0)) {
-    if (open_) {
+    if (open_ && frame.id != kCarrierStatusId) {
       formatFrame(frame, text, sizeof(text));
       out_.write(text);
     }
@@ -195,7 +224,6 @@ void SlcanBridge::reportStatus(const CarrierStatus & status)
   if (!open_) {
     return;
   }
-  const uint32_t errors = status.can_errors > 0xFFFF ? 0xFFFF : status.can_errors;
   const uint16_t supply = status.supply_wired ? status.supply_millivolts : 0;
   Frame frame;
   frame.id = kCarrierStatusId;
@@ -207,10 +235,11 @@ void SlcanBridge::reportStatus(const CarrierStatus & status)
     (status.supply_wired ? 0x04 : 0));
   frame.data[2] = static_cast<uint8_t>(supply >> 8);
   frame.data[3] = static_cast<uint8_t>(supply & 0xFF);
+  const uint16_t errors = static_cast<uint16_t>(status.can_errors);
   frame.data[4] = static_cast<uint8_t>(errors >> 8);
-  frame.data[5] = static_cast<uint8_t>(errors & 0xFF);
-  frame.data[6] = static_cast<uint8_t>(status.failed_writes > 0xFF ? 0xFF : status.failed_writes);
-  frame.data[7] = static_cast<uint8_t>(refused_ > 0xFF ? 0xFF : refused_);
+  frame.data[5] = static_cast<uint8_t>(errors);
+  frame.data[6] = static_cast<uint8_t>(status.failed_writes);
+  frame.data[7] = static_cast<uint8_t>(refused_);
   char text[24];
   formatFrame(frame, text, sizeof(text));
   out_.write(text);

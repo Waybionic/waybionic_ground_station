@@ -57,8 +57,8 @@ drive before proceeding.
 | Base | 1 | Leave at ID 1; verify with `./scripts/macos.sh drives scan --ids 1` |
 | Shoulder | 2 | `./scripts/macos.sh drives set-id 1 2` |
 | Elbow | 3 | `./scripts/macos.sh drives set-id 1 3` |
-| Wrist pitch / left wrist motor | 4 | `./scripts/macos.sh drives set-id 1 4` |
-| Wrist roll / right wrist motor | 5 | `./scripts/macos.sh drives set-id 1 5` |
+| Left wrist motor | 4 | `./scripts/macos.sh drives set-id 1 4` |
+| Right wrist motor | 5 | `./scripts/macos.sh drives set-id 1 5` |
 
 Expected after each `set-id`: `The drive on CAN ID 1 now answers on N`. The CLI refuses an ID
 that already answers. If verification fails, power down and leave that drive isolated; do not
@@ -110,7 +110,8 @@ MKS `92h` in the `feature/real-arm` host and must be performed only in the agree
 If any drive was lost or power-cycled, stop and zero the complete arm again.
 
 At the controller's lowest speed, enable only when controls are neutral. Exercise base,
-shoulder, elbow, wrist pitch, and wrist roll one at a time through a very small range. For each
+shoulder, elbow, left wrist motor, and right wrist motor one at a time through a very small
+range. For each
 joint record commanded direction, encoder direction/change, unexpected coupling, noise, and
 stop response. If direction is wrong, stop; Yassin/Mujtaba must review the corresponding
 `factors` in `waybionic_teleop/config/arm_drives.yaml` before rebuilding. Do not increase speed
@@ -173,8 +174,8 @@ Joint          ID  Label/serial  31h encoder  Small-motion result  Direction
 Base           1
 Shoulder       2
 Elbow          3
-Wrist pitch    4
-Wrist roll     5
+Left wrist     4
+Right wrist    5
 
 Five-drive scan: PASS / FAIL
 Zero pose confirmed by:

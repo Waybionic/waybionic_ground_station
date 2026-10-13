@@ -7,9 +7,6 @@ The script feeds the same edge and random cases to mks_can.py and to the mks_fra
 binary built from the shared Arduino library, and fails on the first difference.
 
     python3 cross_check_mks.py --mks-can path/to/mks_can.py --tool path/to/mks_frame_tool
-
-mks_can.py is not on main yet; one way to get it:
-    git show origin/feature/xbox-teleop:waybionic_teleop/waybionic_teleop/mks_can.py > /tmp/mks_can.py
 """
 
 import argparse
@@ -42,6 +39,8 @@ def reference(mks, request):
             data = mks.read_encoder(can_id)
         elif verb == 'enable':
             data = mks.enable(can_id, bool(numbers[0]))
+        elif verb == 'emergency_stop':
+            data = mks.emergency_stop(can_id)
         elif verb == 'set_mode':
             data = mks.set_mode(can_id, numbers[0])
         elif verb == 'set_response':
@@ -56,8 +55,8 @@ def reference(mks, request):
 
 
 def requests(mks, count, rng):
-    edge_axes = [0, 1, -1, 0x4000, -0x4000, mks.MAX_AXIS, -mks.MAX_AXIS, mks.MAX_AXIS + 1,
-                 -mks.MAX_AXIS - 1]
+    edge_axes = [0, 1, -1, 0x4000, -0x4000, mks.MIN_AXIS, mks.MAX_AXIS,
+                 mks.MIN_AXIS - 1, mks.MAX_AXIS + 1]
     edge_speeds = [0, 1, mks.MAX_SPEED_RPM, mks.MAX_SPEED_RPM + 1, -1]
     edge_accs = [0, 1, 255, 256, -1]
     edge_ids = [0, 1, 0xFF, 0x100, 0x7FF, 0x800]
@@ -65,6 +64,7 @@ def requests(mks, count, rng):
         yield f'read_encoder {can_id}'
         yield f'enable {can_id} 1'
         yield f'enable {can_id} 0'
+        yield f'emergency_stop {can_id}'
         yield f'set_mode {can_id} {mks.MODE_SR_VFOC}'
         yield f'set_heartbeat {can_id} 500'
         for respond in (0, 1):

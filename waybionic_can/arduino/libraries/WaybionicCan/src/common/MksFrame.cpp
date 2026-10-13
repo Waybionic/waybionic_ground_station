@@ -119,6 +119,11 @@ bool enable(const uint16_t can_id, const bool on, Frame & out)
   return buildFrame(can_id, kEnable, &argument, 1, out);
 }
 
+bool emergencyStop(const uint16_t can_id, Frame & out)
+{
+  return buildFrame(can_id, kEmergencyStop, nullptr, 0, out);
+}
+
 bool statusReply(const uint16_t can_id, const uint8_t code, const uint8_t status, Frame & out)
 {
   return buildFrame(can_id, code, &status, 1, out);
@@ -184,6 +189,7 @@ const char * codeName(const uint8_t code)
     case kSetHeartbeat: return "SET_HEARTBEAT";
     case kEnable: return "ENABLE";
     case kAbsoluteAxis: return "ABSOLUTE_AXIS";
+    case kEmergencyStop: return "EMERGENCY_STOP";
   }
   return "UNSUPPORTED";
 }

@@ -268,10 +268,23 @@ TEST_F(FourNodeBus, SpeedZeroStopHaltsOnlyTheAddressedMove)
   EXPECT_FALSE(node(1).actuator.state().enabled);
 }
 
-TEST_F(FourNodeBus, EmergencyStopIsPending)
+TEST_F(FourNodeBus, EmergencyStopHaltsOnlyTheAddressedMove)
 {
-  GTEST_SKIP() << "TODO(MKS manual): F7h emergency stop is not defined in "
-    "waybionic_teleop/mks_can.py; add it from the manual before testing it";
+  for (const uint16_t id : {2, 3}) {
+    transmit(built(mks::setMode(id, mks::kModeSrVfoc, f), f), 0);
+    transmit(built(mks::enable(id, true, f), f), 0);
+    transmit(built(mks::absoluteAxis(id, 0x4000, 600, 2, f), f), 0);
+  }
+  ASSERT_EQ(pump(1).size(), 6u);
+
+  transmit(built(mks::emergencyStop(2, f), f), 5);
+  const auto replies = pump(6);
+  ASSERT_EQ(replies.size(), 1u);
+  uint8_t status = 0;
+  ASSERT_TRUE(mks::decodeStatus(replies[0].message, status));
+  EXPECT_EQ(status, mks::kStatusOk);
+  EXPECT_FALSE(node(2).actuator.state().moving);
+  EXPECT_TRUE(node(3).actuator.state().moving);
 }
 
 TEST(GatewayLogic, IgnoresDuplicateAndExtraNodeIds)
