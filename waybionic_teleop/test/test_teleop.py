@@ -119,6 +119,23 @@ def test_b_holds_the_measured_pose_and_disables(teleop):
     assert not teleop.update(*sample(left_x=1.0), pose, DT)
 
 
+def test_b_stop_needs_a_fresh_start_with_centered_sticks_to_rearm(teleop):
+    press(teleop, 'start')
+    run(teleop, 0.4, left_x=1.0)
+    pose = {**HOME, 'joint_1': 0.2}
+    press(teleop, 'b', pose)
+    run(teleop, 0.4, left_x=1.0)
+    assert not teleop.enabled and teleop.targets['joint_1'] == 0.2
+
+    teleop.update(*sample('start', left_x=1.0), pose, DT)
+    assert not teleop.enabled and teleop.warning
+    teleop.update(*sample(), pose, DT)
+    press(teleop, 'start', pose)
+    assert teleop.enabled and teleop.targets == pose
+    run(teleop, 0.4, left_x=-1.0)
+    assert teleop.targets['joint_1'] < pose['joint_1']
+
+
 def test_joint_limits_stop_motion_and_are_reported(teleop):
     press(teleop, 'start')
     run(teleop, 6.0, left_y=1.0)
@@ -131,6 +148,16 @@ def test_triggers_close_and_open_the_tool_within_its_range(teleop):
     run(teleop, 2.0, right_trigger=-1.0)
     assert teleop.targets['tool_grip'] == 1.0
     run(teleop, 0.5, left_trigger=-1.0)
+    assert teleop.targets['tool_grip'] == pytest.approx(0.5)
+
+
+def test_a_trigger_resting_inside_the_deadzone_leaves_the_tool_still(teleop):
+    teleop.update(*sample('start', right_trigger=-0.1), HOME, DT)
+    assert teleop.enabled
+    run(teleop, 1.0, right_trigger=-0.1)
+    assert teleop.targets['tool_grip'] == 0.0
+    # Past the deadzone the travel is rescaled, so the speed still starts from zero.
+    run(teleop, 1.0, right_trigger=-0.575)
     assert teleop.targets['tool_grip'] == pytest.approx(0.5)
 
 
@@ -174,6 +201,16 @@ def test_holding_lb_keeps_only_the_strongest_direction(arm, cartesian):
     assert end[1:] == pytest.approx(start[1:], abs=1e-12)
 
 
+def test_a_diagonal_moves_the_tip_no_faster_than_one_axis(arm, cartesian):
+    for _ in range(round(0.5 / DT)):
+        start = arm.forward(cartesian.targets)[0]
+        cartesian.update(*sample(left_x=1.0, left_y=1.0, right_y=1.0), DOWN, DT)
+    # 25 mm/s at the initial speed level, shared evenly by x, y and z.
+    assert cartesian.linear == pytest.approx((cartesian.linear_speed / math.sqrt(3),) * 3)
+    assert math.dist(arm.forward(cartesian.targets)[0], start) == pytest.approx(
+        cartesian.linear_speed * DT)
+
+
 def test_the_dpad_tilts_the_tool_about_its_tip(arm, cartesian):
     start, pitch = arm.forward(cartesian.targets)
     for _ in range(round(0.5 / DT)):
@@ -182,6 +219,35 @@ def test_the_dpad_tilts_the_tool_about_its_tip(arm, cartesian):
     # 15 deg/s at the initial speed level, less the short ramp.
     assert arm.forward(cartesian.targets)[1] - pitch == pytest.approx(-math.radians(7.5),
                                                                       abs=math.radians(0.3))
+
+
+def test_the_tip_and_the_next_setpoint_stop_at_the_keep_in_floor(arm, cartesian):
+    floor = cartesian.config.keep_in[0][2]
+    for _ in range(round(6.0 / DT)):
+        cartesian.update(*sample(right_y=-1.0), DOWN, DT)
+        # The drives aim at the published setpoint, so it has to stay inside the box too.
+        for joints in (cartesian.targets, cartesian.command_targets):
+            assert arm.forward(joints)[0][2] >= floor - 1e-8
+    assert cartesian.blocked == ['keep_in']
+    tip = arm.forward(cartesian.targets)[0]
+    assert tip[2] == pytest.approx(floor, abs=1e-6)
+    for _ in range(round(0.5 / DT)):
+        cartesian.update(*sample('dpad_right', right_x=1.0), DOWN, DT)
+        for joints in (cartesian.targets, cartesian.command_targets):
+            assert arm.forward(joints)[0] == pytest.approx(tip, abs=1e-9)
+
+
+def test_a_joint_group_stops_the_tip_and_the_next_setpoint_at_the_keep_in_floor(params, arm):
+    teleop = ArmTeleop(config_from_parameters(params), LIMITS, arm)
+    press(teleop, 'start', DOWN)
+    floor = teleop.config.keep_in[0][2]
+    # In the base group, tilting the shoulder forward lowers the tool, which points down here.
+    for _ in range(round(4.0 / DT)):
+        teleop.update(*sample(left_y=1.0), DOWN, DT)
+        for joints in (teleop.targets, teleop.command_targets):
+            assert arm.forward(joints)[0][2] >= floor - 1e-8
+    assert teleop.blocked == ['keep_in']
+    assert arm.forward(teleop.targets)[0][2] == pytest.approx(floor, abs=1e-4)
 
 
 def test_releasing_a_after_homing_does_not_resume_the_last_move(arm, cartesian):
@@ -314,3 +380,67 @@ def test_missing_parameters_are_named(params):
     del params['deadzone']
     with pytest.raises(ValueError, match='deadzone'):
         config_from_parameters(params)
+
+
+def test_group_change_discards_cartesian_motion_and_lookahead(cartesian):
+    for _ in range(10):
+        cartesian.update(*sample(left_x=1.0, right_x=1.0), DOWN, DT)
+    assert cartesian.linear[1] > 0 and cartesian.roll > 0
+    cartesian.update(*sample('y'), DOWN, DT)
+    assert cartesian.active_group.name == 'incision'
+    assert cartesian.linear == (0.0, 0.0, 0.0) and cartesian.roll == 0.0
+    assert not any(cartesian.velocities.values())
+    assert cartesian.command_targets == cartesian.targets
+
+
+def test_switching_groups_with_a_held_stick_waits_for_neutral(cartesian):
+    cartesian.update(*sample('y', left_y=1.0), DOWN, DT)
+    held = dict(cartesian.targets)
+    assert cartesian.active_group.name == 'incision' and cartesian.warning
+    for _ in range(10):
+        cartesian.update(*sample(left_y=1.0), DOWN, DT)
+        assert cartesian.targets == held and cartesian.command_targets == held
+    cartesian.update(*sample(), DOWN, DT)
+    assert cartesian.targets == held and not cartesian.warning
+    cartesian.update(*sample(left_y=1.0), DOWN, DT)
+    assert cartesian.targets != held
+
+
+def test_cartesian_group_must_name_the_actual_urdf_chain(params, arm):
+    params['cartesian.joints'] = list(reversed(params['cartesian.joints']))
+    with pytest.raises(ValueError, match='does not match the URDF'):
+        ArmTeleop(config_from_parameters(params), LIMITS, arm)
+
+
+def test_nonfinite_feedback_cannot_enable_teleop(teleop):
+    pose = {**HOME, 'joint_2': math.nan}
+    teleop.update(*sample('start'), pose, DT)
+    assert not teleop.enabled and teleop.warning and 'joint_2' in teleop.note
+
+
+@pytest.mark.parametrize('change', [
+    {'rate_hz': 0.0},
+    {'max_linear_speed_mm_s': math.nan},
+    {'speed_levels': [math.inf]},
+    {'tool_limits': [0.0]},
+    {'max_accel_deg_s2': -480.0},
+    {'home_gain': 0.0},
+    {'tool_speed': math.inf},
+    {'speed_levels': [0.5, 1.5]},
+    {'base.scales': [1.0, -1.5, 1.0]},
+])
+def test_invalid_motion_config_cannot_start(params, change):
+    with pytest.raises(ValueError):
+        config_from_parameters({**params, **change})
+
+
+@pytest.mark.parametrize('field, value', [
+    ('max_speed', -1.0), ('max_accel', -1.0), ('home_gain', math.nan), ('tool_speed', 0.0),
+    ('speed_levels', [0.5, 2.0]), ('period', -0.01),
+    ('keep_in', ((-0.5, -0.5, 0.05), (0.5, 0.5, 0.05))),
+])
+def test_teleop_refuses_a_config_with_unusable_motion_limits(params, field, value):
+    config = config_from_parameters(params)
+    setattr(config, field, value)
+    with pytest.raises(ValueError):
+        ArmTeleop(config, LIMITS)

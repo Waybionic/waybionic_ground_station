@@ -59,23 +59,38 @@ def test_heartbeat_stops_a_moving_motor_when_the_host_goes_quiet():
     assert (servo.heartbeat_stops, servo.rpm, servo.target) == (1, 0.0, None)
 
 
-def test_set_zero_makes_the_current_position_zero_and_drops_the_move():
+def test_a_long_pause_still_trips_the_heartbeat():
     servo = ready_servo()
-    servo.receive(mks_can.absolute_axis(1, 10 * mks_can.COUNTS_PER_REV, 60, 0))
-    run(servo, 0.1)
+    servo.receive(mks_can.set_heartbeat(1, 500))
+    servo.receive(mks_can.absolute_axis(1, 100 * mks_can.COUNTS_PER_REV, 60, 0))
+    servo.step(2.0)
+    # The motor ran for the 500 ms the heartbeat allows, then stopped.
+    assert (servo.heartbeat_stops, servo.rpm, servo.target) == (1, 0.0, None)
+    assert servo.axis == pytest.approx(0.5 * mks_can.COUNTS_PER_REV, rel=0.05)
+
+
+def test_set_zero_makes_the_current_position_zero():
+    servo = ready_servo()
+    servo.receive(mks_can.absolute_axis(1, 5000, 300, 0))
+    run(servo, 0.5)
     assert servo.receive(mks_can.set_zero(1)) == [mks_can.frame(1, mks_can.SET_ZERO, [1])]
-    run(servo, 0.1)
-    assert (servo.axis, servo.target) == (0.0, None)
+    _, arguments = mks_can.parse(1, servo.receive(mks_can.read_encoder(1))[0])
+    assert mks_can.encoder_value(arguments) == 0
 
 
-def test_an_unplugged_drive_is_silent_until_its_heartbeat_stops_it():
+def test_f5_stop_is_immediate_and_a_new_negative_target_rearms_the_drive():
     servo = ready_servo()
-    servo.receive(mks_can.set_heartbeat(1, 100))
-    servo.receive(mks_can.absolute_axis(1, 10 * mks_can.COUNTS_PER_REV, 60, 0))
-    servo.unplugged = True
-    assert servo.receive(mks_can.read_encoder(1)) == []
-    run(servo, 0.2)
-    assert (servo.heartbeat_stops, servo.target) == (1, None)
+    assert servo.receive(mks_can.absolute_axis(1, 0x4000, 300, 0)) == [RUNNING]
+    run(servo, 0.05)
+    assert servo.rpm > 0.0 and servo.axis > 0.0
+    held = servo.axis
+    assert servo.receive(mks_can.absolute_axis(1, 0, 0, 0)) == [COMPLETE]
+    assert servo.enabled and servo.target is None and servo.rpm == 0.0
+    assert run(servo, 0.4) == []
+    assert servo.axis == held
+    assert servo.receive(mks_can.absolute_axis(1, -0x4000, 300, 0)) == [RUNNING]
+    run(servo, 0.05)
+    assert servo.target == -0x4000 and servo.rpm < 0.0 and servo.axis < held
 
 
 def test_bus_routes_replies_and_counts_bad_frames():
