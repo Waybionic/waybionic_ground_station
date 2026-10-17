@@ -39,6 +39,15 @@ class SimulatedTool:
                        for claw in mapping.claws for motor in claw.motors}
         self.speeds = mapping.speed_steps_per_second(
             {claw.name: claw.max_speed for claw in mapping.claws})
+        self.stalled_motors = set()
+
+    def set_stalled_motors(self, names):
+        """Inject named, simulation-only motor stalls for diagnostic tests."""
+        names = set(names)
+        unknown = names - self.counts.keys()
+        if unknown:
+            raise ValueError(f'unknown simulated motor(s): {sorted(unknown)}')
+        self.stalled_motors = names
 
     def command(self, positions):
         """Set both claw targets within calibrated limits."""
@@ -60,6 +69,8 @@ class SimulatedTool:
             return
         for name, target in self.targets.items():
             current = self.counts[name]
+            if name in self.stalled_motors:
+                continue
             distance = target - current
             travel = min(abs(distance), self.speeds[name] * dt)
             self.counts[name] = current + (travel if distance > 0 else -travel)

@@ -39,6 +39,8 @@ class SimToolMotors(Node):
         params = {name: self.get_parameter(name).value
                   for name in self.list_parameters([], 0).names}
         self.sim = SimulatedTool(tool_map_from_parameters(params))
+        stalled = params.get('simulated_stalled_motor', '')
+        self.sim.set_stalled_motors([stalled] if stalled else [])
         self.safety = ToolSafety(self.sim, float(params['command_timeout_s']),
                                  time.monotonic())
         self.last_frames = stop_frames()
@@ -105,20 +107,39 @@ class SimToolMotors(Node):
             position = positions[claw.name]
             error = disagreement[claw.name]
             at_limit = position <= claw.lower or position >= claw.upper
-            level = (DiagnosticStatus.WARN if error > self.tolerance
+            stalled = [motor.name for motor in claw.motors
+                       if motor.name in self.sim.stalled_motors]
+            level = (DiagnosticStatus.WARN if stalled or error > self.tolerance
                      else DiagnosticStatus.OK)
             statuses.append(status(
                 f'tool.{claw.name}', level, f'{position:.3f}', 'provisional',
-                'paired motors disagree' if level else
-                ('at limit' if at_limit else 'simulated'),
+                ('simulated motor stall' if stalled else
+                 'paired motors disagree' if error > self.tolerance else
+                 'at limit' if at_limit else 'simulated'),
                 target=f'{self.sim.target_positions[claw.name]:.3f}',
                 lower=claw.lower, upper=claw.upper,
-                pair_error=f'{error:.3f}', at_limit=at_limit))
+                pair_error=f'{error:.3f}', at_limit=at_limit,
+                stalled_motors=','.join(stalled)))
+            endpoints = [
+                self.sim.map.target_steps({
+                    candidate.name: (bound if candidate.name == claw.name
+                                     else candidate.reference)
+                    for candidate in self.sim.map.claws})
+                for bound in (claw.lower, claw.upper)]
             for motor in claw.motors:
+                low_steps, high_steps = sorted(
+                    endpoint[motor.name] for endpoint in endpoints)
+                motor_stalled = motor.name in self.sim.stalled_motors
                 statuses.append(status(
-                    f'tool.motor.{motor.name}', DiagnosticStatus.OK,
-                    counts[motor.name], 'steps', 'simulated',
+                    f'tool.motor.{motor.name}',
+                    DiagnosticStatus.WARN if motor_stalled
+                    else DiagnosticStatus.OK,
+                    counts[motor.name], 'steps',
+                    'simulated motor stall' if motor_stalled else 'simulated',
+                    stalled=motor_stalled,
                     target_steps=self.sim.targets[motor.name],
+                    lower_steps=low_steps, upper_steps=high_steps,
+                    at_limit=counts[motor.name] in (low_steps, high_steps),
                     direction=motor.direction,
                     can_id=self.last_frames[motor.name][0],
                     last_command=mks_can.hex_frame(

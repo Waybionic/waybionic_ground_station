@@ -37,6 +37,45 @@ def test_both_pairs_move_and_stop_at_targets(simulator):
     assert disagreement == {'left_claw': 0.0, 'right_claw': 0.0}
 
 
+def test_limits_are_reached_without_overshoot(simulator):
+    """Both endpoints are exact even after more simulation time passes."""
+    simulator.command({'left_claw': 1.0, 'right_claw': 1.0})
+    simulator.tick(10.0)
+    simulator.tick(10.0)
+    positions, disagreement, counts = simulator.feedback()
+    assert positions == {'left_claw': 1.0, 'right_claw': 1.0}
+    assert counts == simulator.targets
+    assert disagreement == {'left_claw': 0.0, 'right_claw': 0.0}
+    simulator.command({'left_claw': 0.0, 'right_claw': 0.0})
+    simulator.tick(10.0)
+    assert simulator.feedback()[0] == {'left_claw': 0.0, 'right_claw': 0.0}
+
+
+def test_simulated_stall_exposes_pair_error_and_holds_stalled_motor(simulator):
+    """A faulted motor stops while its paired motor moves toward the target."""
+    simulator.set_stalled_motors(['left_1'])
+    simulator.command({'left_claw': 1.0, 'right_claw': 0.5})
+    simulator.tick(1.0)
+    positions, disagreement, counts = simulator.feedback()
+    assert counts['left_1'] == 0
+    assert counts['left_2'] < 0
+    assert counts['right_1'] > 0 and counts['right_2'] < 0
+    assert disagreement['left_claw'] > 0.05
+    assert disagreement['right_claw'] == 0.0
+    simulator.hold()
+    held = simulator.feedback()[2]
+    simulator.tick(10.0)
+    assert simulator.feedback()[2] == held
+    simulator.set_stalled_motors([])
+    assert not simulator.stalled_motors
+
+
+def test_unknown_fault_motor_is_rejected(simulator):
+    """Typos cannot silently disable fault injection."""
+    with pytest.raises(ValueError, match='unknown simulated motor'):
+        simulator.set_stalled_motors(['left_9'])
+
+
 def test_invalid_command_does_not_change_existing_targets(simulator):
     """Out-of-range targets are rejected before changing either pair."""
     old = dict(simulator.targets)

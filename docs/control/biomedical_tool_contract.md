@@ -37,6 +37,13 @@ confirm that mounting transform and the file units. The claws rotate by a
 provisional 0.35 radians about the assembled bar axis from Julie's pose. This
 is a visual demonstration, not a measured open-to-closed range.
 
+For a simulation-only stalled-motor demonstration, set
+`simulated_stalled_motor` to one of `left_1`, `left_2`, `right_1`, or `right_2`
+in `tool_drives.yaml` and restart the simulator. The affected motor count then
+stays fixed while its paired motor moves; both the motor and claw diagnostics
+report a warning, including the pair error. Leave the setting empty for normal
+use. This does not emulate actual board feedback or authorize powered tests.
+
 ## Measurements and decisions to obtain from Biomedical
 
 | Item | Left claw | Right claw |
