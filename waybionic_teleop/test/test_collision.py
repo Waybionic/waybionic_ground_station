@@ -94,11 +94,46 @@ def test_the_wrist_and_tool_stop_just_before_their_parts_touch_the_base(yaw):
 @pytest.mark.parametrize('old, new', [
     ('across="joint_2"', 'across="joint_9"'), ('start="-135"', 'start="nan"'),
     ('step="5"', 'step="0"'), ('upper="147.3 ', 'upper="'), ('lower="-122.7', 'lower="inf'),
+    # Each table replaces the shapes for its pair, so it must fit the joint tree.
+    ('obstacle="shoulder_link"', 'obstacle="upper_arm_link"'),
+    ('link="forearm_link" obstacle="base_link"', 'link="upper_arm_link" obstacle="base_link"'),
+    ('joint="joint_3" across="joint_2" start="-135" step="5"',
+     'joint="joint_1" across="joint_2" start="-135" step="5"'),
+    ('across="joint_2" start="-135" step="5"', 'across="joint_3" start="-135" step="5"'),
+    ('across="joint_2" start="-135" step="5"', 'across="joint_4" start="-135" step="5"'),
+    ('start="-135" step="5"', 'start="-130" step="5"'),
+    ('start="-135" step="2.5"', 'start="-135" step="2"'),
+    ('upper="147.3 ', 'upper="-130 '),
 ])
 def test_an_unusable_fold_table_is_refused(old, new):
     assert old in URDF
     with pytest.raises(ValueError, match='waybionic_fold'):
         ArmCollision.from_urdf(URDF.replace(old, new))
+
+
+def test_a_second_fold_table_for_one_pair_is_refused():
+    fold = re.search(r'<waybionic_fold .*?/>', URDF, re.S).group(0)
+    with pytest.raises(ValueError, match='two waybionic_fold tables for one pair'):
+        ArmCollision.from_urdf(URDF.replace('</robot>', fold + '\n</robot>'))
+
+
+@pytest.mark.parametrize('old, new', [
+    ('<cylinder radius="0.10019"', '<cylinder radius="nan"'),
+    ('<cylinder radius="0.10019"', '<cylinder radius="0"'),
+    ('radius="0.10019" length="0.02"', 'radius="0.10019" length="-0.02"'),
+    ('radius="0.10019" length="0.02"', 'radius="0.10019"'),
+    ('<box size="0.036 0.014 0.03"/>', '<box size="0.036 0 0.03"/>'),
+    ('<box size="0.036 0.014 0.03"/>', '<box size="0.036 inf 0.03"/>'),
+    ('<box size="0.036 0.014 0.03"/>', '<box size="0.036 0.014"/>'),
+    ('<origin xyz="0 0 0.1275"', '<origin xyz="0 0 nan"'),
+    ('<axis xyz="0 0 1"/>', '<axis xyz="0 0 0"/>'),
+    ('<mimic joint="joint_5" multiplier="-1"', '<mimic joint="joint_5" multiplier="nan"'),
+])
+def test_a_shape_or_joint_without_finite_sizes_is_refused(old, new):
+    # NaN would make the broad phase skip the shape, so the check would miss its contacts.
+    assert old in URDF
+    with pytest.raises(ValueError, match='robot_description'):
+        ArmCollision.from_urdf(URDF.replace(old, new, 1))
 
 
 def test_table_height_and_clearance_are_configurable():

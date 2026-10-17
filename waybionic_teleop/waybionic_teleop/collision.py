@@ -27,11 +27,32 @@ _SIDES = tuple((math.cos(2.0 * math.pi * side / SIDES), math.sin(2.0 * math.pi *
                for side in range(SIDES))
 _CORNERS = tuple((math.cos(math.pi * (2 * side + 1) / SIDES),
                   math.sin(math.pi * (2 * side + 1) / SIDES)) for side in range(SIDES))
+# A fold table may stop this short of its joint's limits, which the URDF rounds.
+SPAN_TOLERANCE_DEG = 0.01
 
 
 def _vector(element, name, default=(0.0, 0.0, 0.0)):
     text = element.get(name) if element is not None else None
-    return tuple(float(value) for value in text.split()) if text else default
+    if not text:
+        return default
+    try:
+        values = tuple(float(value) for value in text.split())
+    except ValueError:
+        values = ()
+    if len(values) != 3 or not all(math.isfinite(value) for value in values):
+        raise ValueError(f'robot_description has {name}="{text}", not three finite numbers')
+    return values
+
+
+def _number(element, name, default=math.nan):
+    """Return the attribute as a float, the default if it is missing, or NaN if it is junk."""
+    text = element.get(name)
+    if text is None:
+        return default
+    try:
+        return float(text)
+    except ValueError:
+        return math.nan
 
 
 def _dot(a, b):
@@ -67,7 +88,15 @@ def _rpy(roll, pitch, yaw):
 class Fold:
     """Limits of one joint against another joint's angle, linearly interpolated."""
 
-    def __init__(self, element, links, joints):
+    def __init__(self, element, moved_by, limits):
+        """
+        Read a table; raise ValueError unless it is whole and fits the joint tree.
+
+        moved_by maps each link to the limited revolute joints between it and the root, and
+        limits maps those joints to their (lower, upper) in radians. The table replaces the
+        shapes for its pair, so both its joints must move the link against the obstacle, and
+        it must cover the other joint's whole range.
+        """
         self.link, self.obstacle = element.get('link'), element.get('obstacle')
         self.joint, self.across = element.get('joint'), element.get('across')
         try:
@@ -81,8 +110,22 @@ class Fold:
                 and all(math.isfinite(value) for value in self.upper + self.lower)):
             raise ValueError('waybionic_fold needs finite values, a positive step and matching '
                              'tables')
-        if self.link not in links or not {self.joint, self.across} <= joints:
-            raise ValueError('waybionic_fold refers to an unknown joint or link')
+        if self.link not in FOLDING or self.obstacle not in BODY:
+            raise ValueError('waybionic_fold must pair a folding link with the base or shoulder')
+        between = moved_by.get(self.link, set()) - moved_by.get(self.obstacle, set())
+        if self.joint == self.across or not {self.joint, self.across} <= between:
+            raise ValueError(f'waybionic_fold for {self.link} and {self.obstacle} needs two '
+                             'different limited joints that move one against the other')
+        lower, upper = (math.degrees(limit) for limit in limits[self.across])
+        end = self.start + self.step * (len(self.upper) - 1)
+        if (self.start > lower + SPAN_TOLERANCE_DEG
+                or end < upper - SPAN_TOLERANCE_DEG):
+            raise ValueError(f'waybionic_fold for {self.link} and {self.obstacle} covers '
+                             f'{self.across} from {self.start:g} to {end:g} degrees, not its '
+                             f'whole range {lower:.2f} to {upper:.2f}')
+        if any(low > high for low, high in zip(self.lower, self.upper)):
+            raise ValueError(f'waybionic_fold for {self.link} and {self.obstacle} has a lower '
+                             'value above its upper value')
 
     def limits(self, across):
         """Return (lower, upper) in radians at this angle of the other joint."""
@@ -125,8 +168,12 @@ class ArmCollision:
                 if box is not None:
                     half, radius = tuple(size / 2.0 for size in _vector(box, 'size')), None
                 else:
-                    radius = float(cylinder.get('radius', 0.0))
-                    half = (radius, radius, float(cylinder.get('length', 0.0)) / 2.0)
+                    radius = _number(cylinder, 'radius')
+                    half = (radius, radius, _number(cylinder, 'length') / 2.0)
+                if not all(math.isfinite(size) and size > 0.0 for size in half):
+                    # A shape without a size would silently drop out of the checks.
+                    raise ValueError('robot_description has a collision shape without a '
+                                     f'positive finite size on {link.get("name")}')
                 origin = collision.find('origin')
                 shapes.setdefault(link.get('name'), []).append((
                     _vector(origin, 'xyz'), _rpy(*_vector(origin, 'rpy')), half, radius))
@@ -137,23 +184,47 @@ class ArmCollision:
         for joint in robot.findall('joint'):
             mimic = joint.find('mimic')
             origin = joint.find('origin')
+            axis = _vector(joint.find('axis'), 'xyz', (1.0, 0.0, 0.0))
+            length = math.sqrt(_dot(axis, axis))
+            if mimic is not None:
+                mimic = (mimic.get('joint'), _number(mimic, 'multiplier', 1.0),
+                         _number(mimic, 'offset', 0.0))
+            if length < 1e-9 or (mimic and not all(map(math.isfinite, mimic[1:]))):
+                raise ValueError(f'robot_description has joint {joint.get("name")} without an '
+                                 'axis, or with a mimic that is not two finite numbers')
             joints[joint.find('child').get('link')] = {
                 'name': joint.get('name'), 'type': joint.get('type'),
                 'parent': joint.find('parent').get('link'),
                 'xyz': _vector(origin, 'xyz'), 'rpy': _rpy(*_vector(origin, 'rpy')),
-                'axis': _vector(joint.find('axis'), 'xyz', (1.0, 0.0, 0.0)),
-                'mimic': None if mimic is None else (
-                    mimic.get('joint'), float(mimic.get('multiplier', 1.0)),
-                    float(mimic.get('offset', 0.0)))}
+                'axis': tuple(value / length for value in axis), 'mimic': mimic}
             children.add(joint.find('child').get('link'))
         roots = [link.get('name') for link in robot.findall('link')
                  if link.get('name') not in children]
         if len(roots) != 1:
             raise ValueError(f'robot_description needs one root link, not {len(roots)}')
-        names = {joint['name'] for joint in joints.values()}
-        folds = [Fold(element, shapes, names) for element in robot.findall('waybionic_fold')]
-        checker = cls(shapes, joints, roots[0], table_z, clearance, self_clearance, folds)
+        checker = cls(shapes, joints, roots[0], table_z, clearance, self_clearance)
         checker.poses({})
+        limits = {}
+        for joint in robot.findall('joint'):
+            limit = joint.find('limit')
+            if (joint.get('type') == 'revolute' and joint.find('mimic') is None
+                    and limit is not None):
+                bounds = (_number(limit, 'lower'), _number(limit, 'upper'))
+                if all(math.isfinite(bound) for bound in bounds):
+                    limits[joint.get('name')] = bounds
+        moved_by = {}
+        for link in shapes:
+            moved_by[link], child = set(), link
+            # poses() has checked that the joints form a tree, so this reaches the root.
+            while child in joints:
+                if joints[child]['name'] in limits:
+                    moved_by[link].add(joints[child]['name'])
+                child = joints[child]['parent']
+        folds = [Fold(element, moved_by, limits) for element in robot.findall('waybionic_fold')]
+        pairs = {(fold.link, fold.obstacle) for fold in folds}
+        if len(pairs) != len(folds):
+            raise ValueError('robot_description has two waybionic_fold tables for one pair')
+        checker.folds = {(fold.link, fold.obstacle): fold for fold in folds}
         return checker
 
     def poses(self, positions):
