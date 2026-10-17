@@ -88,7 +88,7 @@ def test_the_next_joint_space_setpoint_stops_at_a_joint_limit(drives, parameters
 def test_a_saturated_drive_slows_every_drive_by_the_same_factor(drives):
     mapping = arm_map(drives, 30.0)
     counts = mapping.to_counts(DOWN)
-    velocities = {'joint_1': 2.0, 'joint_2': 0.5}
+    velocities = {'joint_1': 4.0, 'joint_2': 0.5}
     period, max_rpm = 1.0 / drives['rate_hz'], drives['max_rpm']
     future = extrapolate(DOWN, velocities, period)
     free = mapping.synchronized(future, counts, period, 100 * max_rpm)

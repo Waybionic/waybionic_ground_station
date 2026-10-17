@@ -19,6 +19,10 @@ PACKET_SIZE = _PACKET.size
 # Sent back to the host bridge to rumble the controller; intensity 0 stops it.
 RUMBLE_MAGIC = b'WBRM'
 _RUMBLE = struct.Struct('<4sB3xf')
+# The ground station pings the host bridge, which sends the packet straight back as a pong,
+# so the station can measure the round trip over the network.
+PING_MAGIC, PONG_MAGIC = b'WBPG', b'WBPO'
+_PING = struct.Struct('<4sB3xId')
 
 
 def pack(sequence, axes, buttons, connected=True):
@@ -56,3 +60,25 @@ def unpack_rumble(data):
     if magic != RUMBLE_MAGIC or version != VERSION or not 0.0 <= intensity <= 1.0:
         raise ValueError('not a version 1 WayBionic rumble request')
     return intensity
+
+
+def pack_ping(nonce, sent):
+    """Encode a ping carrying a counter and the station's send time in seconds."""
+    return _PING.pack(PING_MAGIC, VERSION, nonce & 0xFFFFFFFF, sent)
+
+
+def pong(data):
+    """Return the bridge's answer to a ping (the same packet as a pong), or None."""
+    if len(data) != _PING.size or data[:4] != PING_MAGIC:
+        return None
+    return PONG_MAGIC + bytes(data[4:])
+
+
+def unpack_pong(data):
+    """Return (nonce, sent) from a pong; raise ValueError for anything else."""
+    if len(data) != _PING.size:
+        raise ValueError(f'expected {_PING.size} bytes, got {len(data)}')
+    magic, version, nonce, sent = _PING.unpack(data)
+    if magic != PONG_MAGIC or version != VERSION or not math.isfinite(sent):
+        raise ValueError('not a version 1 WayBionic pong')
+    return nonce, sent
