@@ -23,6 +23,7 @@ import math
 import time
 
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
+from rcl_interfaces.msg import SetParametersResult
 import rclpy
 from rclpy._rclpy_pybind11 import RCLError
 from rclpy.executors import ExternalShutdownException
@@ -32,12 +33,18 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 
+from waybionic_control.drive_health import (
+    DriveHealthMonitor,
+    DriveHealthState,
+    DriveHealthThresholds,
+)
 from waybionic_teleop import carrier, mks_can
 from waybionic_teleop.drive_map import drive_map_from_parameters
 from waybionic_teleop.kinematics import joint_limits
 from waybionic_teleop.sim_drives import SimulatedBus, SimulatedServo
 
 REPLY_TIMEOUT_S = 0.5
+REPORT_PERIOD_S = 0.5
 # The carrier reports ten times a second.
 CARRIER_TIMEOUT_S = 0.5
 # Zeroing waits for the joint commands to stop, so teleop must be disabled first.
@@ -75,6 +82,12 @@ class SimArmDrives(Node):
         self.command_timeout = float(params.get('command_timeout_s', 0.5))
         self.following_error = int(params.get('following_error_counts', 4096))
         self.following_ticks = int(params.get('following_error_ticks', 12))
+        health_thresholds = DriveHealthThresholds(
+            following_error_degrees=float(params['health_following_error_degrees']),
+            stall_movement_degrees=float(params['health_stall_movement_degrees']),
+            stall_duration_seconds=float(params['health_stall_duration_seconds']),
+            reply_timeout_seconds=float(params['health_reply_timeout_seconds']),
+        )
         if (not 0 <= self.acc <= 255 or not 1 <= self.max_rpm <= mks_can.MAX_SPEED_RPM
                 or not math.isfinite(rate_hz) or rate_hz <= 0 or self.bitrate <= 0
                 or not 1 <= self.heartbeat_ms <= 0xFFFFFFFF
@@ -115,6 +128,9 @@ class SimArmDrives(Node):
             from waybionic_teleop.can_bus import CanBus
             self.bus = CanBus(self.interface, channel, self.bitrate)
             self.bus_label = f'{self.interface} {channel}'
+        self.test_fault = None
+        if self.interface == 'sim':
+            self.declare_parameter('test_fault', 'none')
         self.carrier, self.carrier_time = None, None
         self.counts = [None] * len(drives)
         # Host time since each drive's last encoder reading, which bounds how far it can turn.
@@ -129,6 +145,9 @@ class SimArmDrives(Node):
         self.setup_time = [None] * len(drives)
         self.state = ['starting'] * len(drives)
         self.sent = [None] * len(drives)
+        self.drive_health_monitors = [
+            DriveHealthMonitor(health_thresholds) for _ in drives]
+        self.drive_health_states = [None] * len(drives)
         # Drives whose stop frame the interface has not accepted yet.
         self.stopping = set()
         # Ticks in a row each drive has been more than following_error from its target.
@@ -148,6 +167,8 @@ class SimArmDrives(Node):
         self.awaiting_release = True
         self.rejected = 0
         self.bus_errors = 0
+        if self.interface == 'sim':
+            self.add_on_set_parameters_callback(self.on_test_fault_parameter)
         for index in range(len(drives)):
             self.set_up(index)
         zero_on_start = params.get('zero_on_start', self.interface == 'sim')
@@ -166,7 +187,7 @@ class SimArmDrives(Node):
         self.report_time, self.report_frames, self.report_bits = self.last_tick, 0, 0
         self.report_errors = self.report_refused = 0
         self.create_timer(self.period, self.tick)
-        self.create_timer(0.5, self.report)
+        self.create_timer(REPORT_PERIOD_S, self.report)
         drive_list = ', '.join(f'{drive.name}=CAN {drive.can_id}' for drive in drives)
         if self.interface == 'sim':
             self.get_logger().info(f'Simulated drives: {drive_list} (no hardware)')
@@ -556,12 +577,37 @@ class SimArmDrives(Node):
                 statuses.append(status(f'arm.{joint}', DiagnosticStatus.OK,
                                        f'{math.degrees(position):+.1f}', 'deg',
                                        f'target {target:+.1f} deg'))
+        health_motor_rates = (self.map.to_rpm(self.velocities) if self.velocities else
+                              [0.0] * len(self.map.drives))
+        health_targets = (self.map.to_counts(self.commanded)
+                          if self.commanded is not None else None)
         for index, drive in enumerate(self.map.drives):
             silent = self.heard[index] is None or now - self.heard[index] > REPLY_TIMEOUT_S
             failed = ('failed' in self.state[index]
                       or self.state[index] in [mks_can.RUN_STATUS[code] for code in RUN_FAULTS])
             turns = '' if self.counts[index] is None else (
                 f'{self.counts[index] / mks_can.COUNTS_PER_REV:+.3f}')
+            count = self.counts[index]
+            heard = self.heard[index]
+            counts_to_joint_degrees = (
+                360.0 / mks_can.COUNTS_PER_REV / drive.gear_ratio)
+            if count is None or heard is None:
+                self.drive_health_states[index] = None
+            else:
+                target = health_targets[index] if health_targets is not None else count
+                enabled = mks_can.ENABLE not in self.unconfirmed[index]
+                if self.interface == 'sim':
+                    servo = self.bus.drives.get(drive.can_id)
+                    if servo is not None:
+                        enabled = enabled and servo.enabled
+                self.drive_health_states[index] = self.drive_health_monitors[index].evaluate(
+                    target_position=target * counts_to_joint_degrees,
+                    encoder_position=count * counts_to_joint_degrees,
+                    motion_commanded=self.authorized and health_motor_rates[index] > 0.0,
+                    enabled=enabled,
+                    reply_age_seconds=now - heard,
+                    now_seconds=now,
+                )
             text = 'no reply' if silent else self.state[index]
             # A drive is never driven before it confirms every setup frame.
             pending = ', '.join(f'{code:02X}h' for code in sorted(self.unconfirmed[index]))
@@ -572,14 +618,69 @@ class SimArmDrives(Node):
             level = (DiagnosticStatus.ERROR if silent or failed else
                      DiagnosticStatus.WARN if pending or not self.zeroed[index] else
                      DiagnosticStatus.OK)
+            health_state = self.drive_health_states[index]
+            health_values = {}
+            if health_state is not None:
+                target = health_targets[index] if health_targets is not None else count
+                health_values = {
+                    'state': health_state.value,
+                    'target_encoder_error_deg': (
+                        f'{(target - count) * counts_to_joint_degrees:.3f}'),
+                    'reply_age_sec': f'{now - heard:.3f}',
+                }
+                if not failed:
+                    if health_state is DriveHealthState.NOT_RESPONDING:
+                        level = DiagnosticStatus.STALE
+                    elif health_state is not DriveHealthState.OK:
+                        level = DiagnosticStatus.ERROR
             statuses.append(status(
                 f'drive.{drive.name}', level, turns, 'rev',
                 f'CAN ID {drive.can_id}: {text}'
                 + (f'; last {self.last_command[index]}' if self.last_command[index] else ''),
-                can_id=drive.can_id, last_command=self.last_command[index]))
+                can_id=drive.can_id, last_command=self.last_command[index],
+                **health_values))
         message = DiagnosticArray(status=statuses)
         message.header.stamp = self.get_clock().now().to_msg()
         self.diagnostics_publisher.publish(message)
+
+    def on_test_fault_parameter(self, parameters):
+        """Apply a simulator-only ``drive_name:fault`` parameter or clear with ``none``."""
+        requested = next(
+            (parameter.value for parameter in parameters if parameter.name == 'test_fault'),
+            None)
+        if requested is None:
+            return SetParametersResult(successful=True)
+        if self.interface != 'sim':
+            return SetParametersResult(
+                successful=False, reason='simulated drive faults require interface:=sim')
+
+        requested = requested.strip().lower()
+        if requested == 'none':
+            if self.test_fault is not None:
+                can_id, _ = self.test_fault
+                self.bus.drives[can_id].set_test_fault(None)
+                self.test_fault = None
+            return SetParametersResult(successful=True)
+
+        try:
+            drive_name, fault = requested.split(':', 1)
+            drive = next(drive for drive in self.map.drives if drive.name == drive_name)
+        except (ValueError, StopIteration):
+            return SetParametersResult(
+                successful=False, reason='Expected none or <drive_name>:<fault>')
+        if fault not in SimulatedServo.TEST_FAULTS:
+            return SetParametersResult(
+                successful=False,
+                reason=f'Fault must be one of {sorted(SimulatedServo.TEST_FAULTS)}')
+
+        if fault == 'disabled' and self.authorized:
+            self.disarm('Simulated drive test fault: disabled', require_release=True)
+        if self.test_fault is not None:
+            can_id, _ = self.test_fault
+            self.bus.drives[can_id].set_test_fault(None)
+        self.bus.drives[drive.can_id].set_test_fault(fault)
+        self.test_fault = (drive.can_id, fault)
+        return SetParametersResult(successful=True)
 
     def carrier_status(self, now):
         """Report the USB link to the carrier and what the carrier says about the bus."""

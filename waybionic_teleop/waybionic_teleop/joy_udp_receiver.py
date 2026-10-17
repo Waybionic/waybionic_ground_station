@@ -80,9 +80,12 @@ class JoyUdpReceiver(Node):
         self.diagnostics_publisher = self.create_publisher(DiagnosticArray, topic, 10)
         # Same rumble topic as game_controller_node, passed back to the host bridge.
         self.create_subscription(JoyFeedback, 'joy/set_feedback', self.on_feedback, 10)
+        self.create_subscription(DiagnosticArray, topic, self.on_diagnostics, 10)
         self.sequence = None
         self.last_packet = None
+        self.last_joy = None
         self.connected = False
+        self.teleop_input_stale = False
         self.sender = None
         self.published = 0
         self.rejected = 0
@@ -137,6 +140,7 @@ class JoyUdpReceiver(Node):
             message.header.stamp = self.get_clock().now().to_msg()
             message.header.frame_id = 'joy'
             self.joy_publisher.publish(message)
+            self.last_joy = time.monotonic()
             self.published += 1
         if self.sender is not None and time.monotonic() - self.last_packet > self.timeout:
             # The bridge has gone; its port may now belong to another program.
@@ -163,10 +167,19 @@ class JoyUdpReceiver(Node):
         except OSError as error:
             self.get_logger().warning(f'Rumble not sent: {error}', throttle_duration_sec=5.0)
 
+    def on_diagnostics(self, message):
+        """Use the teleop consumer's existing /joy freshness status."""
+        for status in message.status:
+            if status.name == 'teleop.input':
+                self.teleop_input_stale = status.level == DiagnosticStatus.STALE
+                break
+
     def report(self):
         now = time.monotonic()
         rate = self.published / max(now - self.report_time, 1e-3)
         self.published, self.report_time = 0, now
+        packet_age = None if self.last_packet is None else now - self.last_packet
+        joy_age = None if self.last_joy is None else now - self.last_joy
         loss, jitter, gap = self.link.take()
         self.waiting_pings = {nonce: ping for nonce, ping in self.waiting_pings.items()
                               if now - ping[1] < PONG_TIMEOUT_S}
@@ -185,21 +198,30 @@ class JoyUdpReceiver(Node):
                    f'longest gap {1000.0 * gap:.0f} ms, round trip '
                    + ('unknown' if round_trip is None else f'{1000.0 * round_trip:.1f} ms'))
         status = DiagnosticStatus(name='controller.link', level=DiagnosticStatus.OK)
-        if self.last_packet is None or now - self.last_packet > self.timeout:
+        if packet_age is None or packet_age > self.timeout:
+            state = 'BRIDGE_NOT_RUNNING'
             status.level = DiagnosticStatus.STALE
             status.message = ('No packets on udp {}:{}; run the controller bridge on the host'
                               .format(*self.address))
         elif not self.connected:
+            state = 'NO_CONTROLLER'
             status.level = DiagnosticStatus.WARN
             status.message = 'Host bridge is running but no controller is connected'
-        elif (loss > UNSTABLE_LOSS or gap > UNSTABLE_GAP_S
-              or (round_trip or 0.0) > UNSTABLE_ROUND_TRIP_S):
-            status.level = DiagnosticStatus.WARN
-            status.message = f'Unstable link from {self.sender[0]}: {quality}'
+        elif (self.teleop_input_stale or joy_age is None or joy_age > self.timeout):
+            state = 'INPUT_STALE'
+            status.level = DiagnosticStatus.STALE
+            status.message = 'No fresh /joy input reported by xbox_teleop'
         else:
-            status.message = f'Receiving from {self.sender[0]}: {quality}'
+            state = 'CONNECTED'
+            if (loss > UNSTABLE_LOSS or gap > UNSTABLE_GAP_S
+                    or (round_trip or 0.0) > UNSTABLE_ROUND_TRIP_S):
+                status.level = DiagnosticStatus.WARN
+                status.message = f'Unstable link from {self.sender[0]}: {quality}'
+            else:
+                status.message = f'Receiving from {self.sender[0]}: {quality}'
         status.values = [
             KeyValue(key='value', value=f'{rate:.0f}'), KeyValue(key='unit', value='Hz'),
+            KeyValue(key='state', value=state),
             KeyValue(key='rejected', value=str(self.rejected)),
             KeyValue(key='loss_percent', value=f'{100.0 * loss:.1f}'),
             KeyValue(key='jitter_ms', value=f'{1000.0 * jitter:.1f}'),
