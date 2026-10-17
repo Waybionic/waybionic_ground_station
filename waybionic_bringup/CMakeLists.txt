@@ -30,6 +30,7 @@ if(BUILD_TESTING)
   add_launch_test(test/test_old_arm_launch.py ${isolated})
   add_launch_test(test/test_old_arm_arduino_launch.py ${isolated})
   ament_add_pytest_test(test_launch_checks test/test_launch_checks.py TIMEOUT 60)
+  ament_add_pytest_test(test_launch_options test/test_launch_options.py)
 endif()
 
 install(PROGRAMS scripts/joint_demo.py scripts/camera_follower.py
