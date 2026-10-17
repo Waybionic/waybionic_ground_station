@@ -464,6 +464,36 @@ def test_each_drive_is_evaluated_with_its_target_encoder_and_reply_age(node, mon
         'target_encoder_error_deg', 'reply_age_sec']
 
 
+def test_drive_health_positions_and_error_use_joint_degrees_with_gear_ratio(
+        node, monkeypatch):
+    ready(node)
+    drive = node.map.drives[0]
+    drive.gear_ratio = 2.0
+    node.counts[0] = round(mks_can.COUNTS_PER_REV * 2 / 360.0)
+    monitor = MagicMock(wraps=DriveHealthMonitor())
+    node.drive_health_monitors[0] = monitor
+    now = max(node.heard) + 0.1
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: now)
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+
+    node.on_command(command(
+        node,
+        velocities=dict.fromkeys(node.map.joints, 0.0),
+        joint_1=math.radians(3.0)))
+    node.report()
+
+    assert monitor.evaluate.call_args.kwargs['target_position'] == pytest.approx(
+        3.0, abs=0.001)
+    assert monitor.evaluate.call_args.kwargs['encoder_position'] == pytest.approx(
+        1.0, abs=0.001)
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
+    assert row.level == DiagnosticStatus.OK
+    assert values['state'] == DriveHealthState.OK.value
+    assert float(values['target_encoder_error_deg']) == pytest.approx(2.0, abs=0.01)
+
+
 def test_drive_health_thresholds_load_from_arm_drive_configuration(node, parameters):
     configured = parameters('arm_drives.yaml', 'sim_arm_drives')
     assert {
@@ -791,6 +821,31 @@ def test_disabled_simulated_drive_reports_error_and_recovers(node, monkeypatch):
     values = {value.key: value.value for value in row.values}
     assert servo.enabled
     assert row.level == DiagnosticStatus.OK
+    assert values['state'] == DriveHealthState.OK.value
+
+
+def test_drive_health_requires_host_confirmation_of_enable_setup(node, monkeypatch):
+    ready(node)
+    clock = [max(node.heard) + 0.1]
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: clock[0])
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+    drive_index = 0
+    can_id = node.map.drives[drive_index].can_id
+    servo = node.bus.drives[can_id]
+    assert servo.enabled
+    assert mks_can.ENABLE not in node.unconfirmed[drive_index]
+
+    node.unconfirmed[drive_index].add(mks_can.ENABLE)
+    node.report()
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
+    assert values['state'] == DriveHealthState.DISABLED.value
+
+    node.unconfirmed[drive_index].remove(mks_can.ENABLE)
+    node.report()
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
     assert values['state'] == DriveHealthState.OK.value
 
 

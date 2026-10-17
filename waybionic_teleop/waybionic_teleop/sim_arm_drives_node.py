@@ -530,18 +530,20 @@ class SimArmDrives(Node):
                 f'{self.counts[index] / mks_can.COUNTS_PER_REV:+.3f}')
             count = self.counts[index]
             heard = self.heard[index]
+            counts_to_joint_degrees = (
+                360.0 / mks_can.COUNTS_PER_REV / drive.gear_ratio)
             if count is None or heard is None:
                 self.drive_health_states[index] = None
             else:
                 target = health_targets[index] if health_targets is not None else count
-                enabled = True
+                enabled = mks_can.ENABLE not in self.unconfirmed[index]
                 if self.interface == 'sim':
                     servo = self.bus.drives.get(drive.can_id)
                     if servo is not None:
-                        enabled = servo.enabled
+                        enabled = enabled and servo.enabled
                 self.drive_health_states[index] = self.drive_health_monitors[index].evaluate(
-                    target_position=target * 360.0 / mks_can.COUNTS_PER_REV,
-                    encoder_position=count * 360.0 / mks_can.COUNTS_PER_REV,
+                    target_position=target * counts_to_joint_degrees,
+                    encoder_position=count * counts_to_joint_degrees,
                     motion_commanded=self.authorized and health_motor_rates[index] > 0.0,
                     enabled=enabled,
                     reply_age_seconds=now - heard,
@@ -564,7 +566,7 @@ class SimArmDrives(Node):
                 health_values = {
                     'state': health_state.value,
                     'target_encoder_error_deg': (
-                        f'{(target - count) * 360.0 / mks_can.COUNTS_PER_REV:.3f}'),
+                        f'{(target - count) * counts_to_joint_degrees:.3f}'),
                     'reply_age_sec': f'{now - heard:.3f}',
                 }
                 if not failed:
