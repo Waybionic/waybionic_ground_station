@@ -1,5 +1,7 @@
 """Simulate two claw positions and four calibrated stepper motors."""
 
+import math
+
 from waybionic_teleop.tool_motor_map import (
     ClawCalibration, MotorCalibration, ToolMotorMap)
 
@@ -44,6 +46,14 @@ class SimulatedTool:
         self.target_positions = dict(positions)
         self.targets = targets
 
+    def hold(self):
+        """Stop at present motor counts instead of finishing an old target."""
+        self.targets = {name: round(count)
+                        for name, count in self.counts.items()}
+        self.counts = {name: float(count)
+                       for name, count in self.targets.items()}
+        self.target_positions, _ = self.map.feedback(self.targets)
+
     def tick(self, dt):
         """Advance each motor by no more than its calibrated step rate."""
         if dt <= 0:
@@ -59,3 +69,69 @@ class SimulatedTool:
         counts = {name: round(value) for name, value in self.counts.items()}
         positions, disagreement = self.map.feedback(counts)
         return positions, disagreement, counts
+
+
+class ToolSafety:
+    """Require live teleop enable and commands before simulated motors move."""
+
+    def __init__(self, simulator, timeout, now):
+        """Start disarmed and validate the command/heartbeat timeout."""
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError(
+                'tool command timeout must be positive and finite')
+        self.sim = simulator
+        self.timeout = timeout
+        self.enabled = False
+        self.requires_release = False
+        self.stop_reason = 'teleop disabled'
+        self.last_tick = now
+        self.last_enable = None
+        self.last_command = None
+
+    def stop(self, reason):
+        """Hold all motors and require an explicit disable before re-arming."""
+        self.sim.hold()
+        self.enabled = False
+        self.requires_release = True
+        self.stop_reason = reason
+
+    def update_enable(self, enabled, now):
+        """Track teleop heartbeat; a fresh false-then-true clears a stop."""
+        if not enabled:
+            was_enabled = self.enabled
+            if was_enabled:
+                self.stop('teleop disabled')
+            self.requires_release = False
+            self.last_enable = None
+            return was_enabled
+        if self.requires_release:
+            return False
+        if not self.enabled:
+            self.enabled = True
+            self.last_command = now
+            self.stop_reason = ''
+        self.last_enable = now
+        return False
+
+    def command(self, positions, now):
+        """Ignore commands while disabled and timestamp accepted targets."""
+        if not self.enabled:
+            return False
+        self.sim.command(positions)
+        self.last_command = now
+        return True
+
+    def tick(self, now):
+        """Stop if the host, enable heartbeat or tool commands go stale."""
+        elapsed = now - self.last_tick
+        self.last_tick = now
+        if self.enabled:
+            if elapsed >= self.timeout:
+                self.stop('simulation host paused')
+            elif now - self.last_enable >= self.timeout:
+                self.stop('teleop enable heartbeat lost')
+            elif now - self.last_command >= self.timeout:
+                self.stop('tool commands timed out')
+            else:
+                self.sim.tick(min(max(elapsed, 0.0), 0.1))
+        return not self.enabled and self.requires_release

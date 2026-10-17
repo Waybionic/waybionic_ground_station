@@ -11,9 +11,12 @@ from rclpy.node import Node
 
 from sensor_msgs.msg import JointState
 
+from std_msgs.msg import Bool
+
 from waybionic_teleop import mks_can
-from waybionic_teleop.tool_board_frames import move_frames
-from waybionic_teleop.tool_sim import SimulatedTool, tool_map_from_parameters
+from waybionic_teleop.tool_board_frames import move_frames, stop_frames
+from waybionic_teleop.tool_sim import (
+    SimulatedTool, tool_map_from_parameters, ToolSafety)
 
 
 def status(name, level, value, unit, message, **extra):
@@ -36,10 +39,12 @@ class SimToolMotors(Node):
         params = {name: self.get_parameter(name).value
                   for name in self.list_parameters([], 0).names}
         self.sim = SimulatedTool(tool_map_from_parameters(params))
-        self.last_frames = move_frames(self.sim.targets, self.sim.speeds)
+        self.safety = ToolSafety(self.sim, float(params['command_timeout_s']),
+                                 time.monotonic())
+        self.last_frames = stop_frames()
         self.tolerance = float(params['pair_tolerance'])
         self.rejected = 0
-        self.last_tick = time.monotonic()
+        self.create_subscription(Bool, 'teleop_enabled', self.on_enabled, 10)
         self.create_subscription(
             JointState, 'tool_commands', self.on_command, 10)
         self.state_publisher = self.create_publisher(
@@ -52,6 +57,11 @@ class SimToolMotors(Node):
         self.get_logger().info(
             'Four simulated tool motors ready; no hardware connection')
 
+    def on_enabled(self, message):
+        """Hold the tool whenever teleop disables its command stream."""
+        if self.safety.update_enable(message.data, time.monotonic()):
+            self.last_frames = stop_frames()
+
     def on_command(self, message):
         """Accept only a complete, finite pair of claw targets."""
         names = set(self.sim.target_positions)
@@ -63,16 +73,17 @@ class SimToolMotors(Node):
             self.rejected += 1
             return
         try:
-            self.sim.command(positions)
-            self.last_frames = move_frames(self.sim.targets, self.sim.speeds)
+            if self.safety.command(positions, time.monotonic()):
+                self.last_frames = move_frames(
+                    self.sim.targets, self.sim.speeds)
         except ValueError:
             self.rejected += 1
 
     def tick(self):
         """Move the motors and publish the two derived claw positions."""
         now = time.monotonic()
-        dt, self.last_tick = min(now - self.last_tick, 0.1), now
-        self.sim.tick(dt)
+        if self.safety.tick(now):
+            self.last_frames = stop_frames()
         positions, _, _ = self.sim.feedback()
         message = JointState(
             name=list(positions), position=list(positions.values()))
@@ -83,6 +94,13 @@ class SimToolMotors(Node):
         """Report claws and motors with targets, limits and pair error."""
         positions, disagreement, counts = self.sim.feedback()
         statuses = []
+        gate_level = (DiagnosticStatus.OK if self.safety.enabled
+                      else DiagnosticStatus.WARN)
+        gate_message = ('teleop enabled' if self.safety.enabled
+                        else self.safety.stop_reason)
+        statuses.append(status(
+            'tool.command_gate', gate_level, self.safety.enabled, 'enabled',
+            gate_message, requires_release=self.safety.requires_release))
         for claw in self.sim.map.claws:
             position = positions[claw.name]
             error = disagreement[claw.name]
@@ -103,7 +121,8 @@ class SimToolMotors(Node):
                     target_steps=self.sim.targets[motor.name],
                     direction=motor.direction,
                     can_id=self.last_frames[motor.name][0],
-                    last_command=mks_can.hex_frame(*self.last_frames[motor.name])))
+                    last_command=mks_can.hex_frame(
+                        *self.last_frames[motor.name])))
         statuses.append(status('tool.commands', DiagnosticStatus.OK,
                                self.rejected, 'rejected', 'simulation only'))
         message = DiagnosticArray(status=statuses)

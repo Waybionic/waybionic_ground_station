@@ -5,6 +5,7 @@
 sim_tool_motors:
   ros__parameters:
     rate_hz: 120.0
+    command_timeout_s: 0.5
     pair_tolerance: 0.05
     claws: [left_claw, right_claw]
     left_claw:
