@@ -39,6 +39,8 @@ class TestArduinoBridge(unittest.TestCase):
         bridge.faulted = False
         bridge.motion_active = True
         bridge.motion_duration = 0.0
+        bridge.segment_duration = 0.3
+        bridge.current = [90.0, 35.0, 151.5, 27.5]
         bridge.sequence_active = True
         bridge.command_kind = 'RUN'
         bridge.stop_requested = False
@@ -137,6 +139,21 @@ class TestArduinoBridge(unittest.TestCase):
         bridge.home_completed = False
         bridge.handle_command(String(data='RUN'))
         self.assertEqual(bridge.last_status, 'run-rejected-home-required')
+
+    def test_short_segment_is_raised_to_servo_speed_limit(self):
+        from waybionic_hardware.arduino_bridge import minimum_motion_duration
+
+        bridge = self.make_bridge()
+        target = [60.0, 95.0, 125.0, 60.0]
+
+        bridge.send_move(target, 'RUN')
+
+        self.assertGreaterEqual(
+            bridge.motion_duration, minimum_motion_duration(bridge.current, target))
+        self.assertGreater(bridge.motion_duration, 0.3)
+        self.assertIn(
+            f',{int(bridge.motion_duration * 1000)}\n',
+            bridge.serial_port.writes[-1].decode('ascii'))
 
     def test_fault_is_reported_as_diagnostic_error(self):
         from diagnostic_msgs.msg import DiagnosticStatus

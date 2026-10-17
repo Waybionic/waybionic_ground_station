@@ -20,6 +20,11 @@ HOME_PHYSICAL_DEGREES = UPRIGHT_PHYSICAL_DEGREES
 SERVO_DIRECTIONS = [1.0, -1.0, 1.0, 1.0]
 MODEL_HOME_OFFSETS_DEGREES = [0.0, 90.0, 0.0, 0.0]
 PHYSICAL_LIMITS = [(0.0, 270.0), (0.0, 112.5), (90.0, 270.0), (0.0, 270.0)]
+# Conservative software caps until the installed servo datasheets are confirmed.
+SERVO_MAX_SPEED_DEGREES_PER_SECOND = [45.0, 30.0, 30.0, 45.0]
+SMOOTHSTEP_PEAK_VELOCITY_FACTOR = 1.875
+MIN_SEGMENT_DURATION_SECONDS = 0.3
+MAX_SEGMENT_DURATION_SECONDS = 15.0
 SEQUENCE = [
     [60.0, 95.0, 125.0, 60.0],
     [45.0, 75.0, 200.0, 100.0],
@@ -50,6 +55,14 @@ def model_radians_from_physical(degrees):
 
 def smoothstep(progress):
     return 6.0 * progress**5 - 15.0 * progress**4 + 10.0 * progress**3
+
+
+def minimum_motion_duration(start, target):
+    return max(
+        SMOOTHSTEP_PEAK_VELOCITY_FACTOR * abs(end - beginning) / speed
+        for beginning, end, speed in zip(
+            start, target, SERVO_MAX_SPEED_DEGREES_PER_SECOND)
+    )
 
 
 class ArduinoBridge(Node):
@@ -282,7 +295,17 @@ class ArduinoBridge(Node):
             self.start = list(self.current)
             self.target = list(target)
             self.motion_started = time.monotonic()
-            self.motion_duration = max(0.3, min(15.0, self.segment_duration))
+            requested_duration = max(
+                MIN_SEGMENT_DURATION_SECONDS,
+                min(MAX_SEGMENT_DURATION_SECONDS, self.segment_duration),
+            )
+            required_duration = minimum_motion_duration(self.start, self.target)
+            if required_duration > MAX_SEGMENT_DURATION_SECONDS:
+                self._latch_fault(
+                    'target-rejected',
+                    'Target requires more than 15 seconds at the servo speed caps.')
+                return
+            self.motion_duration = max(requested_duration, required_duration)
             self.command_kind = command_kind
             command = 'MOVE,' + ','.join(f'{value:.2f}' for value in target)
             command += f',{int(self.motion_duration * 1000)}'
