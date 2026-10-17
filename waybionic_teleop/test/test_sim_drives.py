@@ -93,6 +93,58 @@ def test_f5_stop_is_immediate_and_a_new_negative_target_rearms_the_drive():
     assert servo.target == -0x4000 and servo.rpm < 0.0 and servo.axis < held
 
 
+def test_stalled_test_fault_keeps_replying_without_advancing_and_recovers():
+    servo = ready_servo()
+    initial_axis = servo.axis
+    servo.set_test_fault('stalled')
+    assert servo.receive(mks_can.absolute_axis(1, 0x4000, 60, 0)) == [RUNNING]
+    run(servo, 0.1)
+    assert servo.rpm > 0.0 and servo.target == 0x4000
+    assert servo.axis == initial_axis
+    reply = servo.receive(mks_can.read_encoder(1))
+    _, arguments = mks_can.parse(1, reply[0])
+    assert mks_can.encoder_value(arguments) == initial_axis
+
+    servo.set_test_fault()
+    run(servo, 0.1)
+    assert servo.axis > initial_axis
+
+
+def test_not_responding_test_fault_suppresses_replies_and_recovers():
+    servo = ready_servo()
+    servo.set_test_fault('not_responding')
+    assert servo.receive(mks_can.read_encoder(1)) == []
+    assert servo.receive(mks_can.absolute_axis(1, 0x4000, 60, 0)) == []
+    run(servo, 0.1)
+    assert servo.axis > 0
+
+    servo.set_test_fault(None)
+    assert servo.receive(mks_can.read_encoder(1)) == [
+        mks_can.frame(1, mks_can.READ_ENCODER,
+                      round(servo.axis).to_bytes(6, 'big', signed=True))]
+
+
+def test_disabled_test_fault_exposes_enabled_state_and_recovers():
+    servo = ready_servo()
+    servo.set_test_fault('disabled')
+    assert not servo.enabled
+    assert servo.receive(mks_can.absolute_axis(1, 0x4000, 60, 0)) == [
+        mks_can.frame(1, mks_can.ABSOLUTE_AXIS, [0])]
+    run(servo, 0.1)
+    assert servo.axis == 0.0
+
+    servo.set_test_fault()
+    assert servo.enabled
+    assert servo.receive(mks_can.absolute_axis(1, 0x4000, 60, 0)) == [RUNNING]
+    run(servo, 0.1)
+    assert servo.axis > 0.0
+
+
+def test_unknown_test_fault_is_rejected():
+    with pytest.raises(ValueError, match='unknown simulated drive test fault'):
+        SimulatedServo(1).set_test_fault('other')
+
+
 def test_bus_routes_replies_and_counts_bad_frames():
     bus = SimulatedBus([SimulatedServo(1), SimulatedServo(2)], 500000)
     bus.send(2, mks_can.read_encoder(2))

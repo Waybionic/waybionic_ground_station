@@ -223,7 +223,7 @@ Label replayed data as `recorded/mock` when sharing it. Replay does not require
 the original diagnostics publisher to be running. Generated bag directories
 should remain outside Git; the repository ignores local recording output.
 
-### Task 6: Simulated Drive-Health Sessions
+### Task 7: Record Simulated Arm Drive-Health Sessions
 
 Build and source the workspace from its root:
 
@@ -234,86 +234,150 @@ colcon build --symlink-install --packages-up-to waybionic_bringup waybionic_rviz
 source install/setup.bash
 ```
 
-In terminal 1, start the host and mock drives in an isolated ROS domain with
-the legacy timed faults disabled. Use SocketCAN when `vcan0` exists; if it is
-unavailable, use the mock-only `udp_multicast` transport shown here. UDP
-multicast is not for physical hardware.
+In terminal 1, launch the current arm and teleop stack with the in-process
+simulated MKS drives. `joy_source:=none` and the manual topics below avoid
+requiring an attached controller; this command does not use the legacy
+`can_demo.launch.py`/`waybionic_control` mock path.
 
 ```bash
 source /opt/ros/jazzy/setup.bash
 source ~/waybionic_ws/install/setup.bash
 export ROS_DOMAIN_ID=42
-ros2 launch waybionic_bringup can_demo.launch.py simulate_faults:=false transport:=udp_multicast
+ros2 launch waybionic_bringup ground_station.launch.py teleop:=true \
+  drive_interface:=sim joy_source:=none launch_rviz:=false \
+  use_joint_state_publisher_gui:=false
 ```
 
-In terminal 2, open the live Engineer View:
+In terminal 2, watch diagnostics. Each simulated drive is initially enabled
+and zeroed by the node; wait until all six `drive.<name>` rows show
+`state: OK` and level `OK`.
 
 ```bash
 source /opt/ros/jazzy/setup.bash
 source ~/waybionic_ws/install/setup.bash
 export ROS_DOMAIN_ID=42
-ros2 launch waybionic_rviz_plugins engineer_view.launch.py use_mock_diagnostics:=false diagnostics_topic:=/diagnostics
+ros2 topic echo /diagnostics
 ```
 
-For a healthy baseline, run this in terminal 3 to keep commands fresh, then
-check `/diagnostics`. Expect `can.bus: Command Age` to be ACTIVE and all six
-`can.bus: Joint N Health` rows to be OK with zero tracking error and no faults.
-Keep the publisher running while recording the healthy session.
+For deterministic command-based recordings (simulation only), stop only the
+idle `xbox_teleop` process so it does not compete with the test publishers for
+`/teleop_enabled` and `/joint_commands`. Keep the launch running; the
+`sim_arm_drives` node remains active. Find the exact process ID and stop that
+process:
+
+```bash
+ps -eo pid,args | grep '[x]box_teleop'
+kill <xbox_teleop_pid>
+```
+
+In terminal 3, publish a release followed by a latched enable. The
+`teleop_enabled` subscription requires transient-local durability. Keep the
+enable publisher running; the command gate times out if enable updates stop.
 
 ```bash
 source /opt/ros/jazzy/setup.bash
 source ~/waybionic_ws/install/setup.bash
 export ROS_DOMAIN_ID=42
-ros2 topic pub --rate 10 /joint_commands sensor_msgs/msg/JointState "{name: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6], position: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], velocity: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}"
+ros2 topic pub --qos-durability transient_local --once /teleop_enabled \
+  std_msgs/msg/Bool "{data: false}"
+ros2 topic pub --qos-durability transient_local --rate 10 /teleop_enabled \
+  std_msgs/msg/Bool "{data: true}"
 ```
 
-After confirming the six healthy rows, record the baseline in a new directory:
+In terminal 4, publish the full joint command at 10 Hz. The ordered joint
+names are the five arm joints followed by the simulated `tool_grip`.
 
 ```bash
-SESSION=~/diagnostics-sessions/task6-normal-healthy-$(date +%F)
-ros2 run waybionic_rviz_plugins diagnostics_recorder.py --duration 15 \
+source /opt/ros/jazzy/setup.bash
+source ~/waybionic_ws/install/setup.bash
+export ROS_DOMAIN_ID=42
+ros2 topic pub --rate 10 /joint_commands sensor_msgs/msg/JointState \
+  "{name: [joint_1, joint_2, joint_3, joint_4, joint_5, tool_grip], position: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], velocity: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}"
+```
+
+Record each session in a unique directory under the ignored
+`diagnostics-sessions/` directory at the repository root. For example:
+
+```bash
+SESSION=~/waybionic_ws/src/waybionic_ground_station/diagnostics-sessions/task7-normal-healthy-$(date +%Y%m%d-%H%M%S)
+ros2 run waybionic_rviz_plugins diagnostics_recorder.py --duration 10 \
   --output-directory "$SESSION" --source-label mock \
   --tested-commit "$(git rev-parse HEAD)"
 ros2 bag info "$SESSION/bag"
 ```
 
-Check the live rows with `ros2 topic echo /diagnostics --once`. Stop the
-healthy command publisher with Ctrl+C before testing a fault. For each fault,
-set the mock parameter for joint 1, then publish the listed command at 10 Hz
-in terminal 3. Verify the expected state in `/diagnostics` and the Engineer
-View before recording. Wait at least 2 seconds for `STALLED` and for the next
-diagnostics update for `NOT_RESPONDING`.
+For every fault, check `/diagnostics` before recording and confirm the matching
+`drive.base_yaw` `state` and ROS level (`NOT_RESPONDING`: `STALE`; other faults:
+`ERROR`). Record each only after it is visible, using a new `SESSION` name and
+the same recorder command. The `test_fault` parameter is available only when
+`sim_arm_drives` is using `interface:=sim`; its format is
+`<drive_name>:<fault>`. Supported values are `stalled`, `not_responding`,
+`disabled`, and `none` to clear the active fault.
 
-| State | Trigger | Command stream |
-|-------|---------|----------------|
-| `FOLLOWING_ERROR` | `ros2 param set /mock_drives test_health_fault 1:following_error` | `ros2 topic pub --rate 10 /joint_commands sensor_msgs/msg/JointState "{name: [joint_1], position: [0.2], velocity: [0.1]}"` |
-| `STALLED` | `ros2 param set /mock_drives test_health_fault 1:stalled` | `ros2 topic pub --rate 10 /joint_commands sensor_msgs/msg/JointState "{name: [joint_1], position: [0.05], velocity: [0.1]}"` |
-| `NOT_RESPONDING` | `ros2 param set /mock_drives test_health_fault 1:not_responding` | `ros2 topic pub --rate 10 /joint_commands sensor_msgs/msg/JointState "{name: [joint_1], position: [0.0], velocity: [0.0]}"` |
-| `DISABLED` | `ros2 param set /mock_drives test_health_fault 1:disabled` | `ros2 topic pub --rate 10 /joint_commands sensor_msgs/msg/JointState "{name: [joint_1], position: [0.0], velocity: [0.0]}"` |
-
-Once the expected state is visible, record that fault in terminal 4. Use a
-different output directory for each state; the directory must not exist yet.
-After recording, inspect the bag. Then stop the command stream, clear the
-fault, send joint 1 back to zero, and confirm it returns to OK before starting
-the next case.
+For `FOLLOWING_ERROR`, leave the fault parameter at `none` and command a
+stationary target six degrees away from the current zero pose:
 
 ```bash
-SESSION=~/diagnostics-sessions/task6-following-error-$(date +%F)
-ros2 run waybionic_rviz_plugins diagnostics_recorder.py --duration 15 \
-  --output-directory "$SESSION" --source-label mock \
-  --tested-commit "$(git rev-parse HEAD)"
-ros2 bag info "$SESSION/bag"
-
-ros2 param set /mock_drives test_health_fault none
-ros2 topic pub --once /joint_commands sensor_msgs/msg/JointState "{name: [joint_1], position: [0.0], velocity: [0.0]}"
+ros2 topic pub --rate 10 /joint_commands sensor_msgs/msg/JointState \
+  "{name: [joint_1, joint_2, joint_3, joint_4, joint_5, tool_grip], position: [0.10472, 0.0, 0.0, 0.0, 0.0, 0.0], velocity: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}"
 ```
 
-Use unique session names such as `task6-normal-healthy-$(date +%F)`,
-`task6-following-error-$(date +%F)`, `task6-stalled-$(date +%F)`,
-`task6-not-responding-$(date +%F)`, and `task6-disabled-$(date +%F)`. The
-recorder captures `/diagnostics`; `ros2 bag info` should list that topic as
-`diagnostic_msgs/msg/DiagnosticArray` with a nonzero message count. Keep
-recordings under `diagnostics-sessions/`, which is ignored by Git.
+After recording, command all joints back to zero and confirm `drive.base_yaw`
+returns to `OK`.
+
+For `STALLED`, set the simulated base drive fault and command motion toward a
+four-degree target. Wait for the configured two-second stall window and the
+next diagnostics report before recording:
+
+```bash
+ros2 param set /sim_arm_drives test_fault base_yaw:stalled
+ros2 topic pub --rate 10 /joint_commands sensor_msgs/msg/JointState \
+  "{name: [joint_1, joint_2, joint_3, joint_4, joint_5, tool_grip], position: [0.06981, 0.0, 0.0, 0.0, 0.0, 0.0], velocity: [0.2, 0.0, 0.0, 0.0, 0.0, 0.0]}"
+```
+
+Clear it with `ros2 param set /sim_arm_drives test_fault none`, allow the
+servo to catch up, command zero, and confirm `OK`.
+
+For `NOT_RESPONDING`, keep the zero-pose command and teleop enable streams
+running so the health row naturally ages past its reply timeout:
+
+```bash
+ros2 param set /sim_arm_drives test_fault base_yaw:not_responding
+```
+
+After recording, clear the fault. Stop the enable and command publishers,
+publish `/teleop_enabled` false with transient-local durability, wait at least
+one second for command quiet, then zero and re-arm the drives:
+
+```bash
+ros2 param set /sim_arm_drives test_fault none
+ros2 topic pub --qos-durability transient_local --once /teleop_enabled \
+  std_msgs/msg/Bool "{data: false}"
+ros2 service call /sim_arm_drives/zero std_srvs/srv/Trigger "{}"
+```
+
+Wait for `OK`, then repeat the release/enable and joint-command publisher
+steps before continuing.
+
+For `DISABLED`, selecting the fault safely disarms teleop before releasing the
+simulated base servo:
+
+```bash
+ros2 param set /sim_arm_drives test_fault base_yaw:disabled
+```
+
+Record once the row reports `DISABLED` / `ERROR`. Clear with
+`ros2 param set /sim_arm_drives test_fault none`, publish teleop false once
+with transient-local durability and then resume the true enable publisher,
+command zero, and confirm `OK`.
+
+Name directories `task7-normal-healthy-<timestamp>`,
+`task7-following-error-<timestamp>`, `task7-stalled-<timestamp>`,
+`task7-not-responding-<timestamp>`, and `task7-disabled-<timestamp>`.
+`ros2 bag info "$SESSION/bag"` should show `/diagnostics` as
+`diagnostic_msgs/msg/DiagnosticArray` and a nonzero message count. The session
+folders and MCAP files remain outside Git tracking under the ignored
+`diagnostics-sessions/` directory.
 
 For a complete temporary-publisher validation, record each mode in a separate
 new directory. Use a duration long enough for the first rosbag2 startup on the

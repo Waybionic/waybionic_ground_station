@@ -15,11 +15,20 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 
-from waybionic_control.drive_health import DriveHealthMonitor, DriveHealthState
+from waybionic_control.drive_health import (
+    DriveHealthMonitor,
+    DriveHealthState,
+    DriveHealthThresholds,
+)
 from waybionic_teleop import joy_udp_receiver, mks_can, sim_arm_drives_node, xbox_teleop_node
 from waybionic_teleop.gamepad import AXES, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
-from waybionic_teleop.sim_arm_drives_node import QUIET_BEFORE_ZERO_S, REPLY_TIMEOUT_S, SimArmDrives
+from waybionic_teleop.sim_arm_drives_node import (
+    QUIET_BEFORE_ZERO_S,
+    REPLY_TIMEOUT_S,
+    REPORT_PERIOD_S,
+    SimArmDrives,
+)
 from waybionic_teleop.sim_drives import SimulatedServo
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
@@ -416,7 +425,8 @@ def test_each_drive_is_evaluated_with_its_target_encoder_and_reply_age(node, mon
     assert all(not monitor.evaluate.called for monitor in monitors)
 
     ready(node)
-    node.on_command(command(node,
+    node.on_command(command(
+        node,
         velocities=dict.fromkeys(node.map.joints, 0.0),
         joint_1=math.radians(3.0)))
     advance(node)
@@ -452,6 +462,65 @@ def test_each_drive_is_evaluated_with_its_target_encoder_and_reply_age(node, mon
     assert [value.key for value in drive_status.values] == [
         'value', 'unit', 'can_id', 'last_command', 'state',
         'target_encoder_error_deg', 'reply_age_sec']
+
+
+def test_drive_health_thresholds_load_from_arm_drive_configuration(node, parameters):
+    configured = parameters('arm_drives.yaml', 'sim_arm_drives')
+    assert {
+        name: configured[name] for name in (
+            'health_following_error_degrees',
+            'health_stall_movement_degrees',
+            'health_stall_duration_seconds',
+            'health_reply_timeout_seconds',
+        )
+    } == {
+        'health_following_error_degrees': 5.0,
+        'health_stall_movement_degrees': 1.0,
+        'health_stall_duration_seconds': 2.0,
+        'health_reply_timeout_seconds': 0.5,
+    }
+    expected = DriveHealthThresholds(
+        following_error_degrees=configured['health_following_error_degrees'],
+        stall_movement_degrees=configured['health_stall_movement_degrees'],
+        stall_duration_seconds=configured['health_stall_duration_seconds'],
+        reply_timeout_seconds=configured['health_reply_timeout_seconds'],
+    )
+    assert all(monitor.thresholds == expected for monitor in node.drive_health_monitors)
+
+
+def test_non_default_drive_health_threshold_is_used_for_evaluation(
+        monkeypatch, parameters):
+    monkeypatch.setenv('ROS_AUTOMATIC_DISCOVERY_RANGE', 'OFF')
+    configured = parameters('arm_drives.yaml', 'sim_arm_drives')
+    configured.update({
+        'health_following_error_degrees': 1.25,
+        'health_stall_movement_degrees': 0.75,
+        'health_stall_duration_seconds': 1.25,
+        'health_reply_timeout_seconds': 0.3,
+    })
+    context = rclpy.Context()
+    rclpy.init(context=context)
+    node = SimArmDrives(context=context, parameter_overrides=[
+        Parameter(name, value=value) for name, value in configured.items()])
+    try:
+        expected = DriveHealthThresholds(
+            following_error_degrees=1.25,
+            stall_movement_degrees=0.75,
+            stall_duration_seconds=1.25,
+            reply_timeout_seconds=0.3,
+        )
+        assert all(monitor.thresholds == expected for monitor in node.drive_health_monitors)
+        ready(node)
+        node.on_command(command(
+            node,
+            velocities=dict.fromkeys(node.map.joints, 0.0),
+            joint_1=math.radians(2.0)))
+        advance(node)
+        node.report()
+        assert node.drive_health_states[0] is DriveHealthState.FOLLOWING_ERROR
+    finally:
+        node.destroy_node()
+        rclpy.try_shutdown(context=context)
 
 
 @pytest.mark.parametrize(('health_state', 'expected_level'), [
@@ -500,6 +569,229 @@ def test_drive_health_does_not_replace_an_existing_protocol_error(node, monkeypa
     values = {value.key: value.value for value in row.values}
     assert row.level == DiagnosticStatus.ERROR
     assert values['state'] == DriveHealthState.NOT_RESPONDING.value
+
+
+def test_simulator_test_fault_parameter_applies_and_clears_selected_drive(node):
+    servo = node.bus.drives[node.map.drives[0].can_id]
+    result = node.set_parameters([
+        Parameter('test_fault', Parameter.Type.STRING, 'base_yaw:stalled')])[0]
+    assert result.successful and servo.test_fault == 'stalled'
+
+    result = node.set_parameters([
+        Parameter('test_fault', Parameter.Type.STRING, 'none')])[0]
+    assert result.successful and servo.test_fault is None
+
+
+def test_simulator_test_fault_parameter_rejects_unknown_drive_or_fault(node):
+    unknown_drive = node.set_parameters([
+        Parameter('test_fault', Parameter.Type.STRING, 'unknown:stalled')])[0]
+    unknown_fault = node.set_parameters([
+        Parameter('test_fault', Parameter.Type.STRING, 'base_yaw:other')])[0]
+    assert not unknown_drive.successful
+    assert not unknown_fault.successful
+    assert node.test_fault is None
+
+
+def test_disabled_test_fault_releases_and_restores_the_servo(node):
+    ready(node)
+    servo = node.bus.drives[node.map.drives[0].can_id]
+
+    result = node.set_parameters([
+        Parameter('test_fault', Parameter.Type.STRING, 'base_yaw:disabled')])[0]
+    assert result.successful
+    assert not servo.enabled and not node.authorized
+
+    result = node.set_parameters([
+        Parameter('test_fault', Parameter.Type.STRING, 'none')])[0]
+    assert result.successful and servo.enabled
+
+
+def test_all_healthy_simulated_drive_rows_report_ok(node, monkeypatch):
+    ready(node)
+    now = max(node.heard) + 0.1
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: now)
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+
+    node.report()
+
+    rows = {item.name: item for item in published[-1].status
+            if item.name.startswith('drive.')}
+    assert set(rows) == {f'drive.{drive.name}' for drive in node.map.drives}
+    for row in rows.values():
+        values = {value.key: value.value for value in row.values}
+        assert row.level == DiagnosticStatus.OK
+        assert values['state'] == DriveHealthState.OK.value
+        assert 'target_encoder_error_deg' in values
+        assert 'reply_age_sec' in values
+
+
+def test_following_error_is_reported_and_clears_on_a_current_pose_command(node, monkeypatch):
+    ready(node)
+    now = max(node.heard) + 0.1
+    clock = [now]
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: clock[0])
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+
+    node.on_command(command(
+        node,
+        velocities={joint: 0.0 for joint in node.map.joints},
+        joint_1=math.radians(6.0)))
+    node.report()
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
+    assert row.level == DiagnosticStatus.ERROR
+    assert values['state'] == DriveHealthState.FOLLOWING_ERROR.value
+    assert float(values['target_encoder_error_deg']) == pytest.approx(6.0, abs=0.01)
+    assert float(values['reply_age_sec']) == pytest.approx(0.1)
+    assert clock[0] - now <= REPORT_PERIOD_S
+
+    measured = node.map.to_positions(node.counts)
+    node.on_command(command(
+        node,
+        velocities=dict.fromkeys(node.map.joints, 0.0),
+        **measured))
+    node.report()
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
+    assert row.level == DiagnosticStatus.OK
+    assert values['state'] == DriveHealthState.OK.value
+
+
+def test_stalled_simulated_drive_is_reported_within_detection_window_and_recovers(
+        node, monkeypatch):
+    ready(node)
+    drive_index = 0
+    servo = node.bus.drives[node.map.drives[drive_index].can_id]
+    start = max(node.heard) + 0.1
+    clock = [start]
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: clock[0])
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+    node.on_command(command(node, joint_1=math.radians(4.0)))
+    node.report()
+    servo.set_test_fault('stalled')
+    fault_started = clock[0]
+    assert node.authorized
+    assert node.map.to_rpm(node.velocities)[drive_index] > 0.0
+
+    states = []
+    samples = round((2.0 + REPORT_PERIOD_S) / node.period)
+    for tick in range(1, samples + 1):
+        clock[0] += node.period
+        node.on_enabled(Bool(data=True))
+        node.on_command(command(node, joint_1=math.radians(4.0)))
+        node.last_tick = clock[0] - node.period
+        node.tick()
+        if tick % round(REPORT_PERIOD_S / node.period) == 0:
+            node.report()
+            row = next(item for item in published[-1].status
+                       if item.name == 'drive.base_yaw')
+            values = {value.key: value.value for value in row.values}
+            states.append((clock[0], row.level, values['state'], values))
+
+    stalled = [sample for sample in states
+               if sample[2] == DriveHealthState.STALLED.value]
+    assert node.authorized, (node.stop_reason, node.zeroed, node.heard, node.last_tick,
+                             clock[0], servo.enabled, servo.target, servo.rpm)
+    assert stalled, states
+    assert stalled[0][1] == DiagnosticStatus.ERROR
+    assert stalled[0][0] - fault_started <= 2.0 + REPORT_PERIOD_S
+    assert float(stalled[0][3]['target_encoder_error_deg']) == pytest.approx(4.0, abs=0.01)
+    assert float(stalled[0][3]['reply_age_sec']) <= REPORT_PERIOD_S
+    assert servo.axis == pytest.approx(0.0)
+
+    servo.set_test_fault()
+    for _ in range(round(REPORT_PERIOD_S / node.period)):
+        clock[0] += node.period
+        node.on_enabled(Bool(data=True))
+        node.on_command(command(node, joint_1=math.radians(4.0)))
+        node.last_tick = clock[0] - node.period
+        node.tick()
+    node.report()
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
+    assert row.level == DiagnosticStatus.OK
+    assert values['state'] == DriveHealthState.OK.value
+
+
+def test_not_responding_simulated_drive_is_stale_within_one_report_period_and_recovers(
+        node, monkeypatch):
+    ready(node)
+    start = max(node.heard) + 0.1
+    clock = [start]
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: clock[0])
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+    node.report()
+    servo = node.bus.drives[node.map.drives[0].can_id]
+    servo.set_test_fault('not_responding')
+    fault_started = clock[0]
+    node.bus.send(servo.can_id, mks_can.read_encoder(servo.can_id))
+    assert node.bus.receive() is None
+
+    ticks = round(REPORT_PERIOD_S / node.period)
+    for _ in range(ticks):
+        clock[0] += node.period
+        node.on_enabled(Bool(data=True))
+        node.on_command(command(
+            node,
+            velocities=dict.fromkeys(node.map.joints, 0.0),
+            **node.commanded))
+        node.last_tick = clock[0] - node.period
+        node.tick()
+    node.report()
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
+    assert clock[0] - fault_started <= REPORT_PERIOD_S
+    assert row.level == DiagnosticStatus.STALE
+    assert values['state'] == DriveHealthState.NOT_RESPONDING.value
+    assert 'target_encoder_error_deg' in values and 'reply_age_sec' in values
+    assert (float(values['reply_age_sec'])
+            > node.drive_health_monitors[0].thresholds.reply_timeout_seconds)
+
+    servo.set_test_fault(None)
+    clock[0] += node.period
+    node.on_enabled(Bool(data=True))
+    node.on_command(command(
+        node,
+        velocities=dict.fromkeys(node.map.joints, 0.0),
+        **node.commanded))
+    node.last_tick = clock[0] - node.period
+    node.tick()
+    node.report()
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
+    assert row.level == DiagnosticStatus.OK
+    assert values['state'] == DriveHealthState.OK.value
+
+
+def test_disabled_simulated_drive_reports_error_and_recovers(node, monkeypatch):
+    ready(node)
+    clock = [max(node.heard) + 0.1]
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: clock[0])
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+    servo = node.bus.drives[node.map.drives[0].can_id]
+
+    servo.set_test_fault('disabled')
+    node.report()
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
+    assert not servo.enabled
+    assert row.level == DiagnosticStatus.ERROR
+    assert values['state'] == DriveHealthState.DISABLED.value
+    assert float(values['target_encoder_error_deg']) == pytest.approx(0.0, abs=0.01)
+    assert float(values['reply_age_sec']) == pytest.approx(0.1)
+
+    servo.set_test_fault(None)
+    node.report()
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
+    assert servo.enabled
+    assert row.level == DiagnosticStatus.OK
+    assert values['state'] == DriveHealthState.OK.value
 
 
 def test_drive_rows_show_a_setup_frame_until_the_drive_confirms_it(node, monkeypatch):

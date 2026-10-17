@@ -16,12 +16,16 @@ def ramp_rpm_per_s(acc):
 class SimulatedServo:
     """Answer bus commands and move like an MKS SERVO42D/57D in SR_vFOC mode."""
 
+    TEST_FAULTS = {'stalled', 'not_responding', 'disabled'}
+
     def __init__(self, can_id):
         self.can_id = can_id
         self.mode = None
         self.enabled = False
         self.respond = True
         self.active = True
+        self.test_fault = None
+        self._enabled_before_test_fault = None
         self.heartbeat_ms = 0
         self.quiet_ms = 0.0
         self.heartbeat_stops = 0
@@ -31,13 +35,27 @@ class SimulatedServo:
         self.speed = 0
         self.acc = 0
 
+    def set_test_fault(self, fault=None):
+        """Activate or clear a simulator-only drive fault."""
+        if fault is not None and fault not in self.TEST_FAULTS:
+            raise ValueError(f'unknown simulated drive test fault: {fault}')
+        if self.test_fault == 'disabled':
+            self.enabled = self._enabled_before_test_fault
+            self._enabled_before_test_fault = None
+        self.test_fault = fault
+        if fault == 'disabled':
+            self._enabled_before_test_fault = self.enabled
+            self.enabled = False
+            self.target, self.rpm = None, 0.0
+
     def receive(self, data):
         """Handle one command and return the reply frames."""
         code, arguments = mks_can.parse(self.can_id, data)
         self.quiet_ms = 0.0
         if code == mks_can.READ_ENCODER and not arguments:
             value = round(self.axis).to_bytes(6, 'big', signed=True)
-            return [mks_can.frame(self.can_id, code, value)]
+            return ([mks_can.frame(self.can_id, code, value)]
+                    if self._responding() else [])
         if code == mks_can.SET_MODE and len(arguments) == 1:
             self.mode, status = arguments[0], 1
         elif code == mks_can.SET_RESPONSE and len(arguments) == 2:
@@ -47,14 +65,18 @@ class SimulatedServo:
         elif code == mks_can.SET_ZERO and not arguments:
             self.axis, self.rpm, self.target, status = 0.0, 0.0, None, 1
         elif code == mks_can.ENABLE and len(arguments) == 1:
-            self.enabled, status = bool(arguments[0]), 1
+            self.enabled = bool(arguments[0]) and self.test_fault != 'disabled'
+            status = 1
             if not self.enabled:
                 self.target, self.rpm = None, 0.0
         elif code == mks_can.ABSOLUTE_AXIS and len(arguments) == 6:
             status = self.start_move(arguments)
         else:
             return []
-        return [mks_can.frame(self.can_id, code, [status])] if self.respond else []
+        return [mks_can.frame(self.can_id, code, [status])] if self._responding() else []
+
+    def _responding(self):
+        return self.respond and self.test_fault != 'not_responding'
 
     def start_move(self, arguments):
         if not self.enabled or self.mode != mks_can.MODE_SR_VFOC:
@@ -102,6 +124,8 @@ class SimulatedServo:
         else:
             change = ramp * dt
             self.rpm += min(max(goal - self.rpm, -change), change)
+        if self.test_fault == 'stalled':
+            return []
         move = self.rpm / 60.0 * dt * mks_can.COUNTS_PER_REV
         if self.target is None:
             self.axis += move
@@ -109,7 +133,7 @@ class SimulatedServo:
         remaining = self.target - self.axis
         if abs(remaining) < 0.5 or (move * remaining > 0 and abs(move) >= abs(remaining)):
             self.axis, self.rpm, self.target = float(self.target), 0.0, None
-            if self.respond and self.active:
+            if self._responding() and self.active:
                 return [mks_can.frame(self.can_id, mks_can.ABSOLUTE_AXIS, [2])]
             return []
         self.axis += move

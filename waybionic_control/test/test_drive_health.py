@@ -44,6 +44,17 @@ class TestDriveHealthMonitor(unittest.TestCase):
     def test_ok(self):
         self.assertIs(self.evaluate(), DriveHealthState.OK)
 
+    def test_provisional_threshold_defaults(self):
+        self.assertEqual(
+            self.monitor.thresholds,
+            DriveHealthThresholds(
+                following_error_degrees=5.0,
+                stall_movement_degrees=1.0,
+                stall_duration_seconds=2.0,
+                reply_timeout_seconds=0.5,
+            ),
+        )
+
     def test_following_error(self):
         state = self.evaluate(target_position=5.01)
         self.assertIs(state, DriveHealthState.FOLLOWING_ERROR)
