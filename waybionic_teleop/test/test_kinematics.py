@@ -201,6 +201,25 @@ def test_outside_the_keep_in_box_the_tip_may_only_move_back_in(arm):
     assert fraction == 1.0 and blocked == []
 
 
+@pytest.mark.parametrize('velocity, moves', [
+    ((-0.02, 0.0, 0.02), True),  # Back in through both faces
+    ((-0.02, 0.0, 0.0), True),  # Back in through one, holding the other
+    ((0.0, 0.02, 0.0), True),  # Along both faces
+    ((-0.02, 0.0, -0.02), False),  # Back in through one, further out through the other
+    ((0.02, 0.0, 0.02), False),
+    ((0.02, 0.0, -0.02), False),  # Further out through both
+])
+def test_outside_two_faces_the_tip_may_not_move_further_out_through_either(arm, velocity, moves):
+    # The tip starts 2 cm in front of the x max face and 2 cm below the z min face.
+    start, _ = arm.forward(DOWN)
+    box = ((-1.0, -1.0, start[2] + 0.02), (start[0] - 0.02, 1.0, 1.0))
+    joints, fraction, blocked = arm.jog(DOWN, velocity, 0.0, 0.0, DT, LIMITS, MAX_RATE, box)
+    if moves:
+        assert fraction == 1.0 and blocked == []
+    else:
+        assert joints == pytest.approx(DOWN, abs=1e-6) and blocked == ['keep_in']
+
+
 def test_a_cut_stops_on_the_line_at_the_edge_of_the_workspace(arm):
     path = cut(arm, (0.05, 0.0, 0.0), 20.0)
     start = arm.forward(path[0])[0]

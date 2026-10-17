@@ -213,6 +213,80 @@ def test_without_arm_kinematics_the_cartesian_group_is_skipped(teleop):
     assert teleop.active_group.name == 'base'
 
 
+# Shoulder leant forward: the tip is at about (307, 33, 664) mm, in front of x 250 and below
+# z 700, so it starts outside two faces of FRONT_LOW. Yawed right as well, it is at about
+# (303, -59, 664) mm, in front of x 250 and right of y 0, outside two faces of FRONT_RIGHT.
+LEANT = {**HOME, 'joint_2': 0.6}
+LEANT_RIGHT = {**LEANT, 'joint_1': -0.3}
+FRONT_LOW = ([-550.0, -550.0, 700.0], [250.0, 550.0, 800.0])
+FRONT_RIGHT = ([-550.0, 0.0, 50.0], [250.0, 550.0, 800.0])
+
+
+def boxed(params, arm, pose, box):
+    params['keep_in_min_mm'], params['keep_in_max_mm'] = box
+    teleop = ArmTeleop(config_from_parameters(params), LIMITS, arm)
+    press(teleop, 'start', pose)
+    return teleop
+
+
+def outside(tip, box):
+    """Return how far tip lies outside each face of box, in mm, as (x, y, z)."""
+    low, high = box
+    return [max(lower - value * 1000.0, value * 1000.0 - upper, 0.0)
+            for value, lower, upper in zip(tip, low, high)]
+
+
+@pytest.mark.parametrize('pose, box, axes', [
+    (LEANT, FRONT_LOW, {'left_y': 1.0}),  # Leaning further: further out on both faces
+    (LEANT_RIGHT, FRONT_RIGHT, {'left_x': 1.0}),  # Yaw left: back in on y, further out on x
+    (LEANT_RIGHT, FRONT_RIGHT, {'left_x': -1.0}),  # Yaw right: back in on x, further out on y
+])
+def test_outside_two_faces_a_joint_move_out_through_either_is_refused(
+        params, arm, pose, box, axes):
+    teleop = boxed(params, arm, pose, box)
+    run(teleop, 0.5, **axes)
+    assert {joint: teleop.targets[joint] for joint in LIMITS} == pytest.approx(
+        {joint: pose[joint] for joint in LIMITS}, abs=1e-6)
+    assert teleop.blocked == ['keep_in']
+
+
+def test_outside_two_faces_a_joint_move_back_in_through_both_recovers(params, arm):
+    teleop = boxed(params, arm, LEANT, FRONT_LOW)
+    last = outside(arm.forward(LEANT)[0], FRONT_LOW)
+    assert last[0] > 0.0 and last[2] > 0.0
+    # Leaning back brings the tip in through both faces; no step may take it further out.
+    for _ in range(round(1.5 / DT)):
+        teleop.update(*sample(left_y=-1.0), HOME, DT)
+        now = outside(arm.forward(teleop.targets)[0], FRONT_LOW)
+        assert all(value <= before + 1e-6 for value, before in zip(now, last))
+        last = now
+    assert last == pytest.approx([0.0, 0.0, 0.0], abs=1e-6)
+    # Back inside, the box holds as usual: leaning on over the top stops at the far z wall.
+    run(teleop, 3.0, left_y=-1.0)
+    tip, _ = arm.forward(teleop.targets)
+    assert teleop.targets['joint_2'] < 0.0
+    assert tip[2] * 1000.0 == pytest.approx(FRONT_LOW[0][2], abs=1e-3)
+    assert teleop.blocked == ['keep_in']
+
+
+def test_a_joint_move_back_in_that_would_leave_a_third_face_stops_on_it(params, arm):
+    # FRONT_LOW with its y max pulled in to 35 mm, 2 mm beside the tip.
+    box = (FRONT_LOW[0], [250.0, 35.0, 800.0])
+    teleop = boxed(params, arm, LEANT, box)
+    start = outside(arm.forward(LEANT)[0], box)
+    # Leaning back recovers x and z, but yawing left at the same time pushes y out. The whole
+    # step shrinks, so the arm stops on the y wall and the recovery waits with it.
+    run(teleop, 1.0, left_x=1.0, left_y=-1.0)
+    tip, _ = arm.forward(teleop.targets)
+    now = outside(tip, box)
+    assert tip[1] * 1000.0 == pytest.approx(35.0, abs=1e-3)
+    assert 0.0 < now[0] < start[0] and 0.0 < now[2] < start[2]
+    assert teleop.blocked == ['keep_in']
+    # Releasing the yaw lets the recovery finish.
+    run(teleop, 2.0, left_y=-1.0)
+    assert outside(arm.forward(teleop.targets)[0], box)[0] == 0.0
+
+
 @pytest.mark.parametrize('change', [
     {'base.axes': ['left_x', 'left_y', 'trackpad']},
     {'stop_button': 'turbo'},
