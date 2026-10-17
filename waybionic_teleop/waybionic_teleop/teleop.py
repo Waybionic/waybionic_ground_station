@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import math
 
 from waybionic_teleop.gamepad import AXIS, BUTTON
+from waybionic_teleop.kinematics import _inside
 
 ACTIONS = ('enable', 'stop', 'group', 'home', 'faster', 'slower', 'lock', 'tilt_up', 'tilt_down')
 CARTESIAN_AXES = ('x', 'y', 'z', 'roll')
@@ -342,6 +343,10 @@ class ArmTeleop:
             self.targets[joint], self.velocities[joint] = target, velocity
             self.command_targets[joint] = clamp(
                 target + velocity * config.period, min(lower, target), max(upper, target))
+        # The Cartesian jog and the incision group keep the tip in the box themselves.
+        if self.kinematics is not None and not incision and (
+                homing or self.active_group.mode != 'cartesian'):
+            self.keep_inside(before, dt)
         self.avoid_collisions(before)
 
     def avoid_collisions(self, before):
@@ -366,6 +371,33 @@ class ArmTeleop:
                 self.velocities[joint] = 0.0
         self.stop_cartesian()
         self.blocked += worse
+
+    def keep_inside(self, before, dt):
+        """Shrink this step's arm-joint change so the tool tip stays in the keep-in box."""
+        arm = self.kinematics.joints
+        start, _ = self.kinematics.forward(before)
+
+        def inside(joints):
+            return _inside(self.kinematics.forward(joints)[0], self.config.keep_in, start)
+
+        def partway(fraction):
+            return {joint: before[joint] + fraction * (self.targets[joint] - before[joint])
+                    for joint in arm}
+
+        if inside(partway(1.0)):
+            # The drives aim at the lookahead, a step ahead, so it has to stay inside too.
+            if not inside({joint: self.command_targets[joint] for joint in arm}):
+                self.command_targets.update({joint: self.targets[joint] for joint in arm})
+            return
+        # The whole step shrinks, not single joints, so the arm keeps its direction.
+        low, high = 0.0, 1.0
+        for _ in range(30):
+            middle = (low + high) / 2.0
+            low, high = (middle, high) if inside(partway(middle)) else (low, middle)
+        for joint, target in partway(low).items():
+            self.velocities[joint] = (target - before[joint]) / dt
+            self.targets[joint] = self.command_targets[joint] = target
+        self.blocked.append('keep_in')
 
     def jog(self, axes, dt):
         """Move the tool tip along a straight line set by the sticks, or tilt the tool about it."""

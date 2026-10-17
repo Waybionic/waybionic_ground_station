@@ -237,6 +237,19 @@ def test_the_tip_and_the_next_setpoint_stop_at_the_keep_in_floor(arm, cartesian)
             assert arm.forward(joints)[0] == pytest.approx(tip, abs=1e-9)
 
 
+def test_a_joint_group_stops_the_tip_and_the_next_setpoint_at_the_keep_in_floor(params, arm):
+    teleop = ArmTeleop(config_from_parameters(params), LIMITS, arm)
+    press(teleop, 'start', DOWN)
+    floor = teleop.config.keep_in[0][2]
+    # In the base group, tilting the shoulder forward lowers the tool, which points down here.
+    for _ in range(round(4.0 / DT)):
+        teleop.update(*sample(left_y=1.0), DOWN, DT)
+        for joints in (teleop.targets, teleop.command_targets):
+            assert arm.forward(joints)[0][2] >= floor - 1e-8
+    assert teleop.blocked == ['keep_in']
+    assert arm.forward(teleop.targets)[0][2] == pytest.approx(floor, abs=1e-4)
+
+
 def test_releasing_a_after_homing_does_not_resume_the_last_move(arm, cartesian):
     for _ in range(round(0.5 / DT)):
         cartesian.update(*sample('dpad_right', left_x=1.0, right_x=1.0), DOWN, DT)
