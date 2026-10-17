@@ -158,7 +158,8 @@ int main(int argc, char ** argv)
 
   while (g_running) {
     pollfd fd{master, POLLIN, 0};
-    if (::poll(&fd, 1, 2) > 0 && (fd.revents & POLLIN)) {
+    const int poll_timeout_ms = bridge.queuedFrames() > 0 ? 0 : 2;
+    if (::poll(&fd, 1, poll_timeout_ms) > 0 && (fd.revents & POLLIN)) {
       char chunk[256];
       const ssize_t count = read(master, chunk, sizeof(chunk));
       for (ssize_t i = 0; i < count; ++i) {

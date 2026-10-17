@@ -48,8 +48,9 @@ struct CarrierStatus
 //   tIIILDD  queue a standard data frame while open: no reply, BELL if the queue is full
 //   V / N    version "V0100" / serial "NWB01"
 //
-// Sent frames are not acknowledged with 'z': the real-arm host writes each control tick as one
-// batch, and a non-frame acknowledgement would end its non-blocking read early.
+// Sent frames are not acknowledged with 'z'. The host writes an empty line after a frame; its
+// CR answer is held until that frame leaves the transmit queue. If the frame expires or C drops
+// it, BELL is written immediately before the held answer.
 //
 // Not supported, answered with BELL: L (listen-only: no such mode in the Arduino_CAN API),
 // sxxyy (BTR registers), T/R (extended IDs), r (remote frames: Arduino_CAN sends data frames
@@ -70,6 +71,8 @@ class SlcanBridge
 public:
   static constexpr size_t kMaxLine = 32;
   static constexpr size_t kTransmitQueueCapacity = 16;
+  static constexpr size_t kPendingAnswerCapacity = 32;
+  static constexpr size_t kMaxAnswerLength = 8;
   static constexpr uint32_t kTransmitMaxAgeMs = 10;
   static constexpr uint32_t kDefaultBitrate = 500000;
   static constexpr uint16_t kCarrierStatusId = 0x7F0;
@@ -100,16 +103,24 @@ private:
   {
     Frame frame;
     uint32_t queued_ms = 0;
+    uint32_t sequence = 0;
+  };
+
+  struct PendingAnswer
+  {
+    uint32_t wait_sequence = 0;
+    uint8_t failure_bells = 0;
+    char text[kMaxAnswerLength] = {};
   };
 
   void handleLine(const char * line, size_t length, uint32_t now_ms);
-  void clearTransmitQueue();
-  void ok() {out_.write("\r");}
-  void error()
-  {
-    ++refused_;
-    out_.write("\a");
-  }
+  void clearTransmitQueue(bool report_failure);
+  void resolveTransmit(uint32_t sequence, bool failed);
+  void answer(const char * text);
+  void releaseAnswers();
+  void writeBells(uint8_t count);
+  void ok() {answer("\r");}
+  void error();
 
   ICanTransport & can_;
   CanStarter & starter_;
@@ -122,6 +133,13 @@ private:
   QueuedFrame tx_queue_[kTransmitQueueCapacity];
   size_t tx_head_ = 0;
   size_t tx_count_ = 0;
+  uint32_t next_tx_sequence_ = 1;
+  uint32_t resolved_tx_sequence_ = 0;
+  uint32_t last_tx_sequence_ = 0;
+  uint8_t unreported_failure_bells_ = 0;
+  PendingAnswer pending_answers_[kPendingAnswerCapacity];
+  size_t answer_head_ = 0;
+  size_t answer_count_ = 0;
   char line_[kMaxLine + 1] = {};
   size_t length_ = 0;
   bool overflow_ = false;

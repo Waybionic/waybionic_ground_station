@@ -40,9 +40,9 @@ const char * kHelp =
   "  read <id>                     READ_ENCODER 31h\n"
   "  response <id> <0|1> <0|1>     SET_RESPONSE 8Ch (respond, active)\n"
   "  heartbeat <id> <ms>           SET_HEARTBEAT 98h\n"
+  "  estop <id>                    EMERGENCY_STOP F7h\n"
   "  raw <ID#HEX>                  send any frame, e.g. raw 002#3134 (bad checksum)\n"
-  "  wait <ms> | status | help | quit\n"
-  "  estop: TODO, F7h is not defined in waybionic_teleop/mks_can.py yet\n";
+  "  wait <ms> | status | help | quit\n";
 
 bool parseCandump(const std::string & text, Frame & out)
 {
@@ -109,6 +109,9 @@ bool buildCommand(const std::string & verb, std::istringstream & in, Frame & out
   if (verb == "heartbeat") {
     return static_cast<bool>(in >> a) && a >= 0 &&
            mks::setHeartbeat(can_id, static_cast<uint32_t>(a), out);
+  }
+  if (verb == "estop") {
+    return mks::emergencyStop(can_id, out);
   }
   return false;
 }

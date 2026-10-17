@@ -41,8 +41,12 @@ bool R4CanTransport::send(const Frame & frame)
   // write() returns 1 once the frame is queued in a transmit mailbox, or a negative FSP code.
   const int rc = CAN.write(msg);
   if (rc != 1) {
-    ++failed_writes_;
     last_write_error_ = rc;
+    // The UNO R4 has one standard-frame mailbox. Busy is expected while the previous frame is
+    // leaving the bus and SlcanBridge retries it; count only non-transient write failures.
+    if (rc != -FSP_ERR_CAN_TRANSMIT_NOT_READY) {
+      ++failed_writes_;
+    }
     return false;
   }
   bus_load_.note(frame, millis());

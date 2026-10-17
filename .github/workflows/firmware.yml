@@ -1,15 +1,33 @@
-name: UNO R4 Firmware
+name: Firmware
 
 on:
   push:
     branches: [ "main" ]
+    paths: [ "firmware/**", "waybionic_can/arduino/**", ".github/workflows/firmware.yml" ]
   pull_request:
+    paths: [ "firmware/**", "waybionic_can/arduino/**", ".github/workflows/firmware.yml" ]
 
 permissions:
   contents: read
 
 jobs:
-  compile:
+  compile-tool-board:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Compile for the UNO R4 WiFi
+        uses: arduino/compile-sketches@v1
+        with:
+          fqbn: arduino:renesas_uno:unor4wifi
+          sketch-paths: |
+            - firmware/tool_board
+          libraries: |
+            - name: AccelStepper
+
+  compile-can-sketches:
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false

@@ -1,5 +1,7 @@
 #include "common/SlcanBridge.h"
 
+#include <string.h>
+
 namespace waybionic
 {
 namespace
@@ -120,10 +122,94 @@ void SlcanBridge::handleChar(const char c, const uint32_t now_ms)
   }
 }
 
-void SlcanBridge::clearTransmitQueue()
+void SlcanBridge::writeBells(uint8_t count)
 {
+  while (count-- > 0) {
+    out_.write("\a");
+  }
+}
+
+void SlcanBridge::releaseAnswers()
+{
+  while (answer_count_ > 0) {
+    PendingAnswer & pending = pending_answers_[answer_head_];
+    if (pending.wait_sequence > resolved_tx_sequence_) {
+      break;
+    }
+    writeBells(pending.failure_bells);
+    out_.write(pending.text);
+    answer_head_ = (answer_head_ + 1) % kPendingAnswerCapacity;
+    --answer_count_;
+  }
+  if (tx_count_ == 0 && answer_count_ == 0) {
+    next_tx_sequence_ = 1;
+    resolved_tx_sequence_ = 0;
+    last_tx_sequence_ = 0;
+  }
+}
+
+void SlcanBridge::answer(const char * text)
+{
+  if (tx_count_ == 0 && answer_count_ == 0) {
+    writeBells(unreported_failure_bells_);
+    unreported_failure_bells_ = 0;
+    out_.write(text);
+    return;
+  }
+  if (answer_count_ == kPendingAnswerCapacity) {
+    ++refused_;
+    ++unreported_failure_bells_;
+    return;
+  }
+  const size_t tail = (answer_head_ + answer_count_) % kPendingAnswerCapacity;
+  PendingAnswer & pending = pending_answers_[tail];
+  pending = PendingAnswer{};
+  pending.wait_sequence = last_tx_sequence_;
+  pending.failure_bells = unreported_failure_bells_;
+  unreported_failure_bells_ = 0;
+  strncpy(pending.text, text, kMaxAnswerLength - 1);
+  pending.text[kMaxAnswerLength - 1] = '\0';
+  ++answer_count_;
+  releaseAnswers();
+}
+
+void SlcanBridge::error()
+{
+  ++refused_;
+  answer("\a");
+}
+
+void SlcanBridge::resolveTransmit(const uint32_t sequence, const bool failed)
+{
+  if (failed) {
+    ++refused_;
+    bool assigned = false;
+    for (size_t i = 0; i < answer_count_; ++i) {
+      PendingAnswer & pending =
+        pending_answers_[(answer_head_ + i) % kPendingAnswerCapacity];
+      if (pending.wait_sequence >= sequence) {
+        ++pending.failure_bells;
+        assigned = true;
+        break;
+      }
+    }
+    if (!assigned) {
+      ++unreported_failure_bells_;
+    }
+  }
+  resolved_tx_sequence_ = sequence;
+  releaseAnswers();
+}
+
+void SlcanBridge::clearTransmitQueue(const bool report_failure)
+{
+  while (tx_count_ > 0) {
+    const uint32_t sequence = tx_queue_[tx_head_].sequence;
+    tx_head_ = (tx_head_ + 1) % kTransmitQueueCapacity;
+    --tx_count_;
+    resolveTransmit(sequence, report_failure);
+  }
   tx_head_ = 0;
-  tx_count_ = 0;
 }
 
 void SlcanBridge::handleLine(
@@ -155,7 +241,7 @@ void SlcanBridge::handleLine(
     case 'C':
       if (length == 1) {
         open_ = false;
-        clearTransmitQueue();
+        clearTransmitQueue(true);
         ok();
       } else {
         error();
@@ -170,19 +256,21 @@ void SlcanBridge::handleLine(
         const size_t tail = (tx_head_ + tx_count_) % kTransmitQueueCapacity;
         tx_queue_[tail].frame = frame;
         tx_queue_[tail].queued_ms = now_ms;
+        tx_queue_[tail].sequence = next_tx_sequence_++;
+        last_tx_sequence_ = tx_queue_[tail].sequence;
         ++tx_count_;
       }
       return;
     case 'V':
       if (length == 1) {
-        out_.write("V0100\r");
+        answer("V0100\r");
       } else {
         error();
       }
       return;
     case 'N':
       if (length == 1) {
-        out_.write("NWB01\r");
+        answer("NWB01\r");
       } else {
         error();
       }
@@ -196,15 +284,19 @@ void SlcanBridge::handleLine(
 void SlcanBridge::drainTransmit(const uint32_t now_ms)
 {
   while (tx_count_ > 0 && now_ms - tx_queue_[tx_head_].queued_ms > kTransmitMaxAgeMs) {
+    const uint32_t sequence = tx_queue_[tx_head_].sequence;
     tx_head_ = (tx_head_ + 1) % kTransmitQueueCapacity;
     --tx_count_;
     ++expired_;
+    resolveTransmit(sequence, true);
   }
   if (tx_count_ == 0 || !open_ || !can_.send(tx_queue_[tx_head_].frame)) {
     return;
   }
+  const uint32_t sequence = tx_queue_[tx_head_].sequence;
   tx_head_ = (tx_head_ + 1) % kTransmitQueueCapacity;
   --tx_count_;
+  resolveTransmit(sequence, false);
 }
 
 void SlcanBridge::pollCan()

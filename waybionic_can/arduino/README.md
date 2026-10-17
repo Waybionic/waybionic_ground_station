@@ -29,8 +29,9 @@ For the supervised session with all five arm drives, use the
   These are bench limits on top of the `mks_can.py` protocol limits (signed 24-bit axis
   -0x800000..0x7FFFFF, 0-3000 rpm, acc 0-255). They are constants in the sketch
   (`benchPolicy()` / `MotionPolicy`). Change them only with the leads, then re-upload.
-- The human-readable bench sketches stay at the drive's factory **500 kbit/s**. The
-  `feature/real-arm` carrier/host selects **1 Mbit/s CAN** after each drive is configured.
+- The human-readable bench sketches stay at the drive's factory **500 kbit/s**. The real-arm
+  carrier/host from [PR #45](https://github.com/Waybionic/waybionic_ground_station/pull/45)
+  selects **1 Mbit/s CAN** after each drive is configured.
 - `estop <id>` sends the manual's F7h immediate emergency-stop command. It is a software
   command and does not replace the physical E-stop. Drive-ID (8Bh) and bitrate (8Ah) are not
   implemented in the merged `mks_can.py` or this shared library.
@@ -62,7 +63,7 @@ UNO R4 WiFi -- CAN TX = D10 --> TJA1051T TXD
 | --- | --- | --- |
 | MKS drives as shipped | 500 kbit/s | Factory default |
 | Bench sketches (`kCanBitrate`) | 500 kbit/s | Match drives as shipped |
-| `feature/real-arm` host through `carrier_bridge` | 1 Mbit/s | Target for the five arm drives |
+| PR #45 real-arm host through `carrier_bridge` | 1 Mbit/s | Target for the five arm drives |
 | Carrier USB serial | 1,000,000 baud | Separate serial-link setting, not CAN bitrate |
 
 Configure each drive alone before using the real-arm host. The carrier keeps the CAN rate at
@@ -74,8 +75,9 @@ which it first opened until reset, so replug it before checking the shared 1 Mbi
 ./scripts/macos.sh drives --bitrate 1000000 scan --ids 1 2 3 4 5
 ```
 
-These commands require `feature/real-arm` (or a later integration containing its macOS helper
-and `mks_setup`). If the carrier and a drive disagree on CAN bitrate, no frames are ACKed.
+These commands require [PR #45](https://github.com/Waybionic/waybionic_ground_station/pull/45)
+or a later integration containing its macOS helper and `mks_setup`. If the carrier and a drive
+disagree on CAN bitrate, no frames are ACKed.
 
 ## Checksum vs CRC
 
@@ -236,9 +238,9 @@ Only part of SLCAN is supported:
 | `S4` `S5` `S6` `S8` | 125k / 250k / 500k / 1M, only while closed. Other `Sn` codes answer BELL (the UNO R4 API only offers these four). |
 | `O` | Start CAN (500 kbit/s unless `Sn` was sent) and forward frames both ways |
 | `C` | Stop forwarding. The controller itself stays started, so changing bitrate after the first `O` needs a board reset (`Arduino_CAN`'s `begin()` re-registers interrupts and a restart isn't known to be safe). |
-| `tIIILDD..` | Queue a standard data frame; no reply on success, BELL if malformed, reserved ID `0x7F0`, or the 16-frame queue is full |
+| `tIIILDD..` | Queue a standard data frame; BELL if malformed, reserved ID `0x7F0`, or the 16-frame queue is full |
 | `V`, `N` | `V0100`, `NWB01` |
-| empty line | OK (python-can sends one after `Sn`) |
+| empty line | CR. After a queued frame, held until that frame is sent; BELL then CR if it expires or `C` drops it. |
 | received frames | sent to the host as `tIIILDD..\r` while open |
 | `L`, `s`, `T`, `r`, `R`, `F`, `Z`, `d`/`D`/`b`/`B`, anything else | BELL (not supported: no listen-only mode or remote frames in `Arduino_CAN`, no extended IDs or CAN FD, no status flags or timestamps) |
 
@@ -251,8 +253,9 @@ documented in `SlcanBridge.h`.
 The bridge does **not** check MKS checksums or apply motion limits; the host software is
 responsible for that. A 16-frame queue absorbs a complete control tick while the UNO R4's
 single standard-frame mailbox is busy; entries older than 10 ms are dropped and `C` clears the
-queue. Successful transmitted lines are silent because the real-arm host batches a control tick
-and treats non-frame lines as an end-of-read marker. It has been tested through
+queue. The [PR #45](https://github.com/Waybionic/waybionic_ground_station/pull/45) host writes an
+empty line after each frame and waits for its CR before closing; a refused queued frame produces
+BELL immediately before that CR. It has been tested through
 `slcan_sim` and python-can; it has **not** been tested on the UNO R4/TJA1051T or real drives.
 
 **E-stop and supply telemetry:** `BenchTelemetry.h` has the interface, but currently returns

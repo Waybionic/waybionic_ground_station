@@ -190,17 +190,19 @@ TEST_F(SlcanTest, MalformedTransmitIsRefused)
   EXPECT_TRUE(can.sent.empty());
 }
 
-TEST_F(SlcanTest, BusyControllerIsRetriedWithoutBell)
+TEST_F(SlcanTest, BusyControllerHoldsEmptyLineAnswerUntilFrameIsSent)
 {
   openLikePythonCan();
   can.busy_calls = 3;
-  EXPECT_EQ(feed("t00123132\r"), "");
+  EXPECT_EQ(feed("t00123132\r\r"), "");
   for (uint32_t now = 0; now < 3; ++now) {
     bridge.drainTransmit(now);
     EXPECT_EQ(bridge.queuedFrames(), 1u);
+    EXPECT_EQ(out.take(), "");
   }
   bridge.drainTransmit(3);
   EXPECT_EQ(bridge.queuedFrames(), 0u);
+  EXPECT_EQ(out.take(), "\r");
   ASSERT_EQ(can.sent.size(), 1u);
   EXPECT_EQ(can.send_calls, 4u);
 }
@@ -214,19 +216,28 @@ TEST_F(SlcanTest, QueueIsBoundedAndCloseClearsIt)
   }
   EXPECT_EQ(feed(tick), "");
   EXPECT_EQ(bridge.queuedFrames(), SlcanBridge::kTransmitQueueCapacity);
-  EXPECT_EQ(feed("t00223133\r"), "\a");
-  EXPECT_EQ(feed("C\r"), "\r");
+  EXPECT_EQ(feed("t00223133\r"), "");  // held behind the queued frames
+  EXPECT_EQ(feed("C\r"), std::string(17, '\a') + "\r");
   EXPECT_EQ(bridge.queuedFrames(), 0u);
 }
 
-TEST_F(SlcanTest, StaleQueuedFramesAreDropped)
+TEST_F(SlcanTest, ExpiredFramesBellBeforeTheirHeldAnswers)
 {
   openLikePythonCan();
-  EXPECT_EQ(feed("t00123132\rt00223133\r", 100), "");
+  EXPECT_EQ(feed("t00123132\r\rt00223133\r\r", 100), "");
   bridge.drainTransmit(111);
+  EXPECT_EQ(out.take(), "\a\r\a\r");
   EXPECT_TRUE(can.sent.empty());
   EXPECT_EQ(bridge.queuedFrames(), 0u);
   EXPECT_EQ(bridge.expiredFrames(), 2u);
+}
+
+TEST_F(SlcanTest, CloseBellsForEveryDroppedFrameBeforeItsAnswer)
+{
+  openLikePythonCan();
+  EXPECT_EQ(feed("t00123132\r\rt00223133\r\rC\r", 100), "\a\r\a\r\r");
+  EXPECT_EQ(bridge.queuedFrames(), 0u);
+  EXPECT_TRUE(can.sent.empty());
 }
 
 TEST_F(SlcanTest, UnsupportedCommandsAnswerBell)
