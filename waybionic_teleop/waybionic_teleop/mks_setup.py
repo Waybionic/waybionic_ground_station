@@ -31,11 +31,17 @@ def open_bus(interface, channel, bitrate, tty_baudrate):
 def request(bus, can_id, data, code, answer_ids=None, timeout=0.2):
     """Send a frame; return the arguments of the reply with this code, or None."""
     answer_ids = answer_ids or {can_id}
-    bus.send(can_id, data)
+    sent = (can_id, bytes(data))
+    bus.send(*sent)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         bus.step(0.0)
         frame = bus.receive()
+        if not getattr(bus, 'connected', True):
+            raise SystemExit(f'Lost the carrier: {bus.problem}')
+        # The carrier refuses a frame while its CAN controller is busy.
+        if hasattr(bus, 'take_refused') and sent in bus.take_refused():
+            bus.send(*sent)
         if frame is None:
             time.sleep(0.002)
             continue

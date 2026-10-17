@@ -75,3 +75,31 @@ def test_stop_fails_when_the_carrier_is_unplugged(monkeypatch, usb_carrier):
                         lambda bus: setattr(port, 'broken', True) or True)
     with pytest.raises(SystemExit, match='did not go out'):
         mks_setup.main(['--channel', '/dev/fake', 'stop'])
+
+
+def test_a_scan_over_a_lost_carrier_says_so_instead_of_no_drive(usb_carrier):
+    port = usb_carrier()
+    bus = SlcanBus('/dev/fake', 500000, open_port=lambda: port)
+    port.broken = True
+    with pytest.raises(SystemExit, match='Lost the carrier'):
+        mks_setup.scan(bus, [1])
+
+
+def test_a_refused_request_goes_out_again(bus):
+    send, first, refusals = bus.send, [True], []
+
+    def busy_once(can_id, data):
+        # The carrier refuses the first frame, as while its CAN controller is busy.
+        if first:
+            first.clear()
+            refusals.append((can_id, bytes(data)))
+            return True
+        return send(can_id, data)
+
+    def take_refused():
+        taken = refusals[:]
+        refusals.clear()
+        return taken
+    bus.send, bus.take_refused = busy_once, take_refused
+    bus.drives[3].axis = 0x4000
+    assert mks_setup.scan(bus, [3]) == {3: 0x4000}

@@ -538,7 +538,7 @@ Do the [macOS setup](#macos-apple-silicon) first. Then, from the repository root
 5. Check each joint's direction at the slowest speed in the `upper` group. If a drive
    turns the wrong way, negate its `factors` in `arm_drives.yaml` and rebuild. Then move
    each joint a known angle, such as 10 degrees in RViz, and measure it on the arm; a
-   different angle means its gear ratio in `factors` is wrong.
+   different angle means its `gear_ratio` in `arm_drives.yaml` is wrong.
 
 **Remote operator.** The controller can stay with an operator on another computer. On
 the operator's Windows computer, run the controller bridge pointed at the Mac's address:
