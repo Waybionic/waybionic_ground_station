@@ -139,15 +139,35 @@ def test_a_carrier_that_went_quiet_is_opened_again(bus, ports, clock):
     assert ports[0].writes[-1] == b'C\rS8\rO\r'
 
 
+def test_no_more_frames_are_unanswered_than_the_carrier_can_queue(bus, ports):
+    ports[0].inbox += b'\r\r\r'
+    bus.receive()
+    frames = [(can_id, mks_can.read_encoder(can_id))
+              for can_id in range(1, slcan_bus.CARRIER_QUEUE + 3)]
+    assert all(bus.send(*frame) for frame in frames)
+    assert bus.receive() is None
+    # The rest are refused here, as the carrier would refuse them once its queue is full.
+    assert b''.join(ports[0].writes[1:]).count(b'\r\r') == slcan_bus.CARRIER_QUEUE
+    assert bus.take_refused() == frames[slcan_bus.CARRIER_QUEUE:]
+    assert bus.refused == 0 and bus.unanswered == slcan_bus.CARRIER_QUEUE
+    ports[0].inbox += b'\r' * slcan_bus.CARRIER_QUEUE
+    bus.receive()
+    assert bus.unanswered == 0
+    assert bus.send(*frames[-1]) and bus.take_refused() == []
+
+
 def test_a_carrier_that_stops_answering_lines_is_opened_again(bus, ports, clock):
     # Its status frames keep coming, but no line written gets its answer.
-    for _ in range(slcan_bus.MAX_PENDING):
+    for _ in range(slcan_bus.CARRIER_QUEUE):
         bus.send(1, mks_can.read_encoder(1))
     ports[0].inbox += b't7F080005000000000000\r'
     bus.receive()
+    assert bus.connected
+    clock[0] += slcan_bus.ANSWER_TIMEOUT_S + 0.01
+    assert not bus.send(1, mks_can.read_encoder(1))
     assert not bus.connected and 'stopped answering' in bus.problem and ports[0].closed
-    # Nothing is left to match a late answer to, so no frame is wrongly called refused.
-    assert bus.unanswered == 0 and bus.take_refused() == []
+    # Nothing is left to match a late answer to, so only frames never written count as refused.
+    assert bus.unanswered == 0 and bus.take_refused() == [(1, mks_can.read_encoder(1))] * 3
     clock[0] += slcan_bus.REOPEN_EVERY_S
     bus.step(0.0)
     assert bus.connected and ports[1].writes == [b'C\rS8\rO\r']

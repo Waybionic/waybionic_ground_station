@@ -10,7 +10,8 @@ carrier that resets (or sits closed after the port opens) is opened again once i
 The carrier says nothing about a frame it puts on the bus, and answers BELL to one it refuses,
 such as a frame that arrives while its CAN controller is still busy. Each frame is therefore
 followed by an empty line, which the carrier answers with CR, so every answer can be matched to
-the line it belongs to. take_refused() hands back the refused frames to be sent again.
+the line it belongs to. take_refused() hands back the refused frames to be sent again. No more
+lines go unanswered at once than the carrier can queue; a frame beyond that is refused here.
 """
 
 from collections import deque
@@ -29,9 +30,15 @@ WRITE_TIMEOUT_S = 0.1
 # The carrier sends its status ten times a second while open, so this much quiet means it is
 # closed: it reset, or it was still booting when the port opened.
 SILENCE_S = 1.0
-# Lines still waiting for an answer. The carrier answers within a millisecond or two, so this
-# many means it stopped answering, and later answers could no longer be matched to their lines.
-MAX_PENDING = 256
+# The carrier queues 16 frames and holds the answers to the lines after a queued frame until it
+# leaves the queue, 32 answers at most. A frame it refuses for room needs two (its BELL and the
+# CR after it), so with more lines unanswered than it can queue, a stalled bus could overflow
+# them and later answers would be pinned on the wrong lines. Keeping to the queue's size means it
+# never refuses a frame for room.
+CARRIER_QUEUE = 16
+# The carrier answers within milliseconds, and drops a frame it cannot send after 10 ms, so no
+# answer for this long with no room left means it stopped answering its lines.
+ANSWER_TIMEOUT_S = 0.5
 BELL = 0x07
 CR = 0x0D
 
@@ -64,6 +71,8 @@ class SlcanBus:
         # Lines queued, then written but unanswered: a frame's (can_id, data) or a command.
         self.queued, self.pending = [], deque()
         self.refusals, self.bell = [], False
+        # When a frame was first refused here for room, until the carrier answers a line.
+        self.full_since = None
         self.heard = self.next_try = 0.0
         # A missing adapter at start-up is a configuration error, so let it raise.
         self.serial = self.open_port()
@@ -85,13 +94,24 @@ class SlcanBus:
             raise ValueError(f'cannot send {can_id:X}#{data.hex()} as a standard frame')
         if self.serial is None:
             return False
+        if self.unanswered >= CARRIER_QUEUE:
+            now = time.monotonic()
+            if self.full_since is None:
+                self.full_since = now
+            elif now - self.full_since > ANSWER_TIMEOUT_S:
+                # Start again rather than pin a later answer, such as a refusal, on the wrong line.
+                self._lost('the carrier stopped answering its lines')
+                return False
+            # Not counted as refused: a burst such as the drives' setup simply waits a tick.
+            self.refusals.append((can_id, data))
+            return True
         self.outgoing += b't%03X%d%s\r\r' % (can_id, len(data), data.hex().upper().encode())
         self.queued.append((can_id, data))
         self._count(data)
         return True
 
     def take_refused(self):
-        """Return the frames the carrier refused since the last call, oldest first."""
+        """Return the frames refused since the last call, here or by the carrier, oldest first."""
         refused, self.refusals = self.refusals, []
         return refused
 
@@ -137,7 +157,7 @@ class SlcanBus:
         self.queued[:0] = commands
         # A carrier that reset will never answer the lines written before.
         self.pending.clear()
-        self.bell = False
+        self.bell, self.full_since = False, None
         self.heard = time.monotonic()
         self._flush()
 
@@ -152,9 +172,6 @@ class SlcanBus:
         self.outgoing.clear()
         self.pending.extend(self.queued)
         self.queued.clear()
-        if len(self.pending) > MAX_PENDING:
-            # Start again rather than pin a later answer, such as a refusal, on the wrong line.
-            self._lost('the carrier stopped answering its lines')
 
     def _read(self):
         if self.serial is None:
@@ -190,6 +207,7 @@ class SlcanBus:
 
     def _refused(self):
         # A frame's BELL comes before the CR of its empty line; a command answers one or the other.
+        self.full_since = None
         if self.pending and isinstance(self.pending[0], tuple):
             self.bell = True
             return
@@ -199,6 +217,7 @@ class SlcanBus:
         self.errors += 1
 
     def _answered(self):
+        self.full_since = None
         if not self.pending:
             return
         line = self.pending.popleft()
@@ -220,7 +239,7 @@ class SlcanBus:
         self.outgoing.clear()
         self.queued.clear()
         self.pending.clear()
-        self.bell = False
+        self.bell, self.full_since = False, None
         self.incoming.clear()
         self.replies.clear()
         self.next_try = time.monotonic() + REOPEN_EVERY_S
