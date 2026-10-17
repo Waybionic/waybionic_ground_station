@@ -7,15 +7,13 @@ import pytest
 
 from waybionic_teleop import drive_map, mks_can
 from waybionic_teleop.gamepad import AXES, BUTTONS
-from waybionic_teleop.kinematics import ArmKinematics
+from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 from waybionic_teleop.sim_drives import SimulatedServo
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
         / 'waybionic_arm.urdf').read_text(encoding='utf-8')
-LIMITS = {'joint_1': (-math.pi, math.pi), 'joint_2': (-1.5708, 1.5708),
-          'joint_3': (-1.5708, 1.5708), 'joint_4': (-1.5708, 1.5708),
-          'joint_5': (-1.5708, 1.5708)}
+LIMITS = joint_limits(URDF, ['joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5'])
 DOWN = {'joint_1': 0.1, 'joint_2': 0.5, 'joint_3': 1.4, 'joint_4': math.pi - 1.9,
         'joint_5': 0.0, 'tool_grip': 0.0}
 SUBSTEPS = 10
@@ -158,7 +156,7 @@ def test_cartesian_next_setpoint_stays_at_the_tip_when_tilt_hits_a_limit(drives,
     teleop.group = 2
     mapping = arm_map(drives, 30.0)
     period = 1.0 / drives['rate_hz']
-    for _ in range(350):
+    for _ in range(1100):
         teleop.update(*sample('dpad_right'), DOWN, period)
         tip, _ = arm.forward(teleop.targets)
         ahead, _ = arm.forward(teleop.command_targets)
@@ -168,7 +166,7 @@ def test_cartesian_next_setpoint_stays_at_the_tip_when_tilt_hits_a_limit(drives,
         moves = mapping.synchronized(teleop.command_targets, mapping.to_counts(teleop.targets),
                                      period, drives['max_rpm'])
         assert [axis for axis, rpm in moves] == mapping.to_counts(teleop.command_targets)
-        if 'joint_3' in teleop.blocked:
+        if 'joint_4' in teleop.blocked:
             break
     else:
         pytest.fail('the Cartesian tilt never reached its joint limit')

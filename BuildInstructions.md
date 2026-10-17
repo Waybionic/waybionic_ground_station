@@ -270,9 +270,10 @@ a terminal with an outdated `PATH`:
 ```
 
 RViz and the Joint State Publisher GUI open as separate windows. Move the
-`joint_1` to `joint_5` sliders to move the arm, and use the diagnostics panel's
-mock controls to try normal and fault states. This demo uses simulated data, not
-a physical arm. Press **Ctrl+C** in PowerShell to stop it.
+`joint_1` to `joint_5` sliders to move the arm; it stops where it would hit
+itself or the ground, and the sliders jump back to where it stopped. Use the
+diagnostics panel's mock controls to try normal and fault states. This demo uses
+simulated data, not a physical arm. Press **Ctrl+C** in PowerShell to stop it.
 
 To sweep each joint in turn instead, put the launch command after `wslg`:
 
@@ -434,11 +435,18 @@ the point moves onto the axis instead of the arm moving. Further away, the group
 rather than pull the tool back: press Y, withdraw the tool in another group, then
 select the incision group again to set a new incision point.
 
-The current arm URDF has provisional joint limits, and the collision checks below model
-each link as a box; they have been tested with simulated drives only. The simulated
-CAN map is not a powered-arm safety case. Do not change a wrist bound or operate powered
-motors until Mechanical identifies the URDF joint and measures signed travel from upright
-zero, including any cable or gear stop.
+The arm URDF's joint limits are where the CAD parts touch, found by turning each joint
+from the upright pose with exact triangle-mesh contacts (`scripts/cad/exact_limits.py`):
+the straight arm meets the ground under the base at 109.65 degrees of shoulder either
+way, the forearm meets the shoulder's motor mount at 148.93 degrees of elbow, and the
+tool mount meets the cap on the forearm at 94.67 degrees of wrist pitch, at the wrist
+roll that turns its facets closest to the cap. Nothing meets anything over a full turn
+of base yaw or wrist roll, so they turn a full turn (360 degrees) either way; their
+cabling is not modelled. These limits and the collision
+checks below have been tested with simulated drives only. The simulated CAN map is not
+a powered-arm safety case. Do not operate powered motors until Mechanical confirms the
+signed travel of each joint from upright zero on the built arm, including any cable or
+gear stop.
 
 In simulation, a zero-velocity joint command (including B and controller timeout)
 sends an MKS F5 frame with zero speed and zero acceleration to each moving drive.
@@ -451,21 +459,42 @@ up faster than the teleop speed limits. This checks simulated behavior only. Do
 not connect powered drives or treat it as a hardware E-stop test; drive
 identities, wiring, zeroing and electrical safety still need hardware verification.
 
-Every group stops a move before any part of the arm comes within 10 mm of the
-table or folds into the arm's own base. The checks use a box around each link,
-which you can see by ticking **Collision Enabled** on RViz's RobotModel display.
+Every group stops a move where any part of the arm would go below the table or into
+the arm's own base and shoulder. Against the table each link's lowest point comes from
+the convex hull of its CAD parts (`waybionic_hull` in the URDF), so the arm stops where
+its real parts reach the table. Against the base and shoulder the checks use a box
+around each CAD part, or a cylinder where a part, or one side of it, is round
+about a joint axis, such as the base's lid, the tool mount and the lower half of
+the wrist's housing, so they fit those parts however the joints turn. You can see
+them by ticking **Collision Enabled** on RViz's RobotModel display. They are too
+coarse where the forearm folds against the shoulder or the base, so there the elbow
+follows tables of its limits against the shoulder angle, measured from the CAD where
+the parts touch (`waybionic_fold` in the URDF, `scripts/cad/joint_clearance.py`); the
+base's table holds at every yaw.
 The tool's box is a placeholder around the RViz jaws, which reach 30 mm past
 `tool_link`, until the real tool is modelled; a longer tool needs a longer box.
 When a move stops, the diagnostics panel names the part, for example
 `At limit: forearm_link: table`. If the arm stands on a raised mount, set
 `table_height` in `waybionic_teleop/config/xbox_teleop.yaml` to the table's height
-above the bottom of the base. `collision_clearance` in the same file sets the 10 mm
-margin. If the arm is already touching something, the only moves still allowed are
-the ones that back out of it: a move that presses any contact further in is
-refused, even if it would ease another contact at the same time.
+above the bottom of the base. `collision_clearance` in the same file keeps a gap to the
+table, and `self_collision_clearance` to the base and shoulder; both are 0, so the arm
+stops where its parts touch. Raise them for a margin on the real arm. If the arm is
+already touching something, the only moves still allowed are the ones that back out of
+it: a move that presses any contact further in is refused, even if it would ease
+another contact at the same time.
 
-The boxes are what makes any of this work. A `robot_description` without a
-collision box for the base, shoulder, upper arm, forearm, wrist, wrist roll or tool
+The joint sliders use the same check. `joint_state_guard` moves the arm from where it
+is toward the sliders' pose, checking at least every half degree of each joint, stops
+at the last pose before any part would touch, and moves the sliders back to it.
+
+`scripts/cad/check_collision_model.py` checks all of this against the exact CAD
+meshes: at about 300,000 poses that the check calls clear (random poses, poses with
+a joint at a limit, and the poses where moves stop), no two parts, nor the tool's box,
+intersect, and no part is below the ground. Run it after any change to the CAD,
+the limits or the collision shapes.
+
+The collision shapes are what make any of this work. A `robot_description` without
+collision shapes for the base, shoulder, upper arm, forearm, wrist, wrist roll or tool
 leaves teleop disabled, and the diagnostics panel names the missing links.
 A description reload while teleop is enabled disables teleop and holds the arm where
 it is, and the drives stop on any `robot_description` change, so Start has to be
@@ -899,7 +928,7 @@ ros2 launch waybionic_bringup ground_station.launch.py
 ```
 - **RViz** and **Joint State Publisher GUI** (separate small window) will pop up after the last command
 - RViz opens pre-configured with `base_link` fixed frame, `RobotModel`, and `TF` displays already loaded
-- Move the `joint_1` to `joint_5` sliders in the Joint State Publisher GUI (small window) to move the arm: base yaw, shoulder, elbow, wrist pitch, and wrist roll
+- Move the `joint_1` to `joint_5` sliders in the Joint State Publisher GUI (small window) to move the arm: base yaw, shoulder, elbow, wrist pitch, and wrist roll. The arm stops where it would hit itself or the ground, and the sliders jump back to where it stopped
 - Joint demo: `ros2 launch waybionic_bringup ground_station.launch.py demo_mode:=true` sweeps each joint in turn (simulated, no hardware) and shows a pass/fail row per joint in the diagnostics panel; `demo_speed:=60` changes the speed in degrees per second
 
 For mock and live diagnostics checks, continue with the
@@ -975,7 +1004,8 @@ Keep this Terminal window open. Within a few seconds:
 - `DiagnosticsPanel` displays **WayBionic Engineering Monitor** and
   **Current State: NORMAL**.
 - Joint State Publisher displays the `joint_1` to `joint_5` sliders. Move them
-  to check base yaw, shoulder, elbow, wrist pitch, and wrist roll.
+  to check base yaw, shoulder, elbow, wrist pitch, and wrist roll. The arm stops
+  where it would hit itself or the ground.
 
 To stop the application, return to the launch Terminal and press
 <kbd>Control</kbd>+<kbd>C</kbd>.
@@ -1000,6 +1030,7 @@ RMW_IMPLEMENTATION=rmw_cyclonedds_cpp ./scripts/macos.sh run ros2 node list
 The output must include:
 
 ```text
+/joint_state_guard
 /joint_state_publisher
 /robot_state_publisher
 /rviz2

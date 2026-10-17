@@ -168,7 +168,7 @@ def test_stale_joint_feedback_cannot_be_used_to_enable(node):
 
 
 def test_bad_description_and_mismatched_joint_map_fail_closed(node):
-    node.load(String(data=URDF.replace('upper="1.570796"', 'upper="nan"', 1)))
+    node.load(String(data=URDF.replace('upper="1.913754"', 'upper="nan"', 1)))
     assert node.teleop is None and 'invalid limits' in node.problem
     node.config.groups[2].joints.reverse()
     node.load(String(data=URDF))
@@ -177,9 +177,10 @@ def test_bad_description_and_mismatched_joint_map_fail_closed(node):
 
 @pytest.mark.parametrize('change', [
     {'rate_hz': 0.0}, {'input_timeout_s': 0.0}, {'input_timeout_s': -0.5},
-    {'input_timeout_s': math.inf},
+    {'input_timeout_s': math.inf}, {'table_height': math.nan}, {'collision_clearance': -0.01},
+    {'self_collision_clearance': -0.001}, {'self_collision_clearance': math.inf},
 ])
-def test_the_rate_and_input_timeout_must_be_positive(monkeypatch, parameters, change):
+def test_the_rate_timeout_and_collision_settings_must_be_valid(monkeypatch, parameters, change):
     monkeypatch.setenv('ROS_AUTOMATIC_DISCOVERY_RANGE', 'OFF')
     context = rclpy.Context()
     rclpy.init(context=context)
