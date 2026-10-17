@@ -11,7 +11,7 @@ Currently, this repository contains the clean foundation and the SolidWorks-expo
 - **`waybionic_bringup`**
   Launch files and RViz configurations to bring up the robot state and visualization.
 - **`waybionic_teleop`**
-  Xbox controller teleoperation of the arm through placeholder MKS SERVO CAN drives, simulated until the real drives are connected.
+  Xbox and PS5 DualSense controller teleoperation of the arm through placeholder MKS SERVO CAN drives, simulated until the real drives are connected.
 - **`waybionic_rviz_plugins`**
   Engineer diagnostics panel, mock/live diagnostics sources, and a temporary diagnostics publisher.
 

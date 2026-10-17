@@ -1,4 +1,4 @@
-"""Load a node's parameters from the package config files, flattened the way ROS names them."""
+"""Shared test helpers: node parameters from the package config files, and a fake carrier."""
 
 from pathlib import Path
 
@@ -6,6 +6,45 @@ import pytest
 import yaml
 
 CONFIG = Path(__file__).resolve().parent.parent / 'config'
+
+
+class CarrierPort:
+    """The carrier's USB port: it answers every line, and BELL to each frame it refuses."""
+
+    def __init__(self, refuse=(), answering=True):
+        self.refuse, self.answering = list(refuse), answering
+        self.writes, self.inbox, self.closed, self.broken = [], bytearray(), False, False
+
+    @property
+    def in_waiting(self):
+        return len(self.inbox)
+
+    def read(self, size):
+        chunk = bytes(self.inbox[:size])
+        del self.inbox[:size]
+        return chunk
+
+    def write(self, data):
+        if self.broken:
+            raise OSError(6, 'Device not configured')
+        self.writes.append(bytes(data))
+        for line in bytes(data).split(b'\r')[:-1] if self.answering else ():
+            if line[:1] != b't':
+                # A command, or the empty line after a frame.
+                self.inbox += b'\r'
+            elif line in self.refuse:
+                # Refused once each time it is listed.
+                self.refuse.remove(line)
+                self.inbox += b'\a'
+        return len(data)
+
+    def close(self):
+        self.closed = True
+
+
+@pytest.fixture
+def usb_carrier():
+    return CarrierPort
 
 
 def flatten(values, prefix=''):
