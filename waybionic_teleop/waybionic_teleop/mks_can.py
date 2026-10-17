@@ -107,5 +107,5 @@ def enable(can_id, on=True):
 
 
 def emergency_stop(can_id):
-    """Stop the motor immediately (F7h); this is not a substitute for the physical E-stop."""
+    """Stop at once, without a ramp (F7h); not advised above 1000 rpm. ID 0 reaches all."""
     return frame(can_id, EMERGENCY_STOP)

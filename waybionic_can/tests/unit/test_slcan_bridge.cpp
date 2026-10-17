@@ -207,6 +207,49 @@ TEST_F(SlcanTest, BusyControllerHoldsEmptyLineAnswerUntilFrameIsSent)
   EXPECT_EQ(can.send_calls, 4u);
 }
 
+TEST_F(SlcanTest, TwelveFrameTickAnswersEachFrameOnceSent)
+{
+  // The real-arm host writes up to 6 moves and 6 encoder reads, then an empty line after each.
+  openLikePythonCan();
+  std::string tick;
+  for (int i = 0; i < 12; ++i) {
+    tick += "t00123132\r\r";
+  }
+  EXPECT_EQ(feed(tick), "");
+  EXPECT_EQ(bridge.queuedFrames(), 12u);
+  // Drain on the same millisecond: a full tick is a few ms at 1 Mbit/s, under the 10 ms cap.
+  for (int i = 0; i < 12; ++i) {
+    bridge.drainTransmit(0);
+    EXPECT_EQ(out.take(), "\r") << "frame " << i;
+    EXPECT_EQ(bridge.queuedFrames(), static_cast<size_t>(11 - i));
+  }
+  EXPECT_EQ(can.sent.size(), 12u);
+}
+
+TEST_F(SlcanTest, TwelveFrameTickSurvivesBusyMailboxThenExpiresUnsent)
+{
+  openLikePythonCan();
+  can.busy_calls = 40;
+  std::string tick;
+  for (int i = 0; i < 12; ++i) {
+    tick += "t00123132\r\r";
+  }
+  EXPECT_EQ(feed(tick, 0), "");
+  for (uint32_t now = 0; now <= 10; ++now) {
+    bridge.drainTransmit(now);
+    EXPECT_EQ(out.take(), "");
+  }
+  bridge.drainTransmit(11);
+  std::string expected;
+  for (int i = 0; i < 12; ++i) {
+    expected += "\a\r";
+  }
+  EXPECT_EQ(out.take(), expected);
+  EXPECT_EQ(bridge.queuedFrames(), 0u);
+  EXPECT_TRUE(can.sent.empty());
+  EXPECT_EQ(bridge.expiredFrames(), 12u);
+}
+
 TEST_F(SlcanTest, QueueIsBoundedAndCloseClearsIt)
 {
   openLikePythonCan();

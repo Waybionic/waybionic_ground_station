@@ -152,8 +152,9 @@ Here is what an exchange looks like. Receivers 1 and 3 log `ignored (addressed t
 - `test_bringup_console`: checks command parsing, motion gates, status/error output, and the
   documented startup vectors.
 - `test_slcan_bridge`: checks SLCAN parsing, bitrate/open state, queued/retried/expired
-  transmission, reserved status-ID filtering, rejected-line accounting, forwarding, and
-  wrapping carrier status counters without putting status on CAN.
+  transmission, held empty-line answers, BELL on drop/expiry, a 12-frame control tick,
+  reserved status-ID filtering, rejected-line accounting, forwarding, and wrapping carrier
+  status counters without putting status on CAN.
 - `test_bus_load`: checks classic-CAN lower/worst-case bit estimates and reporting windows.
 - `test_vcan_four_node`: launches real gateway/receiver processes over Linux `vcan`.
 - `cross_check_mks.py`: compares C++ frames with Python over edge and randomized cases.
@@ -162,8 +163,10 @@ Here is what an exchange looks like. Receivers 1 and 3 log `ignored (addressed t
 
 ## Hardware status and TODOs
 
-- **Set CAN ID and bitrate:** 8Bh and 8Ah are not implemented in the shared C++ or merged
-  `mks_can.py` subset. F7h emergency stop is implemented from MKS manual section 9.2.3.
+- **Set CAN ID and bitrate:** 8Bh and 8Ah are not implemented in the shared C++ subset. F7h
+  emergency stop is implemented from MKS manual section 9.2.3. The Python `EMERGENCY_STOP`
+  helper matches [PR #45](https://github.com/Waybionic/waybionic_ground_station/pull/45); if
+  that PR lands first, keep main's copy of `emergency_stop()` and the F7h `sim_drives.py` branch.
 - **Broadcast ID 0 and other MKS commands:** not implemented in the C++ bench subset.
 - **Physical receiver actuator:** the bench receivers use `SoftwareActuator`. A hobby-servo `IActuator` would need a defined mapping from MKS axis counts to angles and of what READ_ENCODER reports.
 - **Carrier telemetry hardware:** status ID `0x7F0` reports unknown E-stop/supply plus CAN error

@@ -74,6 +74,13 @@ def main():
         if receive(bus, 0.5) is not None:
             sys.exit('FAIL bad checksum got a reply')
         print('bad checksum: no reply (correct)')
+        send(bus, 1, 'F7F8')
+        expect(bus, 1, 'F701F9', 'F7h emergency stop ok')
+        # One control tick: 6 encoder polls. python-can waits for each empty-line CR, so every
+        # send() here means the queued frame reached the simulated mailbox.
+        for i in range(6):
+            send(bus, 1, '3132')
+            expect(bus, 1, '3100000000400072', f'31h under load {i + 1}/6')
         bus.shutdown()
         print('PASS')
     finally:
