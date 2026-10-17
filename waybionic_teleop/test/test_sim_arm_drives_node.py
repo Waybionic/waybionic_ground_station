@@ -15,6 +15,7 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 
+from waybionic_control.drive_health import DriveHealthMonitor, DriveHealthState
 from waybionic_teleop import joy_udp_receiver, mks_can, sim_arm_drives_node, xbox_teleop_node
 from waybionic_teleop.gamepad import AXES, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
@@ -404,6 +405,101 @@ def test_a_stop_the_interface_refuses_is_sent_again_until_it_goes_out(node, monk
     assert not node.stopping and base.target is None and base.rpm == 0.0
     node.on_enabled(Bool(data=True))
     assert node.authorized
+
+
+def test_each_drive_is_evaluated_with_its_target_encoder_and_reply_age(node, monkeypatch):
+    monitors = [MagicMock(wraps=DriveHealthMonitor())
+                for _ in node.drive_health_monitors]
+    node.drive_health_monitors = monitors
+
+    node.report()
+    assert all(not monitor.evaluate.called for monitor in monitors)
+
+    ready(node)
+    node.on_command(command(node,
+        velocities=dict.fromkeys(node.map.joints, 0.0),
+        joint_1=math.radians(3.0)))
+    advance(node)
+    now = time.monotonic()
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: now)
+    node.heard = [now - 0.1] * len(node.heard)
+    expected_targets = node.map.to_counts(node.commanded)
+    expected_motion = [rate > 0.0 for rate in node.map.to_rpm(node.velocities)]
+
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+    node.report()
+
+    assert all(monitor.evaluate.called for monitor in monitors)
+    assert all(state is not None for state in node.drive_health_states)
+    for index, monitor in enumerate(monitors):
+        values = monitor.evaluate.call_args.kwargs
+        assert values['target_position'] == pytest.approx(
+            expected_targets[index] * 360.0 / mks_can.COUNTS_PER_REV)
+        assert values['encoder_position'] == pytest.approx(
+            node.counts[index] * 360.0 / mks_can.COUNTS_PER_REV)
+        assert values['reply_age_seconds'] == pytest.approx(0.1)
+        assert values['motion_commanded'] is expected_motion[index]
+        assert values['enabled'] is True
+    drive_status = next(item for item in published[-1].status
+                        if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in drive_status.values}
+    assert drive_status.name == 'drive.base_yaw'
+    assert drive_status.level == DiagnosticStatus.OK
+    assert values['state'] == DriveHealthState.OK.value
+    assert float(values['target_encoder_error_deg']) == pytest.approx(3.0, abs=0.01)
+    assert float(values['reply_age_sec']) == pytest.approx(0.1)
+    assert [value.key for value in drive_status.values] == [
+        'value', 'unit', 'can_id', 'last_command', 'state',
+        'target_encoder_error_deg', 'reply_age_sec']
+
+
+@pytest.mark.parametrize(('health_state', 'expected_level'), [
+    (DriveHealthState.OK, DiagnosticStatus.OK),
+    (DriveHealthState.NOT_RESPONDING, DiagnosticStatus.STALE),
+    (DriveHealthState.FOLLOWING_ERROR, DiagnosticStatus.ERROR),
+    (DriveHealthState.STALLED, DiagnosticStatus.ERROR),
+    (DriveHealthState.DISABLED, DiagnosticStatus.ERROR),
+])
+def test_drive_health_state_maps_to_diagnostic_level(
+        node, monkeypatch, health_state, expected_level):
+    ready(node)
+    node.drive_health_monitors = [
+        MagicMock(evaluate=MagicMock(return_value=health_state))
+        for _ in node.map.drives]
+    now = time.monotonic()
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: now)
+    age = REPLY_TIMEOUT_S + 0.1 if health_state is DriveHealthState.NOT_RESPONDING else 0.1
+    node.heard = [now - age] * len(node.heard)
+
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+    node.report()
+
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
+    assert row.level == expected_level
+    assert values['state'] == health_state.value
+
+
+def test_drive_health_does_not_replace_an_existing_protocol_error(node, monkeypatch):
+    ready(node)
+    node.drive_health_monitors = [
+        MagicMock(evaluate=MagicMock(return_value=DriveHealthState.NOT_RESPONDING))
+        for _ in node.map.drives]
+    node.state[0] = 'setup 98h failed'
+    now = time.monotonic()
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: now)
+    node.heard = [now - REPLY_TIMEOUT_S - 0.1] * len(node.heard)
+
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+    node.report()
+
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
+    assert row.level == DiagnosticStatus.ERROR
+    assert values['state'] == DriveHealthState.NOT_RESPONDING.value
 
 
 def test_drive_rows_show_a_setup_frame_until_the_drive_confirms_it(node, monkeypatch):

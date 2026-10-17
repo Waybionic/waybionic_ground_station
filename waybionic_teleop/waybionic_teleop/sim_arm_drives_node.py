@@ -31,6 +31,7 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 
+from waybionic_control.drive_health import DriveHealthMonitor, DriveHealthState
 from waybionic_teleop import mks_can
 from waybionic_teleop.drive_map import drive_map_from_parameters
 from waybionic_teleop.kinematics import joint_limits
@@ -118,6 +119,8 @@ class SimArmDrives(Node):
         self.setup_time = [None] * len(drives)
         self.state = ['starting'] * len(drives)
         self.sent = [None] * len(drives)
+        self.drive_health_monitors = [DriveHealthMonitor() for _ in drives]
+        self.drive_health_states = [None] * len(drives)
         # Drives whose stop frame the interface has not accepted yet.
         self.stopping = set()
         # Ticks in a row each drive has been more than following_error from its target.
@@ -497,12 +500,31 @@ class SimArmDrives(Node):
                 statuses.append(status(f'arm.{joint}', DiagnosticStatus.OK,
                                        f'{math.degrees(position):+.1f}', 'deg',
                                        f'target {target:+.1f} deg'))
+        health_motor_rates = (self.map.to_rpm(self.velocities) if self.velocities else
+                              [0.0] * len(self.map.drives))
+        health_targets = (self.map.to_counts(self.commanded)
+                          if self.commanded is not None else None)
         for index, drive in enumerate(self.map.drives):
             silent = self.heard[index] is None or now - self.heard[index] > REPLY_TIMEOUT_S
             failed = ('failed' in self.state[index]
                       or self.state[index] in [mks_can.RUN_STATUS[code] for code in RUN_FAULTS])
             turns = '' if self.counts[index] is None else (
                 f'{self.counts[index] / mks_can.COUNTS_PER_REV:+.3f}')
+            count = self.counts[index]
+            heard = self.heard[index]
+            if count is None or heard is None:
+                self.drive_health_states[index] = None
+            else:
+                target = health_targets[index] if health_targets is not None else count
+                self.drive_health_states[index] = self.drive_health_monitors[index].evaluate(
+                    target_position=target * 360.0 / mks_can.COUNTS_PER_REV,
+                    encoder_position=count * 360.0 / mks_can.COUNTS_PER_REV,
+                    motion_commanded=self.authorized and health_motor_rates[index] > 0.0,
+                    # No per-drive enabled feedback is tracked; don't infer it from the gate.
+                    enabled=True,
+                    reply_age_seconds=now - heard,
+                    now_seconds=now,
+                )
             text = 'no reply' if silent else self.state[index]
             # A drive is never driven before it confirms every setup frame.
             pending = ', '.join(f'{code:02X}h' for code in sorted(self.unconfirmed[index]))
@@ -513,11 +535,27 @@ class SimArmDrives(Node):
             level = (DiagnosticStatus.ERROR if silent or failed else
                      DiagnosticStatus.WARN if pending or not self.zeroed[index] else
                      DiagnosticStatus.OK)
+            health_state = self.drive_health_states[index]
+            health_values = {}
+            if health_state is not None:
+                target = health_targets[index] if health_targets is not None else count
+                health_values = {
+                    'state': health_state.value,
+                    'target_encoder_error_deg': (
+                        f'{(target - count) * 360.0 / mks_can.COUNTS_PER_REV:.3f}'),
+                    'reply_age_sec': f'{now - heard:.3f}',
+                }
+                if not failed:
+                    if health_state is DriveHealthState.NOT_RESPONDING:
+                        level = DiagnosticStatus.STALE
+                    elif health_state is not DriveHealthState.OK:
+                        level = DiagnosticStatus.ERROR
             statuses.append(status(
                 f'drive.{drive.name}', level, turns, 'rev',
                 f'CAN ID {drive.can_id}: {text}'
                 + (f'; last {self.last_command[index]}' if self.last_command[index] else ''),
-                can_id=drive.can_id, last_command=self.last_command[index]))
+                can_id=drive.can_id, last_command=self.last_command[index],
+                **health_values))
         message = DiagnosticArray(status=statuses)
         message.header.stamp = self.get_clock().now().to_msg()
         self.diagnostics_publisher.publish(message)
