@@ -166,3 +166,30 @@ def test_the_bridge_times_the_link_and_lost_packets_make_it_warn(receiver, monke
     finally:
         bridge.close()
         stranger.close()
+
+
+def test_only_the_first_answer_to_a_ping_of_this_node_times_the_link(receiver):
+    bridge = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    def deliver(data):
+        bridge.sendto(data, receiver.socket.getsockname())
+        assert select.select([receiver.socket], [], [], 2.0)[0], 'the packet never arrived'
+        receiver.poll()
+
+    try:
+        deliver(gamepad.pack(1, *NEUTRAL))
+        receiver.report()
+        assert select.select([bridge], [], [], 2.0)[0], 'the ping never came'
+        ping = bridge.recv(64)
+        nonce, sent = gamepad.unpack_pong(gamepad.pong(ping))
+        # A pong for a ping this node never sent does not count, even with a fresh time.
+        deliver(gamepad.pong(gamepad.pack_ping(nonce + 1, sent)))
+        assert receiver.round_trip is None
+        deliver(gamepad.pong(ping))
+        assert receiver.round_trip is not None
+        # The same pong again, delayed or replayed, does not refresh the round trip.
+        receiver.round_trip_time = None
+        deliver(gamepad.pong(ping))
+        assert receiver.round_trip_time is None
+    finally:
+        bridge.close()

@@ -25,6 +25,8 @@ UNSTABLE_LOSS = 0.02
 UNSTABLE_GAP_S = 0.1
 UNSTABLE_ROUND_TRIP_S = 0.05
 PING_EVERY_S = 0.5
+# A pong later than this no longer times the link.
+PONG_TIMEOUT_S = 10.0
 
 
 class LinkQuality:
@@ -86,6 +88,8 @@ class JoyUdpReceiver(Node):
         self.rejected = 0
         self.link = LinkQuality()
         self.pings = 0
+        # Pings not answered yet: nonce -> (bridge address, time sent).
+        self.waiting_pings = {}
         self.round_trip, self.round_trip_time = None, None
         self.report_time = time.monotonic()
         # Every millisecond, so a packet waits at most that long before it reaches teleop.
@@ -140,13 +144,16 @@ class JoyUdpReceiver(Node):
 
     def on_pong(self, data, sender, now):
         try:
-            _, sent = unpack_pong(data)
+            nonce, _ = unpack_pong(data)
         except ValueError:
             self.rejected += 1
             return
-        # Only the bridge's answer to one of this node's pings times the link.
-        if sender == self.sender and 0.0 <= now - sent < 10.0:
-            self.round_trip, self.round_trip_time = now - sent, now
+        # Only the bridge's first answer to one of this node's own pings times the link, so a
+        # late or repeated pong cannot refresh it.
+        ping = self.waiting_pings.get(nonce)
+        if ping is not None and sender == ping[0] == self.sender:
+            del self.waiting_pings[nonce]
+            self.round_trip, self.round_trip_time = now - ping[1], now
 
     def on_feedback(self, message):
         if message.type != JoyFeedback.TYPE_RUMBLE or message.id != 0 or self.sender is None:
@@ -161,10 +168,14 @@ class JoyUdpReceiver(Node):
         rate = self.published / max(now - self.report_time, 1e-3)
         self.published, self.report_time = 0, now
         loss, jitter, gap = self.link.take()
+        self.waiting_pings = {nonce: ping for nonce, ping in self.waiting_pings.items()
+                              if now - ping[1] < PONG_TIMEOUT_S}
         if self.sender is not None:
             self.pings += 1
+            nonce = self.pings & 0xFFFFFFFF
             try:
-                self.socket.sendto(pack_ping(self.pings, now), self.sender)
+                self.socket.sendto(pack_ping(nonce, now), self.sender)
+                self.waiting_pings[nonce] = (self.sender, now)
             except OSError as error:
                 self.get_logger().warning(f'Ping not sent: {error}', throttle_duration_sec=5.0)
         # Bridges from before the ping was added never answer it.
