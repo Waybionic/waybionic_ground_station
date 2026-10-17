@@ -221,6 +221,35 @@ def test_the_dpad_tilts_the_tool_about_its_tip(arm, cartesian):
                                                                       abs=math.radians(0.3))
 
 
+def test_the_tip_and_the_next_setpoint_stop_at_the_keep_in_floor(arm, cartesian):
+    floor = cartesian.config.keep_in[0][2]
+    for _ in range(round(6.0 / DT)):
+        cartesian.update(*sample(right_y=-1.0), DOWN, DT)
+        # The drives aim at the published setpoint, so it has to stay inside the box too.
+        for joints in (cartesian.targets, cartesian.command_targets):
+            assert arm.forward(joints)[0][2] >= floor - 1e-8
+    assert cartesian.blocked == ['keep_in']
+    tip = arm.forward(cartesian.targets)[0]
+    assert tip[2] == pytest.approx(floor, abs=1e-6)
+    for _ in range(round(0.5 / DT)):
+        cartesian.update(*sample('dpad_right', right_x=1.0), DOWN, DT)
+        for joints in (cartesian.targets, cartesian.command_targets):
+            assert arm.forward(joints)[0] == pytest.approx(tip, abs=1e-9)
+
+
+def test_a_joint_group_stops_the_tip_and_the_next_setpoint_at_the_keep_in_floor(params, arm):
+    teleop = ArmTeleop(config_from_parameters(params), LIMITS, arm)
+    press(teleop, 'start', DOWN)
+    floor = teleop.config.keep_in[0][2]
+    # In the base group, tilting the shoulder forward lowers the tool, which points down here.
+    for _ in range(round(4.0 / DT)):
+        teleop.update(*sample(left_y=1.0), DOWN, DT)
+        for joints in (teleop.targets, teleop.command_targets):
+            assert arm.forward(joints)[0][2] >= floor - 1e-8
+    assert teleop.blocked == ['keep_in']
+    assert arm.forward(teleop.targets)[0][2] == pytest.approx(floor, abs=1e-4)
+
+
 def test_releasing_a_after_homing_does_not_resume_the_last_move(arm, cartesian):
     for _ in range(round(0.5 / DT)):
         cartesian.update(*sample('dpad_right', left_x=1.0, right_x=1.0), DOWN, DT)
@@ -250,6 +279,80 @@ def test_without_arm_kinematics_the_cartesian_group_is_skipped(teleop):
     assert teleop.active_group.name == 'base'
 
 
+# Shoulder leant forward: the tip is at about (307, 33, 664) mm, in front of x 250 and below
+# z 700, so it starts outside two faces of FRONT_LOW. Yawed right as well, it is at about
+# (303, -59, 664) mm, in front of x 250 and right of y 0, outside two faces of FRONT_RIGHT.
+LEANT = {**HOME, 'joint_2': 0.6}
+LEANT_RIGHT = {**LEANT, 'joint_1': -0.3}
+FRONT_LOW = ([-550.0, -550.0, 700.0], [250.0, 550.0, 800.0])
+FRONT_RIGHT = ([-550.0, 0.0, 50.0], [250.0, 550.0, 800.0])
+
+
+def boxed(params, arm, pose, box):
+    params['keep_in_min_mm'], params['keep_in_max_mm'] = box
+    teleop = ArmTeleop(config_from_parameters(params), LIMITS, arm)
+    press(teleop, 'start', pose)
+    return teleop
+
+
+def outside(tip, box):
+    """Return how far tip lies outside each face of box, in mm, as (x, y, z)."""
+    low, high = box
+    return [max(lower - value * 1000.0, value * 1000.0 - upper, 0.0)
+            for value, lower, upper in zip(tip, low, high)]
+
+
+@pytest.mark.parametrize('pose, box, axes', [
+    (LEANT, FRONT_LOW, {'left_y': 1.0}),  # Leaning further: further out on both faces
+    (LEANT_RIGHT, FRONT_RIGHT, {'left_x': 1.0}),  # Yaw left: back in on y, further out on x
+    (LEANT_RIGHT, FRONT_RIGHT, {'left_x': -1.0}),  # Yaw right: back in on x, further out on y
+])
+def test_outside_two_faces_a_joint_move_out_through_either_is_refused(
+        params, arm, pose, box, axes):
+    teleop = boxed(params, arm, pose, box)
+    run(teleop, 0.5, **axes)
+    assert {joint: teleop.targets[joint] for joint in LIMITS} == pytest.approx(
+        {joint: pose[joint] for joint in LIMITS}, abs=1e-6)
+    assert teleop.blocked == ['keep_in']
+
+
+def test_outside_two_faces_a_joint_move_back_in_through_both_recovers(params, arm):
+    teleop = boxed(params, arm, LEANT, FRONT_LOW)
+    last = outside(arm.forward(LEANT)[0], FRONT_LOW)
+    assert last[0] > 0.0 and last[2] > 0.0
+    # Leaning back brings the tip in through both faces; no step may take it further out.
+    for _ in range(round(1.5 / DT)):
+        teleop.update(*sample(left_y=-1.0), HOME, DT)
+        now = outside(arm.forward(teleop.targets)[0], FRONT_LOW)
+        assert all(value <= before + 1e-6 for value, before in zip(now, last))
+        last = now
+    assert last == pytest.approx([0.0, 0.0, 0.0], abs=1e-6)
+    # Back inside, the box holds as usual: leaning on over the top stops at the far z wall.
+    run(teleop, 3.0, left_y=-1.0)
+    tip, _ = arm.forward(teleop.targets)
+    assert teleop.targets['joint_2'] < 0.0
+    assert tip[2] * 1000.0 == pytest.approx(FRONT_LOW[0][2], abs=1e-3)
+    assert teleop.blocked == ['keep_in']
+
+
+def test_a_joint_move_back_in_that_would_leave_a_third_face_stops_on_it(params, arm):
+    # FRONT_LOW with its y max pulled in to 35 mm, 2 mm beside the tip.
+    box = (FRONT_LOW[0], [250.0, 35.0, 800.0])
+    teleop = boxed(params, arm, LEANT, box)
+    start = outside(arm.forward(LEANT)[0], box)
+    # Leaning back recovers x and z, but yawing left at the same time pushes y out. The whole
+    # step shrinks, so the arm stops on the y wall and the recovery waits with it.
+    run(teleop, 1.0, left_x=1.0, left_y=-1.0)
+    tip, _ = arm.forward(teleop.targets)
+    now = outside(tip, box)
+    assert tip[1] * 1000.0 == pytest.approx(35.0, abs=1e-3)
+    assert 0.0 < now[0] < start[0] and 0.0 < now[2] < start[2]
+    assert teleop.blocked == ['keep_in']
+    # Releasing the yaw lets the recovery finish.
+    run(teleop, 2.0, left_y=-1.0)
+    assert outside(arm.forward(teleop.targets)[0], box)[0] == 0.0
+
+
 @pytest.mark.parametrize('change', [
     {'base.axes': ['left_x', 'left_y', 'trackpad']},
     {'stop_button': 'turbo'},
@@ -257,10 +360,20 @@ def test_without_arm_kinematics_the_cartesian_group_is_skipped(teleop):
     {'tool_limits': [1.0, 0.0]},
     {'cartesian.axes': ['left_y', 'left_x', 'right_y']},
     {'cartesian.mode': 'polar'},
+    {'keep_in_min_mm': [0.0, 0.0, 900.0]},
+    {'keep_in_max_mm': [500.0, 500.0]},
+    {'keep_in_min_mm': [math.nan, 0.0, 0.0]},
 ])
 def test_invalid_mappings_are_rejected(params, change):
     with pytest.raises(ValueError):
         config_from_parameters({**params, **change})
+
+
+def test_a_keep_in_box_without_the_home_pose_is_rejected(params, arm):
+    # The home tool tip is about 759 mm above the base.
+    params['keep_in_max_mm'] = [500.0, 500.0, 500.0]
+    with pytest.raises(ValueError, match='home'):
+        ArmTeleop(config_from_parameters(params), LIMITS, arm)
 
 
 def test_missing_parameters_are_named(params):
@@ -324,6 +437,7 @@ def test_invalid_motion_config_cannot_start(params, change):
 @pytest.mark.parametrize('field, value', [
     ('max_speed', -1.0), ('max_accel', -1.0), ('home_gain', math.nan), ('tool_speed', 0.0),
     ('speed_levels', [0.5, 2.0]), ('period', -0.01),
+    ('keep_in', ((-0.5, -0.5, 0.05), (0.5, 0.5, 0.05))),
 ])
 def test_teleop_refuses_a_config_with_unusable_motion_limits(params, field, value):
     config = config_from_parameters(params)

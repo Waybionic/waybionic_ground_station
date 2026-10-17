@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import math
 
 from waybionic_teleop.gamepad import AXIS, BUTTON
+from waybionic_teleop.kinematics import _inside
 
 ACTIONS = ('enable', 'stop', 'group', 'home', 'faster', 'slower', 'lock', 'tilt_up', 'tilt_down')
 CARTESIAN_AXES = ('x', 'y', 'z', 'roll')
@@ -60,6 +61,7 @@ class TeleopConfig:
     speed_level: int
     deadzone: float
     home_gain: float
+    keep_in: tuple
 
 
 def config_from_parameters(params):
@@ -89,7 +91,9 @@ def config_from_parameters(params):
             speed_levels=[float(level) for level in params['speed_levels']],
             speed_level=int(params['initial_speed_level']),
             deadzone=float(params['deadzone']),
-            home_gain=float(params['home_gain']))
+            home_gain=float(params['home_gain']),
+            keep_in=(tuple(float(value) / 1000.0 for value in params['keep_in_min_mm']),
+                     tuple(float(value) / 1000.0 for value in params['keep_in_max_mm'])))
     except KeyError as missing:
         raise ValueError(f'missing teleop parameter {missing}') from None
     check_config(config)
@@ -129,6 +133,11 @@ def check_config(config):
         raise ValueError('initial_speed_level or deadzone out of range')
     if len(config.tool_limits) != 2 or not config.tool_limits[0] < config.tool_limits[1]:
         raise ValueError('tool_limits must be [open, closed] with open < closed')
+    low, high = config.keep_in
+    if (len(low) != 3 or len(high) != 3 or not all(map(math.isfinite, low + high))
+            or not all(lower < upper for lower, upper in zip(low, high))):
+        raise ValueError('keep_in box is empty: keep_in_min_mm and keep_in_max_mm need '
+                         'three finite values with min < max on each axis')
 
 
 class ArmTeleop:
@@ -174,6 +183,17 @@ class ArmTeleop:
         self.blocked = []
         self.note = 'Press Start (Xbox Menu button) to enable'
         self.warning = False
+        if kinematics is not None:
+            tip, _ = kinematics.forward(self.home())
+            low, high = config.keep_in
+            if not all(lower <= value <= upper for value, lower, upper in zip(tip, low, high)):
+                raise ValueError('keep_in box does not contain the home tool tip at '
+                                 + ', '.join(f'{value * 1000.0:.0f}' for value in tip) + ' mm')
+
+    def home(self):
+        """Return the joints homing drives to: zero, clamped to each joint's limits."""
+        return {joint: clamp(0.0, lower, upper) for joint, (lower, upper) in self.limits.items()
+                if joint != self.config.tool_joint}
 
     @property
     def active_group(self):
@@ -289,10 +309,9 @@ class ArmTeleop:
         incision = self.active_group.mode == 'incision'
         if homing and not incision:
             self.stop_cartesian()
-            for joint, (lower, upper) in self.limits.items():
-                if joint != config.tool_joint:
-                    error = clamp(0.0, lower, upper) - self.targets[joint]
-                    desired[joint] = clamp(config.home_gain * error, -self.speed, self.speed)
+            for joint, home in self.home().items():
+                error = home - self.targets[joint]
+                desired[joint] = clamp(config.home_gain * error, -self.speed, self.speed)
         elif self.active_group.mode == 'cartesian':
             self.jog(axes, dt)
             desired = {config.tool_joint: 0.0}
@@ -324,6 +343,10 @@ class ArmTeleop:
             self.targets[joint], self.velocities[joint] = target, velocity
             self.command_targets[joint] = clamp(
                 target + velocity * config.period, min(lower, target), max(upper, target))
+        # The Cartesian jog and the incision group keep the tip in the box themselves.
+        if self.kinematics is not None and not incision and (
+                homing or self.active_group.mode != 'cartesian'):
+            self.keep_inside(before, dt)
         self.avoid_collisions(before)
 
     def avoid_collisions(self, before):
@@ -348,6 +371,33 @@ class ArmTeleop:
                 self.velocities[joint] = 0.0
         self.stop_cartesian()
         self.blocked += worse
+
+    def keep_inside(self, before, dt):
+        """Shrink this step's arm-joint change so the tool tip stays in the keep-in box."""
+        arm = self.kinematics.joints
+        start, _ = self.kinematics.forward(before)
+
+        def inside(joints):
+            return _inside(self.kinematics.forward(joints)[0], self.config.keep_in, start)
+
+        def partway(fraction):
+            return {joint: before[joint] + fraction * (self.targets[joint] - before[joint])
+                    for joint in arm}
+
+        if inside(partway(1.0)):
+            # The drives aim at the lookahead, a step ahead, so it has to stay inside too.
+            if not inside({joint: self.command_targets[joint] for joint in arm}):
+                self.command_targets.update({joint: self.targets[joint] for joint in arm})
+            return
+        # The whole step shrinks, not single joints, so the arm keeps its direction.
+        low, high = 0.0, 1.0
+        for _ in range(30):
+            middle = (low + high) / 2.0
+            low, high = (middle, high) if inside(partway(middle)) else (low, middle)
+        for joint, target in partway(low).items():
+            self.velocities[joint] = (target - before[joint]) / dt
+            self.targets[joint] = self.command_targets[joint] = target
+        self.blocked.append('keep_in')
 
     def jog(self, axes, dt):
         """Move the tool tip along a straight line set by the sticks, or tilt the tool about it."""
@@ -375,7 +425,7 @@ class ArmTeleop:
         roll = self.roll + clamp(roll * self.speed - self.roll, -step, step)
         before = {joint: self.targets[joint] for joint in self.kinematics.joints}
         after, fraction, self.blocked = self.kinematics.jog(
-            before, velocity, tilt, roll, dt, self.limits, config.max_speed)
+            before, velocity, tilt, roll, dt, self.limits, config.max_speed, config.keep_in)
         self.linear = tuple(value * fraction for value in velocity)
         self.tilt, self.roll = tilt * fraction, roll * fraction
         for joint in self.kinematics.joints:
@@ -384,7 +434,7 @@ class ArmTeleop:
         if any(self.linear) or self.tilt or self.roll:
             future, _, _ = self.kinematics.jog(
                 after, self.linear, self.tilt, self.roll, config.period, self.limits,
-                config.max_speed)
+                config.max_speed, config.keep_in)
         else:
             future = after
         self.command_targets.update(future)
@@ -467,7 +517,7 @@ class ArmTeleop:
                   in zip(self.incision, kinematics.axis(joints, pitch + self.tilt * dt))]
         velocity = [(goal - now) / dt for goal, now in zip(target, tip)]
         return kinematics.jog(joints, velocity, self.tilt, self.roll, dt, self.limits,
-                              self.config.max_speed)
+                              self.config.max_speed, self.config.keep_in)
 
     def stick(self, axes, name):
         value = self.axis(axes, name)

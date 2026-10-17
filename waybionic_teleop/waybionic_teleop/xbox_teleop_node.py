@@ -10,6 +10,7 @@ import math
 import time
 
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
+from geometry_msgs.msg import Point
 import rclpy
 from rclpy._rclpy_pybind11 import RCLError
 from rclpy.executors import ExternalShutdownException
@@ -31,6 +32,8 @@ RUMBLE_INTENSITY = 0.6
 RUMBLE_S = 0.25
 # A stick wavering at the deadzone edge against a limit would otherwise rumble every other tick.
 RUMBLE_REFRACTORY_S = 1.0
+# The 12 edges of a box as pairs of corners; bit 0, 1, 2 of a corner picks max x, y, z.
+BOX_EDGES = [(a, b) for a in range(8) for b in range(a + 1, 8) if bin(a ^ b).count('1') == 1]
 
 
 def stop_reason(blocked):
@@ -292,7 +295,22 @@ class XboxTeleop(Node):
         point.scale.x = point.scale.y = point.scale.z = 0.016
         point.color.r, point.color.g, point.color.b, point.color.a = 1.0, 0.2, 0.6, 0.8
         markers.markers.append(point)
+        markers.markers.append(self.box_marker())
         self.marker_publisher.publish(markers)
+
+    def box_marker(self):
+        """Draw the tool tip's keep-in box; it turns red while it stops a move."""
+        low, high = self.config.keep_in
+        corners = [Point(x=(high if i & 1 else low)[0], y=(high if i & 2 else low)[1],
+                         z=(high if i & 4 else low)[2]) for i in range(8)]
+        box = Marker(ns='keep_in', id=0, type=Marker.LINE_LIST, action=Marker.ADD,
+                     points=[corners[i] for edge in BOX_EDGES for i in edge])
+        box.header.frame_id = self.base_frame
+        box.pose.orientation.w = 1.0
+        box.scale.x = 0.003
+        box.color.r, box.color.g, box.color.b, box.color.a = (
+            (1.0, 0.3, 0.3, 0.9) if 'keep_in' in self.teleop.blocked else (0.6, 0.6, 0.6, 0.5))
+        return box
 
     def report(self):
         now = time.monotonic()
