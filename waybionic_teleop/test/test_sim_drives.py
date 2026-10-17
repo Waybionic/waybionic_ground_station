@@ -1,8 +1,10 @@
 """The simulated drive follows the manual's speed, acceleration and heartbeat rules."""
 
+import threading
+
 import pytest
 
-from waybionic_teleop import mks_can
+from waybionic_teleop import mks_can, mks_drive_sim
 from waybionic_teleop.sim_drives import SimulatedBus, SimulatedServo
 
 RUNNING = mks_can.frame(1, mks_can.ABSOLUTE_AXIS, [1])
@@ -145,6 +147,19 @@ def test_unknown_test_fault_is_rejected():
         SimulatedServo(1).set_test_fault('other')
 
 
+def test_f7_emergency_stop_is_immediate():
+    servo = ready_servo()
+    servo.receive(mks_can.absolute_axis(1, 0x4000, 300, 0))
+    run(servo, 0.05)
+    held = servo.axis
+    assert servo.rpm > 0.0
+    assert servo.receive(mks_can.emergency_stop(1)) == [
+        mks_can.frame(1, mks_can.EMERGENCY_STOP, [1])]
+    assert servo.enabled and servo.target is None and servo.rpm == 0.0
+    run(servo, 0.4)
+    assert servo.axis == held
+
+
 def test_bus_routes_replies_and_counts_bad_frames():
     bus = SimulatedBus([SimulatedServo(1), SimulatedServo(2)], 500000)
     bus.send(2, mks_can.read_encoder(2))
@@ -153,3 +168,49 @@ def test_bus_routes_replies_and_counts_bad_frames():
     bus.send(1, mks_can.read_encoder(2))
     bus.send(9, mks_can.read_encoder(9))
     assert (bus.frames, bus.errors) == (4, 2)
+
+
+def moving_servos(*can_ids):
+    servos = {}
+    for can_id in can_ids:
+        servo = servos[can_id] = SimulatedServo(can_id)
+        for data in (mks_can.set_mode(can_id), mks_can.enable(can_id),
+                     mks_can.absolute_axis(can_id, 0x4000, 300, 0)):
+            servo.receive(data)
+        run(servo, 0.05)
+        assert servo.rpm > 0.0
+    return servos
+
+
+def test_a_broadcast_stops_every_drive_and_none_replies():
+    servos = moving_servos(1, 2)
+    bus = SimulatedBus(servos.values(), 500000)
+    # The checksum of a broadcast counts ID 0, so one made for a single drive is malformed.
+    assert not bus.send(0, mks_can.emergency_stop(1)) and bus.errors == 1
+    assert bus.send(0, mks_can.emergency_stop(0))
+    assert bus.receive() is None
+    assert all(servo.target is None and servo.rpm == 0.0 for servo in servos.values())
+
+
+def test_the_drive_simulator_obeys_a_broadcast_without_replying():
+    servos, done = moving_servos(1, 2), threading.Event()
+
+    class Bus:
+        errors = 0
+
+        def __init__(self):
+            self.inbox, self.sent = [(0, mks_can.emergency_stop(0))], []
+
+        def receive(self, timeout=0.0):
+            if self.inbox:
+                return self.inbox.pop(0)
+            done.set()
+            return None
+
+        def send(self, can_id, data):
+            self.sent.append((can_id, data))
+
+    bus = Bus()
+    mks_drive_sim.serve(bus, servos, done)
+    assert all(servo.target is None and servo.rpm == 0.0 for servo in servos.values())
+    assert bus.sent == [] and bus.errors == 0

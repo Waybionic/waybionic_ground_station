@@ -15,6 +15,7 @@ class FakeSocket:
 
     def __init__(self):
         self.packets = []
+        self.sent = []
 
     def bind(self, address):
         self.address = address
@@ -26,6 +27,10 @@ class FakeSocket:
         if not self.packets:
             raise BlockingIOError
         return self.packets.pop(0)
+
+    def sendto(self, data, address):
+        self.sent.append((data, address))
+        return len(data)
 
     def close(self):
         pass
