@@ -15,6 +15,7 @@ from waybionic_teleop import mks_can
     (mks_can.read_encoder(1), '3132'),
     (mks_can.set_mode(1), '820588'),
     (mks_can.enable(1), 'F301F5'),
+    (mks_can.emergency_stop(1), 'F7F8'),
     (mks_can.set_response(1, respond=True, active=False), '8C01008E'),
     (mks_can.set_heartbeat(1, 500), '98000001F48E'),
     (mks_can.set_zero(1), '9293'),

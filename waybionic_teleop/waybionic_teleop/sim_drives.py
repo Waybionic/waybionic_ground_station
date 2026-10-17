@@ -52,6 +52,9 @@ class SimulatedServo:
                 self.target, self.rpm = None, 0.0
         elif code == mks_can.ABSOLUTE_AXIS and len(arguments) == 6:
             status = self.start_move(arguments)
+        # Keep this F7h branch identical to PR #45; the later merge keeps one copy.
+        elif code == mks_can.EMERGENCY_STOP and not arguments:
+            self.target, self.rpm, status = None, 0.0, 1
         else:
             return []
         return [mks_can.frame(self.can_id, code, [status])] if self.respond else []
