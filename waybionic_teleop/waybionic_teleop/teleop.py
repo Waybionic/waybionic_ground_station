@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import math
 
 from waybionic_teleop.gamepad import AXIS, BUTTON
+from waybionic_teleop.kinematics import _inside
 
 ACTIONS = ('enable', 'stop', 'group', 'home', 'faster', 'slower', 'lock', 'tilt_up', 'tilt_down')
 CARTESIAN_AXES = ('x', 'y', 'z', 'roll')
@@ -209,6 +210,7 @@ class ArmTeleop:
 
     def move(self, axes, homing, dt):
         config = self.config
+        before = dict(self.targets)
         desired = dict.fromkeys(self.limits, 0.0)
         self.blocked = []
         if homing:
@@ -242,6 +244,32 @@ class ArmTeleop:
                 target, velocity = min(self.targets[joint], lower), 0.0
                 self.blocked.append(joint)
             self.targets[joint], self.velocities[joint] = target, velocity
+        # The Cartesian jog keeps the tip in the box itself; homing can run in any group.
+        if self.kinematics is not None and (homing or self.active_group.mode != 'cartesian'):
+            self.keep_inside(before, dt)
+
+    def keep_inside(self, before, dt):
+        """Shrink this step's arm-joint change so the tool tip stays in the keep-in box."""
+        arm = self.kinematics.joints
+        start, _ = self.kinematics.forward(before)
+
+        def inside(fraction):
+            joints = {joint: before[joint] + fraction * (self.targets[joint] - before[joint])
+                      for joint in arm}
+            return _inside(self.kinematics.forward(joints)[0], self.config.keep_in, start)
+
+        if inside(1.0):
+            return
+        # The whole step shrinks, not single joints, so the arm keeps its direction.
+        low, high = 0.0, 1.0
+        for _ in range(30):
+            middle = (low + high) / 2.0
+            low, high = (middle, high) if inside(middle) else (low, middle)
+        for joint in arm:
+            target = before[joint] + low * (self.targets[joint] - before[joint])
+            self.velocities[joint] = (target - before[joint]) / dt
+            self.targets[joint] = target
+        self.blocked.append('keep_in')
 
     def jog(self, axes, dt):
         """Move the tool tip along a straight line set by the sticks, or tilt the tool about it."""

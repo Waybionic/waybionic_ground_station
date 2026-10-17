@@ -10,6 +10,7 @@ import math
 import time
 
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
+from geometry_msgs.msg import Point
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
@@ -23,6 +24,8 @@ from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
 JAW_SIZE = (0.006, 0.014, 0.03)
 JAW_OPEN_GAP = 0.024
+# The 12 edges of a box as pairs of corners; bit 0, 1, 2 of a corner picks max x, y, z.
+BOX_EDGES = [(a, b) for a in range(8) for b in range(a + 1, 8) if bin(a ^ b).count('1') == 1]
 
 
 def status(name, level, value, unit, message):
@@ -158,7 +161,22 @@ class XboxTeleop(Node):
         label.color.r, label.color.g, label.color.b, label.color.a = (
             (0.5, 1.0, 0.5, 1.0) if enabled else (1.0, 0.8, 0.3, 1.0))
         markers.markers.append(label)
+        markers.markers.append(self.box_marker())
         self.marker_publisher.publish(markers)
+
+    def box_marker(self):
+        """Draw the tool tip's keep-in box; it turns red while it stops a move."""
+        low, high = self.config.keep_in
+        corners = [Point(x=(high if i & 1 else low)[0], y=(high if i & 2 else low)[1],
+                         z=(high if i & 4 else low)[2]) for i in range(8)]
+        box = Marker(ns='keep_in', id=0, type=Marker.LINE_LIST, action=Marker.ADD,
+                     points=[corners[i] for edge in BOX_EDGES for i in edge])
+        box.header.frame_id = self.base_frame
+        box.pose.orientation.w = 1.0
+        box.scale.x = 0.003
+        box.color.r, box.color.g, box.color.b, box.color.a = (
+            (1.0, 0.3, 0.3, 0.9) if 'keep_in' in self.teleop.blocked else (0.6, 0.6, 0.6, 0.5))
+        return box
 
     def report(self):
         now = time.monotonic()
