@@ -49,11 +49,58 @@ def test_folding_back_into_the_base_is_caught_past_todays_joint_limits(check):
     assert not any('table' in hit for hit in hits)
 
 
-def test_the_elbow_folds_until_the_forearm_almost_touches_the_shoulder(check):
-    # The forearm's boxes would stop this near 134 degrees; the CAD fold table allows 147.
-    assert check.hits(pose(0, 146, 0)) == [] and check.hits(pose(0, -146, 0)) == []
+def test_the_elbow_folds_until_the_forearm_touches_the_shoulder(check):
+    # The forearm's boxes would stop this near 134 degrees; the CAD fold table allows 148.7.
+    assert check.hits(pose(0, 148.6, 0)) == [] and check.hits(pose(0, -148.6, 0)) == []
     assert check.hits(pose(0, 149, 0)) == ['forearm_link: shoulder_link']
     assert check.hits(pose(0, -149, 0)) == ['forearm_link: shoulder_link']
+
+
+@pytest.mark.parametrize('group, axis, joint, stop, why', [
+    # The straight arm reaches the ground under the base, where the shoulder's limit is.
+    (0, 'left_y', 'joint_2', 109.65, None),
+    # The forearm reaches the shoulder's motor mount: the fold table at an upright shoulder.
+    (0, 'right_y', 'joint_3', 148.7, 'forearm_link: shoulder_link'),
+    # The tool mount reaches the cap on the forearm, where the wrist's limit is.
+    (1, 'right_y', 'joint_4', 94.68, None),
+])
+def test_each_joint_turned_from_upright_stops_where_its_cad_parts_touch(
+        parameters, check, group, axis, joint, stop, why):
+    teleop = ArmTeleop(config_from_parameters({**parameters('xbox_teleop.yaml', 'xbox_teleop'),
+                                               'initial_speed_level': 3}),
+                       LIMITS, ArmKinematics.from_urdf(URDF), check)
+    upright = pose(0, 0, 0)
+    for button in ('start',) + ('y',) * group:
+        teleop.update(*sample(button), upright, DT)
+        teleop.update(*sample(), upright, DT)
+    for _ in range(round(4.0 / DT)):
+        teleop.update(*sample(**{axis: 1.0}), dict(teleop.targets), DT)
+    assert abs(math.degrees(teleop.targets[joint])) == pytest.approx(stop, abs=0.05)
+    assert check.hits(teleop.targets) == []
+    if why:
+        assert teleop.blocked == [why]
+    if joint == 'joint_2':
+        # Where the shoulder stops, the tool mount is within 0.1 mm of the ground.
+        assert ArmCollision.from_urdf(URDF, clearance=0.0001).hits(teleop.targets) == [
+            'wrist_roll_link: table']
+
+
+def test_base_yaw_and_wrist_roll_turn_on_past_half_a_turn(parameters, check):
+    teleop = ArmTeleop(config_from_parameters({**parameters('xbox_teleop.yaml', 'xbox_teleop'),
+                                               'initial_speed_level': 3}),
+                       LIMITS, ArmKinematics.from_urdf(URDF), check)
+    upright = pose(0, 0, 0)
+    teleop.update(*sample('start'), upright, DT)
+    teleop.update(*sample(), upright, DT)
+    for _ in range(round(4.0 / DT)):
+        teleop.update(*sample(left_x=1.0), dict(teleop.targets), DT)
+    teleop.update(*sample('y'), dict(teleop.targets), DT)
+    teleop.update(*sample(), dict(teleop.targets), DT)
+    for _ in range(round(4.0 / DT)):
+        teleop.update(*sample(right_x=1.0), dict(teleop.targets), DT)
+    assert abs(math.degrees(teleop.targets['joint_1'])) > 200.0
+    assert abs(math.degrees(teleop.targets['joint_5'])) > 200.0
+    assert teleop.blocked == []
 
 
 def test_the_fold_limit_follows_the_shoulder_angle():
@@ -65,17 +112,17 @@ def test_the_fold_limit_follows_the_shoulder_angle():
 
 
 @pytest.mark.parametrize('yaw', [0.0, math.radians(45)])
-def test_the_forearm_folds_onto_the_base_until_just_before_its_parts_touch(yaw):
+def test_the_forearm_folds_onto_the_base_until_its_parts_touch(yaw):
     # With the table out of the way, the CAD parts touch at these elbow angles at either yaw.
     away = ArmCollision.from_urdf(URDF, table_z=-10.0)
     for shoulder, touch in ((45, 130.2), (90, 97.2)):
-        assert away.hits(pose(shoulder, touch - 1.4, 0, yaw)) == []
+        assert away.hits(pose(shoulder, touch - 0.3, 0, yaw)) == []
         assert 'forearm_link: base_link' in away.hits(pose(shoulder, touch + 0.3, 0, yaw))
-    # Folded back to the shoulder's limit, the forearm clears the base with the elbow bent up;
-    # bent down, it touches the base at -11 degrees.
-    for elbow in (60, 90, -9.5):
-        assert away.hits(pose(-135, elbow, 0, yaw)) == []
-    assert away.hits(pose(-135, -11.5, 0, yaw)) == ['forearm_link: base_link']
+    # At the shoulder's limit, the forearm clears the base with the elbow bent up; bent down, it
+    # touches the base at -76.5 degrees.
+    for elbow in (60, 90, -76):
+        assert away.hits(pose(-109.65, elbow, 0, yaw)) == []
+    assert away.hits(pose(-109.65, -77, 0, yaw)) == ['forearm_link: base_link']
 
 
 @pytest.mark.parametrize('yaw', [0.0, math.radians(45)])
@@ -92,18 +139,21 @@ def test_the_wrist_and_tool_stop_just_before_their_parts_touch_the_base(yaw):
 
 
 @pytest.mark.parametrize('old, new', [
-    ('across="joint_2"', 'across="joint_9"'), ('start="-135"', 'start="nan"'),
-    ('step="5"', 'step="0"'), ('upper="147.3 ', 'upper="'), ('lower="-122.7', 'lower="inf'),
+    ('across="joint_2"', 'across="joint_9"'), ('start="-109.65"', 'start="nan"'),
+    ('step="4.984090909"', 'step="0"'), ('upper="148.7 ', 'upper="'),
+    ('lower="-126.8', 'lower="inf'),
     # Each table replaces the shapes for its pair, so it must fit the joint tree.
     ('obstacle="shoulder_link"', 'obstacle="upper_arm_link"'),
     ('link="forearm_link" obstacle="base_link"', 'link="upper_arm_link" obstacle="base_link"'),
-    ('joint="joint_3" across="joint_2" start="-135" step="5"',
-     'joint="joint_1" across="joint_2" start="-135" step="5"'),
-    ('across="joint_2" start="-135" step="5"', 'across="joint_3" start="-135" step="5"'),
-    ('across="joint_2" start="-135" step="5"', 'across="joint_4" start="-135" step="5"'),
-    ('start="-135" step="5"', 'start="-130" step="5"'),
-    ('start="-135" step="2.5"', 'start="-135" step="2"'),
-    ('upper="147.3 ', 'upper="-130 '),
+    ('joint="joint_3" across="joint_2" start="-109.65" step="4.984090909"',
+     'joint="joint_1" across="joint_2" start="-109.65" step="4.984090909"'),
+    ('across="joint_2" start="-109.65" step="4.984090909"',
+     'across="joint_3" start="-109.65" step="4.984090909"'),
+    ('across="joint_2" start="-109.65" step="4.984090909"',
+     'across="joint_4" start="-109.65" step="4.984090909"'),
+    ('start="-109.65" step="4.984090909"', 'start="-104.65" step="4.984090909"'),
+    ('start="-109.65" step="2.492045455"', 'start="-109.65" step="2"'),
+    ('upper="148.7 ', 'upper="-130 '),
 ])
 def test_an_unusable_fold_table_is_refused(old, new):
     assert old in URDF
@@ -142,6 +192,35 @@ def test_table_height_and_clearance_are_configurable():
     assert ArmCollision.from_urdf(URDF, table_z=0.17).hits(joints)
     assert not ArmCollision.from_urdf(URDF, table_z=0.1).hits(joints)
     assert ArmCollision.from_urdf(URDF, table_z=0.1, clearance=0.1).hits(joints)
+
+
+def test_the_table_check_follows_the_real_parts_rather_than_their_shapes():
+    # With the tool tilted back, the tool mount's cylinder reaches 12 mm below the mount itself,
+    # whose lowest point, from the URDF's convex hull of its CAD parts, is 650.42 mm up.
+    joints = pose(0, 20, -60)
+    contact = 'wrist_roll_link: table'
+    assert contact not in ArmCollision.from_urdf(URDF, table_z=0.6503).hits(joints)
+    assert contact in ArmCollision.from_urdf(URDF, table_z=0.6505).hits(joints)
+    shapes_only = re.sub(r'<waybionic_hull .*?/>', '', URDF, flags=re.S)
+    assert contact in ArmCollision.from_urdf(shapes_only, table_z=0.645).hits(joints)
+    assert contact not in ArmCollision.from_urdf(URDF, table_z=0.645).hits(joints)
+
+
+ROLL_HULL = re.search(r'<waybionic_hull link="wrist_roll_link" .*?/>', URDF, re.S).group(0)
+
+
+@pytest.mark.parametrize('hull', [
+    ROLL_HULL.replace('points="', 'points="nan '),
+    ROLL_HULL.replace('points="', 'points="0.1 '),
+    '<waybionic_hull link="wrist_roll_link" points="0 0 0 0.1 0 0 0 0.1 0"/>',
+    ROLL_HULL.replace('link="wrist_roll_link"', 'link="base_link"'),
+    ROLL_HULL.replace('link="wrist_roll_link"', 'link="stray_link"'),
+    ROLL_HULL.replace('link="wrist_roll_link"', 'link="forearm_link"'),
+])
+def test_a_hull_that_is_not_one_whole_set_of_points_is_refused(hull):
+    # A hull short of the link's parts would let them below the table.
+    with pytest.raises(ValueError, match='waybionic_hull'):
+        ArmCollision.from_urdf(URDF.replace(ROLL_HULL, hull))
 
 
 def test_the_base_and_shoulder_have_their_own_smaller_clearance():
@@ -255,7 +334,7 @@ def test_teleop_refuses_a_step_that_presses_one_contact_deeper(parameters, check
     for _ in range(round(0.5 / DT)):
         teleop.update(*sample(left_y=-1.0), dict(teleop.targets), DT)
     assert teleop.targets['joint_3'] == start['joint_3']
-    assert teleop.blocked == ['tool_link: table']
+    assert 'tool_link: table' in teleop.blocked
 
 
 def test_the_intrusion_is_the_volume_inside_the_grown_obstacle():
@@ -271,7 +350,7 @@ def test_the_intrusion_is_the_volume_inside_the_grown_obstacle():
 
 
 @pytest.mark.parametrize('start, contact', [
-    (pose(45, 129.5, 0), 'forearm_link: base_link'),
+    (pose(45, 130.1, 0), 'forearm_link: base_link'),
     (pose(45, 121.0, 60), 'wrist_roll_link: base_link'),
 ])
 def test_teleop_never_presses_the_arm_further_into_the_base(parameters, start, contact):

@@ -37,6 +37,37 @@ def test_joint_chain_matches_mechanical_fk(robot):
         assert float(limit.get('lower')) < 0.0 < float(limit.get('upper'))
 
 
+def test_joint_limits_are_where_the_cad_parts_touch(robot):
+    # From the upright pose (scripts/cad/exact_limits.py), the straight arm meets the ground under
+    # the base at 109.65 degrees of shoulder, the forearm the shoulder's motor mount at 148.93 of
+    # elbow, and the tool mount the forearm's cap at 94.68 of wrist pitch. Nothing meets over a
+    # full turn of base yaw or wrist roll.
+    joints = {joint.get('name'): joint for joint in robot.findall('joint')}
+    for name, degrees in (('joint_1', 360.0), ('joint_2', 109.65), ('joint_3', 148.93),
+                          ('joint_4', 94.68), ('joint_5', 360.0)):
+        limit = joints[name].find('limit')
+        assert math.degrees(float(limit.get('upper'))) == pytest.approx(degrees, abs=1e-4)
+        assert math.degrees(float(limit.get('lower'))) == pytest.approx(-degrees, abs=1e-4)
+
+
+def test_moving_links_carry_the_hull_of_their_parts(robot):
+    hulls = {hull.get('link'): [float(value) for value in hull.get('points').split()]
+             for hull in robot.findall('waybionic_hull')}
+    assert sorted(hulls) == sorted([
+        'upper_arm_link', 'forearm_link', 'wrist_pitch_link', 'wrist_left_gear_link',
+        'wrist_right_gear_link', 'wrist_roll_link'])
+    for link, values in hulls.items():
+        assert len(values) % 3 == 0 and len(values) >= 12
+        shapes = [collision_shape(collision)
+                  for collision in robot.find(f"link[@name='{link}']").findall('collision')]
+        # In the link's own frame: the shapes hold the parts, so they hold the hull too, to
+        # within the 1 mm the visual meshes' tessellation leaves.
+        for point in zip(values[0::3], values[1::3], values[2::3]):
+            assert any(inside(point, center, [h + 0.001 for h in half],
+                              None if radius is None else radius + 0.001, axis)
+                       for center, half, radius, axis in shapes), (link, point)
+
+
 def test_differential_side_gears_follow_wrist_roll(robot):
     gears = {joint.get('name'): joint for joint in robot.findall('joint')
              if joint.find('mimic') is not None}

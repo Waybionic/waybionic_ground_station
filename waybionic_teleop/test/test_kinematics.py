@@ -204,18 +204,18 @@ def test_other_arm_layouts_are_rejected(change):
 
 def test_joint_limits_match_the_model_and_allow_only_explicit_missing_placeholders():
     assert joint_limits(URDF, ['joint_1', 'joint_2']) == {
-        'joint_1': (-3.141593, 3.141593),
-        'joint_2': (-2.356194, 2.356194)}
+        'joint_1': (-6.283185, 6.283185),
+        'joint_2': (-1.913754, 1.913754)}
     assert joint_limits(URDF, ['tool_grip'], required=False) == {}
     with pytest.raises(ValueError, match='tool_grip'):
         joint_limits(URDF, ['tool_grip'])
 
 
 @pytest.mark.parametrize('bad', [
-    URDF.replace('lower="-2.356194"', 'lower="nan"', 1),
-    URDF.replace('upper="2.356194"', 'upper="inf"', 1),
-    URDF.replace('upper="2.356194"', 'upper="-3"', 1),
-    URDF.replace('lower="-2.356194" ', '', 1),
+    URDF.replace('lower="-1.913754"', 'lower="nan"', 1),
+    URDF.replace('upper="1.913754"', 'upper="inf"', 1),
+    URDF.replace('upper="1.913754"', 'upper="-3"', 1),
+    URDF.replace('lower="-1.913754" ', '', 1),
     URDF.replace('</robot>', '<joint name="joint_2" type="continuous"/></robot>'),
 ])
 def test_invalid_or_duplicate_urdf_joint_bounds_are_rejected(bad):

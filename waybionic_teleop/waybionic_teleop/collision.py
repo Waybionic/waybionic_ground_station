@@ -5,15 +5,18 @@ Each link's collision shapes come from the URDF, made from its CAD parts: a cyli
 round about a joint axis, such as the base's lid or the tool mount, a cylinder and a box for a
 part round on one side, such as the wrist's differential housing, and otherwise a box. Every
 check happens in the base frame. The moving links must stay above the table, and the forearm,
-wrist and tool must stay out of the base and shoulder, the parts they can fold into. Adjacent
-links overlap at their joints, so those pairs are never compared; the joint limits keep them
-apart. Where the URDF has a fold table for a pair (waybionic_fold, measured from the CAD), the
-table replaces the shapes for it: the elbow may fold until the forearm is about to touch the
-shoulder or the base.
+wrist and tool must stay out of the base and shoulder, the parts they can fold into. Against the
+table a link's convex hull (waybionic_hull, the CAD parts' own) gives its exact lowest point;
+links without one use their shapes. Adjacent links overlap at their joints, so those pairs are
+never compared; the joint limits keep them apart. Where the URDF has a fold table for a pair
+(waybionic_fold, measured from the CAD), the table replaces the shapes for it: the elbow may fold
+until the forearm touches the shoulder or the base.
 """
 
 import math
 import xml.etree.ElementTree as ET
+
+import numpy as np
 
 # The fixed base and the yaw stage, and what may never touch them.
 BODY = ('base_link', 'shoulder_link')
@@ -145,14 +148,16 @@ class Fold:
 class ArmCollision:
     """Collision shapes and joint tree read from a URDF."""
 
-    def __init__(self, shapes, joints, root, table_z=0.0, clearance=0.01, self_clearance=0.002,
-                 folds=()):
+    def __init__(self, shapes, joints, root, table_z=0.0, clearance=0.0, self_clearance=0.0,
+                 folds=(), hulls=None):
         self.shapes, self.joints, self.root = shapes, joints, root
         self.table_z, self.clearance, self.self_clearance = table_z, clearance, self_clearance
         self.folds = {(fold.link, fold.obstacle): fold for fold in folds}
+        # link -> (N, 3) points in the link frame whose lowest is the link's lowest point.
+        self.hulls = dict(hulls or {})
 
     @classmethod
-    def from_urdf(cls, urdf, table_z=0.0, clearance=0.01, self_clearance=0.002):
+    def from_urdf(cls, urdf, table_z=0.0, clearance=0.0, self_clearance=0.0):
         """Read shapes and joints; raise ValueError if a required link has no shapes."""
         try:
             robot = ET.fromstring(urdf)
@@ -225,6 +230,19 @@ class ArmCollision:
         if len(pairs) != len(folds):
             raise ValueError('robot_description has two waybionic_fold tables for one pair')
         checker.folds = {(fold.link, fold.obstacle): fold for fold in folds}
+        for element in robot.findall('waybionic_hull'):
+            link = element.get('link')
+            try:
+                values = [float(value) for value in (element.get('points') or '').split()]
+            except ValueError:
+                values = []
+            if (link not in shapes or link in BODY or link in checker.hulls
+                    or len(values) < 12 or len(values) % 3
+                    or not all(math.isfinite(value) for value in values)):
+                # A hull that is not whole would let the link's real parts below the table.
+                raise ValueError(f'robot_description has a waybionic_hull for {link} that is not '
+                                 'one set of at least four finite points of a moving link')
+            checker.hulls[link] = np.array(values).reshape(-1, 3)
         return checker
 
     def poses(self, positions):
@@ -285,7 +303,11 @@ class ArmCollision:
         for link, placed in world.items():
             if link in BODY:
                 continue
-            lowest = min(_lowest(shape) for shape, _ in placed)
+            if link in self.hulls:
+                rotation, origin = poses[link]
+                lowest = float((self.hulls[link] @ np.array(rotation[2])).min()) + origin[2]
+            else:
+                lowest = min(_lowest(shape) for shape, _ in placed)
             if lowest < self.table_z + self.clearance:
                 found[f'{link}: table'] = self.table_z + self.clearance - lowest
         margin = self.self_clearance

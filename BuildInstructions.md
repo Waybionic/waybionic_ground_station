@@ -434,14 +434,17 @@ the point moves onto the axis instead of the arm moving. Further away, the group
 rather than pull the tool back: press Y, withdraw the tool in another group, then
 select the incision group again to set a new incision point.
 
-The arm URDF's joint limits come from the CAD: each pitch joint stops about 1 degree
-before two parts touch, 135 degrees either way for the shoulder, 147 for the elbow and
-93 for the wrist pitch (found with `scripts/cad/joint_clearance.py`). Base yaw and
-wrist roll never touch another part, so they turn 180 degrees either way until their
-cabling is measured. These limits and the collision checks below have been tested with
-simulated drives only. The simulated CAN map is not a powered-arm safety case. Do not
-operate powered motors until Mechanical confirms the signed travel of each joint from
-upright zero on the built arm, including any cable or gear stop.
+The arm URDF's joint limits are where the CAD parts touch, found by turning each joint
+from the upright pose with exact triangle-mesh contacts (`scripts/cad/exact_limits.py`):
+the straight arm meets the ground under the base at 109.65 degrees of shoulder either
+way, the forearm meets the shoulder's motor mount at 148.93 degrees of elbow, and the
+tool mount meets the cap on the forearm at 94.68 degrees of wrist pitch. Nothing meets
+anything over a full turn of base yaw or wrist roll, so they turn a full turn (360
+degrees) either way; their cabling is not modelled. These limits and the collision
+checks below have been tested with simulated drives only. The simulated CAN map is not
+a powered-arm safety case. Do not operate powered motors until Mechanical confirms the
+signed travel of each joint from upright zero on the built arm, including any cable or
+gear stop.
 
 In simulation, a zero-velocity joint command (including B and controller timeout)
 sends an MKS F5 frame with zero speed and zero acceleration to each moving drive.
@@ -454,26 +457,28 @@ up faster than the teleop speed limits. This checks simulated behavior only. Do
 not connect powered drives or treat it as a hardware E-stop test; drive
 identities, wiring, zeroing and electrical safety still need hardware verification.
 
-Every group stops a move before any part of the arm comes within 10 mm of the
-table or within 2 mm of the arm's own base and shoulder. The checks use a box
+Every group stops a move where any part of the arm would go below the table or into
+the arm's own base and shoulder. Against the table each link's lowest point comes from
+the convex hull of its CAD parts (`waybionic_hull` in the URDF), so the arm stops where
+its real parts reach the table. Against the base and shoulder the checks use a box
 around each CAD part, or a cylinder where a part, or one side of it, is round
 about a joint axis, such as the base's lid, the tool mount and the lower half of
 the wrist's housing, so they fit those parts however the joints turn. You can see
 them by ticking **Collision Enabled** on RViz's RobotModel display. They are too
 coarse where the forearm folds against the shoulder or the base, so there the elbow
-follows tables of its limits against the shoulder angle, measured from the CAD
-1 degree before the parts touch (`waybionic_fold` in the URDF); the base's table
-holds at every yaw.
+follows tables of its limits against the shoulder angle, measured from the CAD where
+the parts touch (`waybionic_fold` in the URDF, `scripts/cad/joint_clearance.py`); the
+base's table holds at every yaw.
 The tool's box is a placeholder around the RViz jaws, which reach 30 mm past
 `tool_link`, until the real tool is modelled; a longer tool needs a longer box.
 When a move stops, the diagnostics panel names the part, for example
 `At limit: forearm_link: table`. If the arm stands on a raised mount, set
 `table_height` in `waybionic_teleop/config/xbox_teleop.yaml` to the table's height
-above the bottom of the base. `collision_clearance` in the same file sets the 10 mm
-margin to the table, and `self_collision_clearance` the 2 mm margin to the base and
-shoulder; the forearm's tables keep their 1 degree instead. If the arm is already
-touching something, the only moves still allowed are the ones that back out of it:
-a move that presses any contact further in is refused, even if it would ease
+above the bottom of the base. `collision_clearance` in the same file keeps a gap to the
+table, and `self_collision_clearance` to the base and shoulder; both are 0, so the arm
+stops where its parts touch. Raise them for a margin on the real arm. If the arm is
+already touching something, the only moves still allowed are the ones that back out of
+it: a move that presses any contact further in is refused, even if it would ease
 another contact at the same time.
 
 The collision shapes are what make any of this work. A `robot_description` without

@@ -38,6 +38,8 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 URDF_PATH = REPOSITORY / 'waybionic_description' / 'urdf' / 'waybionic_arm.urdf'
 MESH_DIRECTORY = REPOSITORY / 'waybionic_description' / 'meshes' / 'arm'
 MESH_URI = 'package://waybionic_description/meshes/arm/'
+# Written by scripts/cad/exact_limits.py --hulls: each moving link's convex hull.
+HULLS_PATH = Path(__file__).resolve().with_name('link_hulls.json')
 
 # Top-level components, including everything below them, for each rigid link.
 LINKS = {
@@ -59,60 +61,59 @@ LINKS = {
 }
 
 # name, parent, child, axis mate, origin plane mate, SolidWorks rotor, limits in degrees.
-# The pitch limits stop about 1 degree before two CAD parts touch, found with
-# scripts/cad/joint_clearance.py; base yaw and wrist roll never touch, so cabling sets them.
+# Each limit is where a joint, turning from the upright pose, first brings two CAD parts
+# together or the arm down to the ground under the base (scripts/cad/exact_limits.py): the
+# straight arm meets the ground at 109.65 degrees of shoulder, the forearm the shoulder's motor
+# mount at 148.93 of elbow, and the tool mount the cap on the forearm at 94.68 of wrist pitch.
+# Nothing meets over a full turn of base yaw or wrist roll, so they turn a full turn either way.
+# In other poses the forearm's folds (ELBOW_FOLDS) and the ground stop the arm in teleop.
 JOINTS = (
     ('joint_1', 'base_link', 'shoulder_link', 'Concentric124', 'Coincident70',
-     'outer_ring_sweep_loose-1', (-180.0, 180.0)),
+     'outer_ring_sweep_loose-1', (-360.0, 360.0)),
     ('joint_2', 'shoulder_link', 'upper_arm_link', 'Concentric112', 'Coincident57',
-     'outer-ring-Nema23-1', (-135.0, 135.0)),
+     'outer-ring-Nema23-1', (-109.65, 109.65)),
     ('joint_3', 'upper_arm_link', 'forearm_link', 'Concentric127', 'Coincident71',
-     'outer_ring_sweep_loose-2', (-147.0, 147.0)),
+     'outer_ring_sweep_loose-2', (-148.93, 148.93)),
     ('joint_4', 'forearm_link', 'wrist_pitch_link', 'Concentric139', None,
-     'DifferentialHousing-1', (-93.0, 93.0)),
+     'DifferentialHousing-1', (-94.68, 94.68)),
     ('joint_5', 'wrist_pitch_link', 'wrist_roll_link', 'Concentric143', None,
-     'straight bevel pinion_iso-3', (-180.0, 180.0)),
+     'straight bevel pinion_iso-3', (-360.0, 360.0)),
 )
 # How far the elbow folds before the forearm meets the shoulder, or the base at any yaw, depends
 # on the shoulder angle: for each, shoulder angles from START in steps of STEP degrees, then the
-# elbow's upper and lower limits there, 1 degree short of contact
+# elbow's upper and lower limits there, where the parts touch, to 0.1 degree
 # (scripts/cad/joint_clearance.py). The collision shapes are too coarse for these pairs, so the
 # teleop collision check reads these tables instead.
 ELBOW_FOLDS = {
     'shoulder_link': (
-        -135.0, 5.0,
-        (147.3, 147.4, 147.4, 147.5, 147.6, 147.6, 147.6, 147.6, 147.6, 147.7, 147.7, 147.7, 147.7,
-         147.7, 147.7, 147.7, 147.7, 147.7, 147.7, 147.7, 147.7, 147.7, 147.7, 147.6, 147.6, 147.6,
-         147.6, 147.5, 147.5, 147.4, 147.4, 147.3, 147.2, 147.1, 147.0, 146.3, 144.8, 143.3, 141.6,
-         139.9, 138.1, 136.4, 134.7, 133.1, 131.7, 130.2, 128.9, 127.6, 126.5, 125.6, 124.8, 124.3,
-         121.9, 121.9, 122.6),
-        (-122.7, -121.9, -121.8, -124.3, -124.8, -125.6, -126.5, -127.6, -128.8, -130.1, -131.6,
-         -133.2, -134.7, -136.4, -138.1, -139.8, -141.6, -143.3, -144.8, -146.3, -147.0, -147.1,
-         -147.2, -147.3, -147.4, -147.4, -147.5, -147.5, -147.5, -147.6, -147.6, -147.6, -147.6,
-         -147.6, -147.7, -147.7, -147.7, -147.7, -147.7, -147.7, -147.7, -147.7, -147.7, -147.7,
-         -147.7, -147.6, -147.6, -147.6, -147.6, -147.6, -147.5, -147.5, -147.5, -147.4, -147.3),
+        -109.65, 4.984090909090909,
+        (148.7, 148.8, 148.8, 148.8, 148.8, 148.9, 148.8, 148.9, 148.9, 148.9, 148.9, 148.9, 148.9,
+         148.9, 148.9, 148.9, 148.9, 148.8, 148.8, 148.8, 148.8, 148.7, 148.7, 148.7, 148.6, 148.5,
+         148.5, 148.4, 148.3, 148.1, 147.5, 146.0, 144.5, 142.8, 141.0, 139.3, 137.6, 136.0, 134.4,
+         132.9, 131.4, 130.1, 128.8, 127.8, 126.9),
+        (-126.8, -127.7, -128.8, -130.2, -131.4, -132.9, -134.3, -135.9, -137.6, -139.3, -141.0,
+         -142.8, -144.5, -146.0, -147.4, -148.1, -148.3, -148.4, -148.5, -148.5, -148.6, -148.7,
+         -148.7, -148.7, -148.8, -148.8, -148.8, -148.9, -148.8, -148.9, -148.9, -148.9, -148.9,
+         -148.9, -148.9, -148.9, -148.9, -148.9, -148.9, -148.9, -148.8, -148.9, -148.8, -148.8,
+         -148.8),
     ),
     'base_link': (
-        -135.0, 2.5,
-        (172.7, 176.0, 178.5, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0,
-         180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0,
-         180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 178.7, 178.1, 177.4, 176.5, 175.5, 174.6,
-         173.6, 172.7, 171.8, 170.8, 169.9, 168.8, 167.8, 166.9, 165.9, 164.9, 164.0, 163.0, 162.0,
-         161.1, 160.1, 159.1, 158.1, 156.7, 155.3, 154.3, 152.0, 149.6, 147.4, 145.4, 143.4, 141.6,
-         139.9, 138.2, 136.6, 135.0, 133.5, 132.0, 130.5, 128.9, 127.5, 125.9, 124.3, 121.7, 120.1,
-         118.4, 116.8, 115.0, 113.2, 111.3, 109.3, 107.2, 105.1, 103.0, 100.9, 98.8, 96.5, 95.9,
-         93.7, 91.2, 88.8, 86.2, 83.5, 80.8, 77.9, 74.9, 71.7, 68.3, 64.0, 59.4, 54.3, 49.1, 43.9,
-         35.8, 24.6, 9.9),
-        (-9.9, -24.5, -35.8, -43.8, -49.1, -54.3, -59.4, -64.0, -68.3, -71.7, -74.9, -77.9, -80.8,
-         -83.5, -86.2, -88.8, -91.2, -93.6, -95.9, -96.5, -98.8, -100.9, -103.0, -105.1, -107.3,
-         -109.3, -111.3, -113.2, -115.0, -116.8, -118.4, -120.1, -121.7, -124.3, -125.9, -127.4,
-         -128.9, -130.5, -132.0, -133.5, -135.0, -136.6, -138.2, -139.9, -141.6, -143.4, -145.4,
-         -147.4, -149.6, -152.1, -154.3, -155.3, -156.7, -158.1, -159.1, -160.1, -161.0, -162.0,
-         -163.0, -164.0, -164.9, -165.9, -166.9, -167.9, -168.8, -169.8, -170.7, -171.8, -172.7,
-         -173.6, -174.6, -175.5, -176.5, -177.4, -178.1, -178.8, -180.0, -180.0, -180.0, -180.0,
+        -109.65, 2.4920454545454547,
+        (180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0,
+         180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 179.8, 179.2, 178.4,
+         177.5, 176.6, 175.6, 174.7, 173.8, 172.8, 171.8, 170.9, 169.9, 169.0, 168.0, 167.0, 166.1,
+         165.1, 164.1, 163.1, 162.1, 161.2, 160.1, 159.2, 158.1, 156.5, 155.5, 153.3, 150.8, 148.6,
+         146.5, 144.6, 142.8, 141.0, 139.3, 137.7, 136.1, 134.6, 133.1, 131.6, 130.1, 128.6, 127.1,
+         125.5, 122.9, 121.3, 119.7, 118.0, 116.3, 114.4, 112.5, 110.6, 108.6, 106.5, 104.3, 102.2,
+         100.1, 97.9, 97.3, 95.0, 92.7, 90.2, 87.7, 85.1, 82.3, 79.4, 76.4),
+        (-76.5, -79.5, -82.3, -85.1, -87.7, -90.2, -92.7, -95.0, -97.3, -97.9, -100.1, -102.2,
+         -104.4, -106.5, -108.6, -110.6, -112.5, -114.4, -116.3, -118.0, -119.7, -121.3, -122.9,
+         -125.5, -127.1, -128.6, -130.1, -131.7, -133.1, -134.6, -136.1, -137.7, -139.3, -141.0,
+         -142.8, -144.6, -146.6, -148.6, -150.8, -153.3, -155.4, -156.5, -158.2, -159.2, -160.1,
+         -161.1, -162.1, -163.1, -164.1, -165.1, -166.0, -167.0, -168.0, -169.0, -169.9, -170.9,
+         -171.8, -172.8, -173.7, -174.7, -175.6, -176.5, -177.5, -178.4, -179.2, -179.8, -180.0,
          -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0,
-         -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0,
-         -180.0, -180.0, -180.0, -180.0, -178.5, -176.0, -172.7),
+         -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0),
     ),
 }
 DESCRIPTIONS = {
@@ -764,6 +765,10 @@ def collision_lines(name, center, size, radius=None, axis=2):
 
 
 def write_urdf(model, source, shapes):
+    if not HULLS_PATH.exists():
+        raise ValueError(f'{HULLS_PATH.name} is missing; run scripts/cad/exact_limits.py with '
+                         f'--hulls {HULLS_PATH.relative_to(REPOSITORY).as_posix()}')
+    hulls = json.loads(HULLS_PATH.read_text(encoding='utf-8'))
     angles = ', '.join(f'{name}={math.degrees(model.cad_angles[name]):.2f}' for name, *_ in JOINTS)
     lines = [
         '<?xml version="1.0"?>',
@@ -771,7 +776,7 @@ def write_urdf(model, source, shapes):
         '     Do not edit by hand; re-export the SolidWorks assembly and re-run the script.',
         '     Joint zero is the upright pose from the mechanical fk.py (links along +Z,',
         f'     pitch about +Y). Saved CAD pose in degrees {angles}.',
-        '     Each pitch joint stops about 1 degree before two parts touch. Each part has a',
+        '     Joint limits are where CAD parts touch (scripts/cad/exact_limits.py). Each part has a',
         '     collision box, or a cylinder where it is round about a joint axis, with a box for',
         '     any side of it that is not. Effort and velocity are placeholders for display. -->',
         '<robot name="waybionic_arm">']
@@ -816,14 +821,24 @@ def write_urdf(model, source, shapes):
         f'    <origin xyz="0 0 {fmt(model.tool_length)}" rpy="0 0 0"/>',
         '  </joint>',
         '  <!-- Elbow limits in degrees against the shoulder angle, from start every step degrees,',
-        '       1 degree before the forearm meets the shoulder or, at any yaw, the base.',
+        '       where the forearm meets the shoulder or, at any yaw, the base.',
         '       The teleop collision check reads these; other URDF tools ignore them. -->']
     for obstacle, (start, step, upper, lower) in ELBOW_FOLDS.items():
         lines += [
             f'  <waybionic_fold link="forearm_link" obstacle="{obstacle}" joint="joint_3"'
-            f' across="joint_2" start="{start:g}" step="{step:g}"',
+            f' across="joint_2" start="{start:.10g}" step="{step:.10g}"',
             f'      upper="{" ".join(f"{value:g}" for value in upper)}"',
             f'      lower="{" ".join(f"{value:g}" for value in lower)}"/>']
+    lines += [
+        '  <!-- The convex hull of each moving link\'s CAD parts, x y z in m in the link frame',
+        '       (written by scripts/cad/exact_limits.py). The teleop collision check keeps the',
+        '       lowest of these above the table, the exact lowest point of the real parts. -->']
+    for link, points in hulls.items():
+        values = [f'{value:g}' for point in points for value in point]
+        rows = [' '.join(values[i:i + 36]) for i in range(0, len(values), 36)]
+        lines += [f'  <waybionic_hull link="{link}" points="{rows[0]}',
+                  *[f'      {row}' for row in rows[1:]]]
+        lines[-1] += '"/>'
     lines += ['</robot>', '']
     URDF_PATH.write_text('\n'.join(lines), encoding='utf-8')
 

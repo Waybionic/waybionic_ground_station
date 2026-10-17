@@ -264,14 +264,15 @@ def test_malformed_commands_stop_all_drives_instead_of_partially_updating(node, 
     elif fault == 'nonfinite_speed':
         bad.velocity[-1] = math.inf
     else:
-        bad.position[0] = 4.0
+        # Base yaw turns a full turn either way.
+        bad.position[0] = 7.0
     node.on_command(bad)
     assert node.rejected == 1
     assert_stopped(node)
 
 
 @pytest.mark.parametrize('bad', [
-    URDF.replace('upper="2.356194"', 'upper="nan"', 1),
+    URDF.replace('upper="1.913754"', 'upper="nan"', 1),
     URDF.replace('name="joint_2" type="revolute"', 'name="other" type="revolute"', 1),
 ])
 def test_invalid_or_missing_model_limit_requires_repair_and_new_enable(node, bad):
@@ -336,7 +337,7 @@ def test_int24_overflow_rejects_the_entire_coordinated_move(node):
 
 def test_encoder_outside_a_provisional_limit_may_move_only_toward_it(node):
     start = dict.fromkeys(node.map.joints, 0.0)
-    start['joint_4'] = 1.65
+    start['joint_4'] = 1.67
     for drive, count in zip(node.map.drives, node.map.to_counts(start)):
         node.bus.drives[drive.can_id].axis = float(count)
     ready(node)

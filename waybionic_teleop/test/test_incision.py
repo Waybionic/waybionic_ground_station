@@ -161,21 +161,22 @@ def test_moving_into_a_joint_limit_sends_targets_within_the_urdf_limits(
     assert through(arm, teleop.targets, teleop.incision)[0] < 1e-6
 
 
-@pytest.mark.parametrize('into, back, contact', [
-    ({'left_y': 1.0}, {'left_y': -1.0}, 'tool_link: table'),
-    ({'right_y': -1.0}, {'right_y': 1.0}, 'tool_link: table'),
-    ({'right_y': 1.0}, {'right_y': -1.0}, 'forearm_link: table'),
+@pytest.mark.parametrize('inserted, into, back, contact', [
+    (1.0, {'left_y': 1.0}, {'left_y': -1.0}, 'tool_link: table'),
+    (1.6, {'right_y': -1.0}, {'right_y': 1.0}, 'tool_link: table'),
+    (1.0, {'right_y': 1.0}, {'right_y': -1.0}, 'wrist_pitch_link: table'),
 ], ids=['insert', 'pivot_tool_down', 'pivot_forearm_down'])
 def test_an_incision_move_into_the_table_is_refused_but_backing_out_is_not(
-        parameters, arm, into, back, contact):
+        parameters, arm, inserted, into, back, contact):
     check = ArmCollision.from_urdf(URDF)
     teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
                        LIMITS, arm, check)
     for button in ('start', 'y', 'y', 'y'):
         teleop.update(*sample(button), NEAR_TABLE, DT)
         teleop.update(*sample(), NEAR_TABLE, DT)
-    # With the tool 25 mm in, inserting further or pivoting either way reaches the table.
-    run(teleop, 1.0, left_y=1.0)
+    # With the tool 25 mm in, inserting further or pivoting the forearm down reaches the table;
+    # 40 mm in, so does pivoting the tool down, whose jaws reach about 55 mm past the incision.
+    run(teleop, inserted, left_y=1.0)
     run(teleop, 0.3)
     first = teleop.incision
     stopped = False

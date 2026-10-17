@@ -66,8 +66,8 @@ class XboxTeleop(Node):
         self.tool_frame = params['tool_frame']
         self.base_frame = params['base_frame']
         self.table_height = float(params.get('table_height', 0.0))
-        self.clearance = float(params.get('collision_clearance', 0.01))
-        self.self_clearance = float(params.get('self_collision_clearance', 0.002))
+        self.clearance = float(params.get('collision_clearance', 0.0))
+        self.self_clearance = float(params.get('self_collision_clearance', 0.0))
         if not (math.isfinite(self.table_height) and 0 <= self.clearance < math.inf
                 and 0 <= self.self_clearance < math.inf):
             raise ValueError('table_height must be finite, and collision_clearance and '

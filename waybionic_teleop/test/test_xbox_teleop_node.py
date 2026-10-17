@@ -168,7 +168,7 @@ def test_stale_joint_feedback_cannot_be_used_to_enable(node):
 
 
 def test_bad_description_and_mismatched_joint_map_fail_closed(node):
-    node.load(String(data=URDF.replace('upper="2.356194"', 'upper="nan"', 1)))
+    node.load(String(data=URDF.replace('upper="1.913754"', 'upper="nan"', 1)))
     assert node.teleop is None and 'invalid limits' in node.problem
     node.config.groups[2].joints.reverse()
     node.load(String(data=URDF))
