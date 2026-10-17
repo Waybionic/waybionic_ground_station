@@ -1,9 +1,8 @@
 # Five-drive carrier bring-up checklist
 
 Use this checklist with Yassin or Mujtaba present. It prepares the five arm drives (IDs 1-5)
-for the [PR #45](https://github.com/Waybionic/waybionic_ground_station/pull/45) real-arm ground
-station. No powered step in this document has been completed or validated by the
-`waybionic_can` software-only tests.
+for the real-arm ground station. No powered step in this document has been completed or
+validated by the `waybionic_can` software-only tests.
 
 ## Safety and prerequisites
 
@@ -16,9 +15,8 @@ station. No powered step in this document has been completed or validated by the
   120-ohm end terminations, and the powered-off CAN_H-to-CAN_L resistance.
 - [ ] Record the repository commit, operator/lead names, date, wiring photos, drive labels, and
   supply/current-limit settings in the results template below.
-- [ ] Use [PR #45](https://github.com/Waybionic/waybionic_ground_station/pull/45) or a later
-  integration containing its `flash`, `drives`, and `arm` macOS commands. Those host commands
-  are not part of this focused package PR.
+- [ ] Use a checkout of main, which has the `flash`, `drives`, and `arm` commands in
+  `scripts/macos.sh`.
 
 Stop immediately on unexpected motion, duplicate replies, smoke/heat, wiring uncertainty,
 repeated CAN errors, or loss of the physical E-stop. De-energize the motor supply before
@@ -108,7 +106,7 @@ Keep teleoperation disabled. In a second terminal:
 ```
 
 Expected: the Trigger service reports success and joint states become available. Zeroing uses
-MKS `92h` in the PR #45 host and must be performed only in the agreed physical pose.
+MKS `92h` in the real-arm host and must be performed only in the agreed physical pose.
 If any drive was lost or power-cycled, stop and zero the complete arm again.
 
 At the controller's lowest speed, enable only when controls are neutral. Exercise base,
@@ -153,7 +151,7 @@ With all five drives connected at 1 Mbit/s, capture:
 - the five-drive scan output and encoder values;
 - `can.carrier` monitor values: status sequence/freshness, CAN controller errors, failed writes,
   refused serial lines, E-stop state, and supply state;
-- `can.bus` frame rate/load from the PR #45 engineering monitor;
+- `can.bus` frame rate/load from the engineering monitor;
 - a simultaneous `candump`/SocketCAN trace only if using a SocketCAN adapter;
 - wiring and termination photos and a demonstration video approved by the lead.
 

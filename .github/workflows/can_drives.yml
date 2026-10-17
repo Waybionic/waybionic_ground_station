@@ -36,9 +36,13 @@ jobs:
           waybionic-can-drives python3 -m pytest -v -p no:cacheprovider
           src/waybionic_ground_station/waybionic_teleop/test/test_can_drives.py
 
-      # --gtest_fail_if_skipped turns a missing vcan0 into a red job instead of 11 silent skips.
+      # The binary skips its cases when vcan0 is missing, so a skip, or no passed tests at all,
+      # fails the job. This googletest has no --gtest_fail_if_skipped: an unknown flag prints
+      # the help and exits 0 without running anything.
       - name: Run the four-node vcan integration test
-        run: >
-          docker run --rm --network host waybionic-can-drives
-          /waybionic_ws/build/waybionic_can/test_vcan_four_node
-          --gtest_fail_if_skipped
+        run: |
+          set -o pipefail
+          docker run --rm --network host waybionic-can-drives \
+            /waybionic_ws/build/waybionic_can/test_vcan_four_node | tee four_node.txt
+          grep -Eq '^\[  PASSED  \] [1-9][0-9]* tests?\.' four_node.txt
+          ! grep -q 'SKIPPED' four_node.txt

@@ -16,8 +16,9 @@ def ramp_rpm_per_s(acc):
 class SimulatedServo:
     """Answer bus commands and move like an MKS SERVO42D/57D in SR_vFOC mode."""
 
-    def __init__(self, can_id):
+    def __init__(self, can_id, bitrate=500000):
         self.can_id = can_id
+        self.bitrate = bitrate
         self.mode = None
         self.enabled = False
         self.respond = True
@@ -31,9 +32,13 @@ class SimulatedServo:
         self.speed = 0
         self.acc = 0
 
-    def receive(self, data):
-        """Handle one command and return the reply frames."""
-        code, arguments = mks_can.parse(self.can_id, data)
+    def receive(self, data, address=None):
+        """Handle one command sent to address (by default this drive's ID); return the replies."""
+        address = self.can_id if address is None else address
+        replies = self._handle(*mks_can.parse(address, data))
+        return [] if address == mks_can.BROADCAST_ID else replies
+
+    def _handle(self, code, arguments):
         self.quiet_ms = 0.0
         if code == mks_can.READ_ENCODER and not arguments:
             value = round(self.axis).to_bytes(6, 'big', signed=True)
@@ -52,9 +57,22 @@ class SimulatedServo:
                 self.target, self.rpm = None, 0.0
         elif code == mks_can.ABSOLUTE_AXIS and len(arguments) == 6:
             status = self.start_move(arguments)
-        # Keep this F7h branch identical to PR #45; the later merge keeps one copy.
         elif code == mks_can.EMERGENCY_STOP and not arguments:
             self.target, self.rpm, status = None, 0.0, 1
+        elif code == mks_can.SET_BITRATE and len(arguments) == 1:
+            rates = {value: rate for rate, value in mks_can.BITRATES.items()}
+            status = int(arguments[0] in rates)
+            # The reply still goes out at the old rate.
+            reply = [mks_can.frame(self.can_id, code, [status])]
+            self.bitrate = rates.get(arguments[0], self.bitrate)
+            return reply if self.respond else []
+        elif code == mks_can.SET_CAN_ID and len(arguments) == 2:
+            new_id = int.from_bytes(arguments, 'big')
+            status = int(1 <= new_id <= 0x7FF)
+            reply = [mks_can.frame(self.can_id, code, [status])]
+            if status:
+                self.can_id = new_id
+            return reply if self.respond else []
         else:
             return []
         return [mks_can.frame(self.can_id, code, [status])] if self.respond else []
@@ -133,6 +151,14 @@ class SimulatedBus:
     def send(self, can_id, data):
         """Deliver a frame; return False if no drive could take it."""
         self._count(data)
+        if can_id == mks_can.BROADCAST_ID:
+            try:
+                for drive in self.drives.values():
+                    drive.receive(data, can_id)
+            except ValueError:
+                self.errors += 1
+                return False
+            return bool(self.drives)
         drive = self.drives.get(can_id)
         if drive is None:
             self.errors += 1
@@ -143,6 +169,9 @@ class SimulatedBus:
             self.errors += 1
             return False
         self._queue(can_id, replies)
+        if drive.can_id != can_id:
+            # It took a new CAN ID.
+            self.drives = {drive.can_id: drive for drive in self.drives.values()}
         return True
 
     def receive(self):

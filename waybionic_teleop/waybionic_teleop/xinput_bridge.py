@@ -13,7 +13,7 @@ import ctypes
 import socket
 import time
 
-from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS, pack, unpack_rumble
+from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS, pack, pong, unpack_rumble
 
 ERROR_SUCCESS = 0
 # game_controller_node rumbles for a second per request unless told to stop; so does this.
@@ -56,7 +56,7 @@ def vibration(intensity):
 
 
 def read_rumble(sock, receiver):
-    """Return the newest rumble intensity that the receiver address sent, or None."""
+    """Return the newest rumble intensity the receiver sent, or None; answer its pings."""
     intensity = None
     for _ in range(MAX_READS):
         try:
@@ -67,6 +67,14 @@ def read_rumble(sock, receiver):
             # Windows raises here for an oversize datagram or an earlier ICMP error.
             continue
         if sender != receiver:
+            continue
+        answer = pong(data)
+        if answer is not None:
+            # Sent straight back, so the station can time the link.
+            try:
+                sock.sendto(answer, receiver)
+            except OSError:
+                pass
             continue
         try:
             intensity = unpack_rumble(data)
@@ -113,7 +121,7 @@ def main():
     parser = argparse.ArgumentParser(description='Send an Xbox controller to the arm.')
     parser.add_argument('--host', default='127.0.0.1', help='ground station address')
     parser.add_argument('--port', type=int, default=47300, help='ground station joy_udp_port')
-    parser.add_argument('--rate', type=float, default=120.0, help='packets per second')
+    parser.add_argument('--rate', type=float, default=250.0, help='packets per second')
     parser.add_argument('--slot', type=int, choices=range(4),
                         help='XInput controller slot (default: first connected)')
     args = parser.parse_args()
@@ -149,7 +157,8 @@ def main():
                 sender.sendto(pack(sequence, axes, buttons, active is not None), receiver)
             except BlockingIOError:
                 pass
-            # The ground station answers on the same socket when the arm stops at a limit.
+            # The ground station answers on the same socket: pings to time the link, and a
+            # rumble when the arm stops at a limit.
             intensity = read_rumble(sender, receiver)
             if intensity is not None and active is not None:
                 set_state(active, ctypes.byref(vibration(intensity)))
