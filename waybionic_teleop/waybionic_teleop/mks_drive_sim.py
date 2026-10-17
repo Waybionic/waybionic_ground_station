@@ -9,6 +9,7 @@ import argparse
 import threading
 import time
 
+from waybionic_teleop import mks_can
 from waybionic_teleop.can_bus import CanBus
 from waybionic_teleop.sim_drives import SimulatedServo
 
@@ -21,7 +22,13 @@ def serve(bus, servos, stop, period=0.001):
         frame = bus.receive(period)
         while frame is not None:
             can_id, data = frame
-            if can_id in servos:
+            if can_id == mks_can.BROADCAST_ID:
+                try:
+                    for servo in servos.values():
+                        servo.receive(data, can_id)
+                except ValueError:
+                    bus.errors += 1
+            elif can_id in servos:
                 try:
                     replies += [(can_id, reply) for reply in servos[can_id].receive(data)]
                 except ValueError:

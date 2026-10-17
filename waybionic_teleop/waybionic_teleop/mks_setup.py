@@ -83,6 +83,29 @@ def set_bitrate(bus, can_id, bitrate):
             f'scan with --bitrate {bitrate}')
 
 
+def send_confirmed(bus, can_id, data, attempts=5, timeout=0.2):
+    """
+    Send a frame until the interface takes it; return False if it never does.
+
+    The carrier answers BELL to a frame it refuses after send() has returned True, so wait for
+    its answer, and send a refused frame again.
+    """
+    frame = (can_id, bytes(data))
+    for _ in range(attempts):
+        if bus.send(*frame):
+            if not hasattr(bus, 'take_refused'):
+                return True
+            deadline = time.monotonic() + timeout
+            while bus.unanswered and time.monotonic() < deadline:
+                if bus.receive() is None:
+                    time.sleep(0.002)
+            if not bus.unanswered and frame not in bus.take_refused():
+                return True
+        bus.step(0.0)
+        time.sleep(0.01)
+    return False
+
+
 def wait_for_carrier(bus, seconds=3.0):
     """Give a carrier that resets when its port opens time to boot; True once it reports."""
     deadline = time.monotonic() + seconds
@@ -133,8 +156,9 @@ def main(argv=None):
         elif args.command == 'set-bitrate':
             print(set_bitrate(bus, args.can_id, args.rate))
         else:
-            bus.send(0, mks_can.emergency_stop(0))
-            bus.receive()
+            stop = mks_can.emergency_stop(mks_can.BROADCAST_ID)
+            if not send_confirmed(bus, mks_can.BROADCAST_ID, stop):
+                raise SystemExit('The emergency stop did not go out; press the E-stop')
             print('Sent the emergency stop to every drive')
     finally:
         bus.shutdown()

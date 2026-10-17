@@ -32,9 +32,13 @@ class SimulatedServo:
         self.speed = 0
         self.acc = 0
 
-    def receive(self, data):
-        """Handle one command and return the reply frames."""
-        code, arguments = mks_can.parse(self.can_id, data)
+    def receive(self, data, address=None):
+        """Handle one command sent to address (by default this drive's ID); return the replies."""
+        address = self.can_id if address is None else address
+        replies = self._handle(*mks_can.parse(address, data))
+        return [] if address == mks_can.BROADCAST_ID else replies
+
+    def _handle(self, code, arguments):
         self.quiet_ms = 0.0
         if code == mks_can.READ_ENCODER and not arguments:
             value = round(self.axis).to_bytes(6, 'big', signed=True)
@@ -147,6 +151,14 @@ class SimulatedBus:
     def send(self, can_id, data):
         """Deliver a frame; return False if no drive could take it."""
         self._count(data)
+        if can_id == mks_can.BROADCAST_ID:
+            try:
+                for drive in self.drives.values():
+                    drive.receive(data, can_id)
+            except ValueError:
+                self.errors += 1
+                return False
+            return bool(self.drives)
         drive = self.drives.get(can_id)
         if drive is None:
             self.errors += 1

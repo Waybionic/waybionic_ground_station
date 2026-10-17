@@ -9,6 +9,8 @@ is the motor ID; the data is a function code, big-endian arguments and a checksu
 COUNTS_PER_REV = 0x4000
 MAX_SPEED_RPM = 3000
 MIN_AXIS, MAX_AXIS = -0x800000, 0x7FFFFF
+# Every drive acts on a frame to this ID, and none replies (manual part 5, note 1).
+BROADCAST_ID = 0
 
 READ_ENCODER = 0x31
 SET_MODE = 0x82

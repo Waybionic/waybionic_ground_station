@@ -2,8 +2,12 @@
 
 import pytest
 
-from waybionic_teleop import mks_setup
+from waybionic_teleop import mks_can, mks_setup
 from waybionic_teleop.sim_drives import SimulatedBus, SimulatedServo
+from waybionic_teleop.slcan_bus import SlcanBus
+
+STOP = mks_can.emergency_stop(mks_can.BROADCAST_ID)
+STOP_LINE = b't000%d%s' % (len(STOP), STOP.hex().upper().encode())
 
 
 @pytest.fixture
@@ -32,3 +36,31 @@ def test_a_can_id_in_use_or_without_a_drive_is_refused(bus):
 def test_a_drive_switches_its_bit_rate(bus):
     assert '1000000 bit/s' in mks_setup.set_bitrate(bus, 3, 1000000)
     assert bus.drives[3].bitrate == 1000000
+
+
+def test_stop_reaches_every_drive(bus, monkeypatch, capsys):
+    for can_id, servo in bus.drives.items():
+        for data in (mks_can.set_mode(can_id), mks_can.enable(can_id),
+                     mks_can.absolute_axis(can_id, 0x4000, 300, 0)):
+            servo.receive(data)
+        servo.step(0.05)
+    monkeypatch.setattr(mks_setup, 'open_bus', lambda *args: bus)
+    mks_setup.main(['--interface', 'virtual', '--channel', 'sim', 'stop'])
+    assert all(servo.target is None and servo.rpm == 0.0 for servo in bus.drives.values())
+    assert 'Sent the emergency stop' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('refusals, sent', [(1, True), (5, False)])
+def test_stop_goes_out_again_until_the_carrier_takes_it(monkeypatch, capsys, carrier_port,
+                                                        refusals, sent):
+    port = carrier_port(refuse=[STOP_LINE] * refusals)
+    monkeypatch.setattr(mks_setup, 'open_bus',
+                        lambda *args: SlcanBus('/dev/fake', 500000, open_port=lambda: port))
+    monkeypatch.setattr(mks_setup, 'wait_for_carrier', lambda bus: True)
+    if sent:
+        mks_setup.main(['--channel', '/dev/fake', 'stop'])
+        assert 'Sent the emergency stop' in capsys.readouterr().out
+    else:
+        with pytest.raises(SystemExit, match='did not go out'):
+            mks_setup.main(['--channel', '/dev/fake', 'stop'])
+    assert b''.join(port.writes).count(STOP_LINE) == min(refusals + 1, 5)
