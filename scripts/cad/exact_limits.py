@@ -5,7 +5,8 @@
 
 This needs numpy, scipy and python-fcl (pip install python-fcl); the build script does not.
 After a CAD change, run this, copy the joint limits it prints into JOINTS in
-build_arm_description.py, run joint_clearance.py for the ELBOW_FOLDS, and rebuild the URDF.
+build_arm_description.py, run joint_clearance.py for the ELBOW_FOLDS, rebuild the URDF, and
+check it with check_collision_model.py.
 
 Every CAD part, gearbox internals excepted (they are enclosed, and static CAD cannot model their
 eccentric motion), becomes an FCL triangle mesh in its link frame. A joint turns from the upright
@@ -17,16 +18,18 @@ joint's own axis and are left out. The ground is the plane under the base (z = 0
 and the lowest vertex of the moving parts is exact.
 
 A limit that holds in every pose comes from the parts that only that joint moves against each
-other; where a contact also depends on another joint, the teleop collision check stops the arm
-instead (ELBOW_FOLDS for the forearm, and the ground). --hulls writes each moving link's convex
-hull in its link frame, which the URDF carries so the teleop check finds the lowest point of the
-real parts rather than of their collision shapes.
+other, over a full turn of any joint that turns them too (the wrist's roll turns the tool mount
+against the forearm's cap); where a contact also depends on another joint, the teleop collision
+check stops the arm instead (ELBOW_FOLDS for the forearm, and the ground). --hulls writes each
+moving link's convex hull in its link frame, which the URDF carries so the teleop check finds
+the lowest point of the real parts rather than of their collision shapes.
 """
 
 import argparse
 import importlib.util
 import json
 import math
+import multiprocessing
 from pathlib import Path
 
 import fcl
@@ -119,8 +122,10 @@ class Robot:
 class Sweep:
     """One joint turning from the upright pose, some links against others."""
 
-    def __init__(self, robot, joint, moving=None, fixed=None):
+    def __init__(self, robot, joint, moving=None, fixed=None, held=None):
         self.robot, self.name = robot, joint
+        # Other joints held at these angles (radians) while this one turns.
+        self.held = held or {}
         moving = moving or robot.subtree(robot.joints[joint]['child'])
         self.moving = [part for part in robot.parts if part[0] in moving]
         self.fixed = [part for part in robot.parts
@@ -134,16 +139,17 @@ class Sweep:
         mated = {(id(m), id(f)) for m, f in self.mated}
         self.pairs = [(m, f) for m, f in self.pairs if (id(m), id(f)) not in mated]
         info = robot.joints[joint]
-        r, o = robot.poses({})[info['parent']]
+        r, o = robot.poses(self.held)[info['parent']]
         self.origin = o + r @ np.array(info['xyz'])
         self.axis = r @ rpy(*info['rpy']) @ np.array(info['axis'], dtype=float)
         # No moving point is further than this from the joint axis.
         self.reach = max(float(np.linalg.norm(
-            (part[2] - self.origin) - np.outer((part[2] - self.origin) @ self.axis, self.axis),
+            (self.world[id(part)] - self.origin)
+            - np.outer((self.world[id(part)] - self.origin) @ self.axis, self.axis),
             axis=1).max()) for part in self.moving)
 
     def place(self, angle):
-        poses = self.robot.poses({self.name: angle})
+        poses = self.robot.poses({**self.held, self.name: angle})
         self.world, self.boxes = {}, {}
         for part in self.robot.parts:
             r, o = poses[part[0]]
@@ -222,6 +228,32 @@ class Sweep:
         return None
 
 
+# The robot for the roll scan's worker processes, which fork with it.
+_ROBOT = None
+
+
+def _wrist_contacts(roll):
+    sweep = Sweep(_ROBOT, 'joint_4', fixed={'forearm_link'},
+                  held={'joint_5': math.radians(roll)})
+    return [sweep.contact(sign, 120.0)[0] for sign in (1, -1)]
+
+
+def wrist_stops(robot, step=0.1):
+    """
+    Return the wrist pitch (degrees) either way where the wrist first touches the forearm.
+
+    Rolling the wrist turns the tool mount's facets against the forearm's cap, so the contact
+    is found every step degrees over a full turn of roll and the lowest kept. It changes by
+    under 0.1 degree of pitch per degree of roll, so between two steps it is at most 0.005
+    degree lower than the lowest found.
+    """
+    global _ROBOT
+    _ROBOT = robot
+    with multiprocessing.get_context('fork').Pool() as pool:
+        found = pool.map(_wrist_contacts, np.arange(0.0, 360.0, step))
+    return tuple(min(contacts[side] for contacts in found) for side in (0, 1))
+
+
 def report(sweep, title):
     print(title)
     if sweep.mated:
@@ -257,10 +289,10 @@ def main():
            'joint_2, the upper arm against the base and the yaw stage:')
     report(Sweep(robot, 'joint_3', fixed={'upper_arm_link'}),
            'joint_3, the forearm and wrist against the upper arm:')
-    stops = report(Sweep(robot, 'joint_4', fixed={'forearm_link'}),
-                   'joint_4, the wrist against the forearm:')
-    upper, lower = (math.floor(angle * 100) / 100 for angle, _ in stops)
-    print(f'  wrist pitch limits ({-lower:.2f}, {upper:.2f})')
+    report(Sweep(robot, 'joint_4', fixed={'forearm_link'}),
+           'joint_4, the wrist against the forearm, roll at zero:')
+    upper, lower = (math.floor((angle - 0.005) * 100) / 100 for angle in wrist_stops(robot))
+    print(f'  over a full turn of roll, wrist pitch limits ({-lower:.2f}, {upper:.2f})')
 
     if args.hulls:
         hulls = {link: [[round(float(value), 5) for value in point]

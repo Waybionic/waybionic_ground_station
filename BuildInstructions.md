@@ -270,9 +270,10 @@ a terminal with an outdated `PATH`:
 ```
 
 RViz and the Joint State Publisher GUI open as separate windows. Move the
-`joint_1` to `joint_5` sliders to move the arm, and use the diagnostics panel's
-mock controls to try normal and fault states. This demo uses simulated data, not
-a physical arm. Press **Ctrl+C** in PowerShell to stop it.
+`joint_1` to `joint_5` sliders to move the arm; it stops where it would hit
+itself or the ground, and the sliders jump back to where it stopped. Use the
+diagnostics panel's mock controls to try normal and fault states. This demo uses
+simulated data, not a physical arm. Press **Ctrl+C** in PowerShell to stop it.
 
 To sweep each joint in turn instead, put the launch command after `wslg`:
 
@@ -438,9 +439,10 @@ The arm URDF's joint limits are where the CAD parts touch, found by turning each
 from the upright pose with exact triangle-mesh contacts (`scripts/cad/exact_limits.py`):
 the straight arm meets the ground under the base at 109.65 degrees of shoulder either
 way, the forearm meets the shoulder's motor mount at 148.93 degrees of elbow, and the
-tool mount meets the cap on the forearm at 94.68 degrees of wrist pitch. Nothing meets
-anything over a full turn of base yaw or wrist roll, so they turn a full turn (360
-degrees) either way; their cabling is not modelled. These limits and the collision
+tool mount meets the cap on the forearm at 94.67 degrees of wrist pitch, at the wrist
+roll that turns its facets closest to the cap. Nothing meets anything over a full turn
+of base yaw or wrist roll, so they turn a full turn (360 degrees) either way; their
+cabling is not modelled. These limits and the collision
 checks below have been tested with simulated drives only. The simulated CAN map is not
 a powered-arm safety case. Do not operate powered motors until Mechanical confirms the
 signed travel of each joint from upright zero on the built arm, including any cable or
@@ -480,6 +482,16 @@ stops where its parts touch. Raise them for a margin on the real arm. If the arm
 already touching something, the only moves still allowed are the ones that back out of
 it: a move that presses any contact further in is refused, even if it would ease
 another contact at the same time.
+
+The joint sliders use the same check. `joint_state_guard` moves the arm from where it
+is toward the sliders' pose, checking at least every half degree of each joint, stops
+at the last pose before any part would touch, and moves the sliders back to it.
+
+`scripts/cad/check_collision_model.py` checks all of this against the exact CAD
+meshes: at about 300,000 poses that the check calls clear (random poses, poses with
+a joint at a limit, and the poses where moves stop), no two parts, nor the tool's box,
+intersect, and no part is below the ground. Run it after any change to the CAD,
+the limits or the collision shapes.
 
 The collision shapes are what make any of this work. A `robot_description` without
 collision shapes for the base, shoulder, upper arm, forearm, wrist, wrist roll or tool
@@ -916,7 +928,7 @@ ros2 launch waybionic_bringup ground_station.launch.py
 ```
 - **RViz** and **Joint State Publisher GUI** (separate small window) will pop up after the last command
 - RViz opens pre-configured with `base_link` fixed frame, `RobotModel`, and `TF` displays already loaded
-- Move the `joint_1` to `joint_5` sliders in the Joint State Publisher GUI (small window) to move the arm: base yaw, shoulder, elbow, wrist pitch, and wrist roll
+- Move the `joint_1` to `joint_5` sliders in the Joint State Publisher GUI (small window) to move the arm: base yaw, shoulder, elbow, wrist pitch, and wrist roll. The arm stops where it would hit itself or the ground, and the sliders jump back to where it stopped
 - Joint demo: `ros2 launch waybionic_bringup ground_station.launch.py demo_mode:=true` sweeps each joint in turn (simulated, no hardware) and shows a pass/fail row per joint in the diagnostics panel; `demo_speed:=60` changes the speed in degrees per second
 
 For mock and live diagnostics checks, continue with the
@@ -992,7 +1004,8 @@ Keep this Terminal window open. Within a few seconds:
 - `DiagnosticsPanel` displays **WayBionic Engineering Monitor** and
   **Current State: NORMAL**.
 - Joint State Publisher displays the `joint_1` to `joint_5` sliders. Move them
-  to check base yaw, shoulder, elbow, wrist pitch, and wrist roll.
+  to check base yaw, shoulder, elbow, wrist pitch, and wrist roll. The arm stops
+  where it would hit itself or the ground.
 
 To stop the application, return to the launch Terminal and press
 <kbd>Control</kbd>+<kbd>C</kbd>.
@@ -1017,6 +1030,7 @@ RMW_IMPLEMENTATION=rmw_cyclonedds_cpp ./scripts/macos.sh run ros2 node list
 The output must include:
 
 ```text
+/joint_state_guard
 /joint_state_publisher
 /robot_state_publisher
 /rviz2

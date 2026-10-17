@@ -331,6 +331,38 @@ class ArmCollision:
                     found[f'{link}: {body}'] = volume
         return found
 
+    def reach(self, start, goal, step):
+        """
+        Move in a straight line in joint space from start toward goal, checking every step.
+
+        start and goal map the same joints to radians, and step is the most any joint turns
+        between two checks. Return the furthest pose along the line before anything would
+        collide, to within 1e-6 of the move, and what would collide just past it ([] when the
+        whole move is clear). A start that already collides moves only to a clear goal.
+        """
+        def along(fraction):
+            return {joint: start[joint] + (goal[joint] - start[joint]) * fraction
+                    for joint in goal}
+
+        if self.hits(start):
+            blocked = self.hits(goal)
+            return (dict(start), blocked) if blocked else (dict(goal), [])
+        span = max((abs(goal[joint] - start[joint]) for joint in goal), default=0.0)
+        count = max(1, math.ceil(span / step))
+        clear = 0.0
+        for index in range(1, count + 1):
+            if self.hits(along(index / count)):
+                blocked = index / count
+                while blocked - clear > 1e-6:
+                    middle = (clear + blocked) / 2.0
+                    if self.hits(along(middle)):
+                        blocked = middle
+                    else:
+                        clear = middle
+                return along(clear), self.hits(along(blocked))
+            clear = index / count
+        return along(1.0), []
+
 
 def _squared_distance(a, b):
     return sum((x - y) ** 2 for x, y in zip(a, b))

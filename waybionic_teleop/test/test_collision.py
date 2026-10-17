@@ -56,13 +56,46 @@ def test_the_elbow_folds_until_the_forearm_touches_the_shoulder(check):
     assert check.hits(pose(0, -149, 0)) == ['forearm_link: shoulder_link']
 
 
+def test_a_move_stops_at_the_last_pose_before_parts_touch(check):
+    reached, blocked = check.reach(pose(0, 0, 0), pose(0, 160, 0), math.radians(0.5))
+    assert 148.6 < math.degrees(reached['joint_3']) < 149
+    assert check.hits(reached) == [] and blocked == ['forearm_link: shoulder_link']
+    # A clear move goes all the way.
+    assert check.reach(pose(0, 0, 0), pose(30, 60, 60), math.radians(0.5)) == (
+        pytest.approx(pose(30, 60, 60)), [])
+    # From inside a collision the arm moves only to a clear pose.
+    inside = pose(0, 150, 0)
+    stay, blocked = check.reach(inside, pose(0, 155, 0), 0.01)
+    assert stay == inside and 'forearm_link: shoulder_link' in blocked
+    assert check.reach(inside, pose(0, 0, 0), 0.01) == (pose(0, 0, 0), [])
+
+
+@pytest.mark.parametrize('goal', [
+    # Two poses the joint sliders allowed: the elbow folded back through the base...
+    {'joint_1': 0.0, 'joint_2': 0.921, 'joint_3': 2.599, 'joint_4': 1.652, 'joint_5': -6.283},
+    # ...and the wrist under the ground.
+    {'joint_1': 0.0, 'joint_2': 1.9137, 'joint_3': 0.829, 'joint_4': 1.652, 'joint_5': -6.283},
+])
+def test_a_move_toward_a_pose_that_clashes_stops_just_before_it(check, goal):
+    assert check.hits(goal)
+    start = dict.fromkeys(goal, 0.0)
+    reached, blocked = check.reach(start, goal, math.radians(0.5))
+    assert check.hits(reached) == [] and blocked
+    # A hair further along the move the parts touch.
+    fraction = reached['joint_2'] / goal['joint_2'] + 1e-4
+    assert check.hits({joint: goal[joint] * fraction for joint in goal})
+    # Asking again moves it no further.
+    again, _ = check.reach(reached, goal, math.radians(0.5))
+    assert again == pytest.approx(reached, abs=1e-5)
+
+
 @pytest.mark.parametrize('group, axis, joint, stop, why', [
     # The straight arm reaches the ground under the base, where the shoulder's limit is.
     (0, 'left_y', 'joint_2', 109.65, None),
     # The forearm reaches the shoulder's motor mount: the fold table at an upright shoulder.
     (0, 'right_y', 'joint_3', 148.7, 'forearm_link: shoulder_link'),
     # The tool mount reaches the cap on the forearm, where the wrist's limit is.
-    (1, 'right_y', 'joint_4', 94.68, None),
+    (1, 'right_y', 'joint_4', 94.67, None),
 ])
 def test_each_joint_turned_from_upright_stops_where_its_cad_parts_touch(
         parameters, check, group, axis, joint, stop, why):

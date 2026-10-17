@@ -40,11 +40,11 @@ def test_joint_chain_matches_mechanical_fk(robot):
 def test_joint_limits_are_where_the_cad_parts_touch(robot):
     # From the upright pose (scripts/cad/exact_limits.py), the straight arm meets the ground under
     # the base at 109.65 degrees of shoulder, the forearm the shoulder's motor mount at 148.93 of
-    # elbow, and the tool mount the forearm's cap at 94.68 of wrist pitch. Nothing meets over a
-    # full turn of base yaw or wrist roll.
+    # elbow, and the tool mount the forearm's cap at 94.67 of wrist pitch, at the closest roll.
+    # Nothing meets over a full turn of base yaw or wrist roll.
     joints = {joint.get('name'): joint for joint in robot.findall('joint')}
     for name, degrees in (('joint_1', 360.0), ('joint_2', 109.65), ('joint_3', 148.93),
-                          ('joint_4', 94.68), ('joint_5', 360.0)):
+                          ('joint_4', 94.67), ('joint_5', 360.0)):
         limit = joints[name].find('limit')
         assert math.degrees(float(limit.get('upper'))) == pytest.approx(degrees, abs=1e-4)
         assert math.degrees(float(limit.get('lower'))) == pytest.approx(-degrees, abs=1e-4)

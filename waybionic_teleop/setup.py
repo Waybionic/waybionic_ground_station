@@ -32,6 +32,7 @@ setup(
             'mks_setup = waybionic_teleop.mks_setup:main',
             'autoplay = waybionic_teleop.autoplay_node:main',
             'joy_udp_receiver = waybionic_teleop.joy_udp_receiver:main',
+            'joint_state_guard = waybionic_teleop.joint_state_guard:main',
         ],
     },
 )

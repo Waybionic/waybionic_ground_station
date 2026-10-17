@@ -64,7 +64,8 @@ LINKS = {
 # Each limit is where a joint, turning from the upright pose, first brings two CAD parts
 # together or the arm down to the ground under the base (scripts/cad/exact_limits.py): the
 # straight arm meets the ground at 109.65 degrees of shoulder, the forearm the shoulder's motor
-# mount at 148.93 of elbow, and the tool mount the cap on the forearm at 94.68 of wrist pitch.
+# mount at 148.93 of elbow, and the tool mount the cap on the forearm at 94.67 of wrist pitch,
+# at the roll that turns its facets closest to the cap.
 # Nothing meets over a full turn of base yaw or wrist roll, so they turn a full turn either way.
 # In other poses the forearm's folds (ELBOW_FOLDS) and the ground stop the arm in teleop.
 JOINTS = (
@@ -75,7 +76,7 @@ JOINTS = (
     ('joint_3', 'upper_arm_link', 'forearm_link', 'Concentric127', 'Coincident71',
      'outer_ring_sweep_loose-2', (-148.93, 148.93)),
     ('joint_4', 'forearm_link', 'wrist_pitch_link', 'Concentric139', None,
-     'DifferentialHousing-1', (-94.68, 94.68)),
+     'DifferentialHousing-1', (-94.67, 94.67)),
     ('joint_5', 'wrist_pitch_link', 'wrist_roll_link', 'Concentric143', None,
      'straight bevel pinion_iso-3', (-360.0, 360.0)),
 )
