@@ -76,8 +76,8 @@ if(BUILD_TESTING)
     endif()
   endforeach()
 
-  # Skips itself when the vcan interface is missing. The privileged can_drives.yml job
-  # runs this binary with --gtest_fail_if_skipped so a missing vcan0 cannot pass CI.
+  # Skips itself when the vcan interface is missing. The can_drives.yml job runs this binary
+  # with vcan0 and fails if any case skips, so a missing vcan0 cannot pass CI.
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     ament_add_gtest(test_vcan_four_node tests/integration/test_vcan_four_node.cpp TIMEOUT 240)
     if(TARGET test_vcan_four_node)
