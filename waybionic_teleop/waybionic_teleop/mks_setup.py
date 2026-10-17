@@ -99,7 +99,9 @@ def send_confirmed(bus, can_id, data, attempts=5, timeout=0.2):
             while bus.unanswered and time.monotonic() < deadline:
                 if bus.receive() is None:
                     time.sleep(0.002)
-            if not bus.unanswered and frame not in bus.take_refused():
+            # A lost link drops its unanswered lines, which is no answer at all.
+            if (bus.connected and not bus.unanswered
+                    and frame not in bus.take_refused()):
                 return True
         bus.step(0.0)
         time.sleep(0.01)
@@ -138,7 +140,8 @@ def main(argv=None):
     rate_command = commands.add_parser('set-bitrate', help="change one drive's CAN bit rate")
     rate_command.add_argument('can_id', type=int)
     rate_command.add_argument('rate', type=int, choices=sorted(mks_can.BITRATES))
-    commands.add_parser('stop', help='stop every drive at once (F7h to broadcast ID 0)')
+    commands.add_parser('stop', help='stop every drive at once (F7h to broadcast ID 0); give '
+                        "the drives' --bitrate")
     args = parser.parse_args(argv)
 
     bus = open_bus(args.interface, args.channel, args.bitrate, args.tty_baudrate)
@@ -159,7 +162,8 @@ def main(argv=None):
             stop = mks_can.emergency_stop(mks_can.BROADCAST_ID)
             if not send_confirmed(bus, mks_can.BROADCAST_ID, stop):
                 raise SystemExit('The emergency stop did not go out; press the E-stop')
-            print('Sent the emergency stop to every drive')
+            # Drives never answer a broadcast, so this is as far as it can be confirmed.
+            print(f'The carrier took the emergency stop for every drive at {args.bitrate} bit/s')
     finally:
         bus.shutdown()
 

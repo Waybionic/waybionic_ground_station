@@ -609,17 +609,22 @@ class SimArmDrives(Node):
 
     def close(self):
         """Stop the drives and release the bus; the drives' heartbeat would also stop them."""
-        self.stop_all('Shutting down')
-        if self.interface == 'slcan':
-            # The carrier may refuse a stop after send() returned True, and no later tick would
-            # send it again, so wait for its answers and repeat refused stops before closing.
-            deadline = time.monotonic() + CLOSE_TIMEOUT_S
-            while (self.bus.connected and (self.stopping or self.bus.unanswered)
-                   and time.monotonic() < deadline):
-                time.sleep(0.002)
+        try:
+            self.stop_all('Shutting down')
+            if self.interface == 'slcan':
+                # The carrier may refuse a stop after send() returned True, and no later tick
+                # would send it again, so write the stops now, then wait for the carrier's
+                # answers and repeat refused stops before closing it.
+                deadline = time.monotonic() + CLOSE_TIMEOUT_S
                 self.drain(time.monotonic())
-                self.send_stops()
-        self.bus.shutdown()
+                while (self.bus.connected and (self.stopping or self.bus.unanswered)
+                       and time.monotonic() < deadline):
+                    time.sleep(0.002)
+                    self.drain(time.monotonic())
+                    self.send_stops()
+        finally:
+            # Even if a second Ctrl+C lands here, the queued stops and C still go out.
+            self.bus.shutdown()
 
 
 def main():

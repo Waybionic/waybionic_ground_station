@@ -486,6 +486,10 @@ only), and the host waits for every drive in the list, so remove `tool` from `dr
 before driving the real arm. Start with the motors unloaded, and keep the physical E-stop
 within reach.
 
+Before the drives are first powered, Mechanical confirms each joint's signed travel from
+the zero pose against the URDF limits, including any cable or gear stop, and someone
+shows that the E-stop cuts power to the drives.
+
 The computer running ROS needs the carrier or USB CAN adapter. Docker Desktop on Windows
 and macOS cannot reach USB devices, so use native ROS on macOS (RoboStack, below) or
 Linux, or Docker on Linux with `--network host` for a SocketCAN adapter.
@@ -532,7 +536,9 @@ Do the [macOS setup](#macos-apple-silicon) first. Then, from the repository root
    ```
 
 5. Check each joint's direction at the slowest speed in the `upper` group. If a drive
-   turns the wrong way, negate its `factors` in `arm_drives.yaml` and rebuild.
+   turns the wrong way, negate its `factors` in `arm_drives.yaml` and rebuild. Then move
+   each joint a known angle, such as 10 degrees in RViz, and measure it on the arm; a
+   different angle means its gear ratio in `factors` is wrong.
 
 **Remote operator.** The controller can stay with an operator on another computer. On
 the operator's Windows computer, run the controller bridge pointed at the Mac's address:

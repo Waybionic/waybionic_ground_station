@@ -4,6 +4,7 @@ import importlib.util
 import math
 from pathlib import Path
 import time
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from diagnostic_msgs.msg import DiagnosticStatus
@@ -205,8 +206,8 @@ def stop_line(can_id):
 
 @pytest.mark.parametrize('answering', [True, False])
 def test_closing_repeats_a_refused_stop_before_the_carrier_closes(
-        node, monkeypatch, carrier_port, answering):
-    port = carrier_port(refuse=[stop_line(1)], answering=answering)
+        node, monkeypatch, usb_carrier, answering):
+    port = usb_carrier(refuse=[stop_line(1)], answering=answering)
     node.interface = 'slcan'
     node.bus = SlcanBus('/dev/fake', 1000000, open_port=lambda: port)
     monkeypatch.setattr(sim_arm_drives_node, 'CLOSE_TIMEOUT_S', 0.2)
@@ -220,6 +221,23 @@ def test_closing_repeats_a_refused_stop_before_the_carrier_closes(
     else:
         # A carrier that answers nothing delays closing by the timeout only.
         assert written.count(stop_line(1)) == 1 and time.monotonic() - started < 1.0
+
+
+def test_a_second_ctrl_c_while_closing_still_sends_the_stops_and_closes(
+        node, monkeypatch, usb_carrier):
+    port = usb_carrier(answering=False)
+    node.interface = 'slcan'
+    node.bus = SlcanBus('/dev/fake', 1000000, open_port=lambda: port)
+
+    def interrupted(seconds):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(sim_arm_drives_node, 'time',
+                        SimpleNamespace(monotonic=time.monotonic, sleep=interrupted))
+    with pytest.raises(KeyboardInterrupt):
+        node.close()
+    written = b''.join(port.writes)
+    assert written.endswith(b'C\r') and port.closed
+    assert all(written.count(stop_line(drive.can_id)) == 1 for drive in node.map.drives)
 
 
 @pytest.mark.parametrize('fault', [

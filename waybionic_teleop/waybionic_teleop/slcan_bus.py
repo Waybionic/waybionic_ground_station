@@ -23,6 +23,9 @@ from waybionic_teleop import mks_can
 BITRATE_CODES = {125000: b'4', 250000: b'5', 500000: b'6', 1000000: b'8'}
 DEFAULT_BAUDRATE = 1000000
 REOPEN_EVERY_S = 1.0
+# A carrier that stops reading its port fails the write, so the link is reopened rather than
+# the control loop blocking.
+WRITE_TIMEOUT_S = 0.1
 # The carrier sends its status ten times a second while open, so this much quiet means it is
 # closed: it reset, or it was still booting when the port opened.
 SILENCE_S = 1.0
@@ -53,7 +56,8 @@ class SlcanBus:
             raise ValueError(f'the carrier runs CAN at {sorted(BITRATE_CODES)} bit/s')
         self.port, self.bitrate = port, bitrate
         self.open_port = open_port or (
-            lambda: serial.serial_for_url(port, baudrate=baudrate, timeout=0))
+            lambda: serial.serial_for_url(port, baudrate=baudrate, timeout=0,
+                                          write_timeout=WRITE_TIMEOUT_S))
         self.frames = self.bits = self.errors = self.refused = self.reopens = 0
         self.problem = ''
         self.outgoing, self.incoming, self.replies = bytearray(), bytearray(), deque()

@@ -13,7 +13,7 @@ class CarrierPort:
 
     def __init__(self, refuse=(), answering=True):
         self.refuse, self.answering = list(refuse), answering
-        self.writes, self.inbox, self.closed = [], bytearray(), False
+        self.writes, self.inbox, self.closed, self.broken = [], bytearray(), False, False
 
     @property
     def in_waiting(self):
@@ -25,6 +25,8 @@ class CarrierPort:
         return chunk
 
     def write(self, data):
+        if self.broken:
+            raise OSError(6, 'Device not configured')
         self.writes.append(bytes(data))
         for line in bytes(data).split(b'\r')[:-1] if self.answering else ():
             if line[:1] != b't':
@@ -41,7 +43,7 @@ class CarrierPort:
 
 
 @pytest.fixture
-def carrier_port():
+def usb_carrier():
     return CarrierPort
 
 

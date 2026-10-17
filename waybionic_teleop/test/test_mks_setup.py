@@ -47,20 +47,31 @@ def test_stop_reaches_every_drive(bus, monkeypatch, capsys):
     monkeypatch.setattr(mks_setup, 'open_bus', lambda *args: bus)
     mks_setup.main(['--interface', 'virtual', '--channel', 'sim', 'stop'])
     assert all(servo.target is None and servo.rpm == 0.0 for servo in bus.drives.values())
-    assert 'Sent the emergency stop' in capsys.readouterr().out
+    assert 'The carrier took the emergency stop' in capsys.readouterr().out
 
 
 @pytest.mark.parametrize('refusals, sent', [(1, True), (5, False)])
-def test_stop_goes_out_again_until_the_carrier_takes_it(monkeypatch, capsys, carrier_port,
+def test_stop_goes_out_again_until_the_carrier_takes_it(monkeypatch, capsys, usb_carrier,
                                                         refusals, sent):
-    port = carrier_port(refuse=[STOP_LINE] * refusals)
+    port = usb_carrier(refuse=[STOP_LINE] * refusals)
     monkeypatch.setattr(mks_setup, 'open_bus',
                         lambda *args: SlcanBus('/dev/fake', 500000, open_port=lambda: port))
     monkeypatch.setattr(mks_setup, 'wait_for_carrier', lambda bus: True)
     if sent:
         mks_setup.main(['--channel', '/dev/fake', 'stop'])
-        assert 'Sent the emergency stop' in capsys.readouterr().out
+        assert 'The carrier took the emergency stop' in capsys.readouterr().out
     else:
         with pytest.raises(SystemExit, match='did not go out'):
             mks_setup.main(['--channel', '/dev/fake', 'stop'])
     assert b''.join(port.writes).count(STOP_LINE) == min(refusals + 1, 5)
+
+
+def test_stop_fails_when_the_carrier_is_unplugged(monkeypatch, usb_carrier):
+    port = usb_carrier()
+    monkeypatch.setattr(mks_setup, 'open_bus',
+                        lambda *args: SlcanBus('/dev/fake', 500000, open_port=lambda: port))
+    # The carrier booted, then its USB link failed before the stop.
+    monkeypatch.setattr(mks_setup, 'wait_for_carrier',
+                        lambda bus: setattr(port, 'broken', True) or True)
+    with pytest.raises(SystemExit, match='did not go out'):
+        mks_setup.main(['--channel', '/dev/fake', 'stop'])
