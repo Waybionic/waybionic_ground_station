@@ -139,6 +139,20 @@ def test_a_carrier_that_went_quiet_is_opened_again(bus, ports, clock):
     assert ports[0].writes[-1] == b'C\rS8\rO\r'
 
 
+def test_a_carrier_that_stops_answering_lines_is_opened_again(bus, ports, clock):
+    # Its status frames keep coming, but no line written gets its answer.
+    for _ in range(slcan_bus.MAX_PENDING):
+        bus.send(1, mks_can.read_encoder(1))
+    ports[0].inbox += b't7F080005000000000000\r'
+    bus.receive()
+    assert not bus.connected and 'stopped answering' in bus.problem and ports[0].closed
+    # Nothing is left to match a late answer to, so no frame is wrongly called refused.
+    assert bus.unanswered == 0 and bus.take_refused() == []
+    clock[0] += slcan_bus.REOPEN_EVERY_S
+    bus.step(0.0)
+    assert bus.connected and ports[1].writes == [b'C\rS8\rO\r']
+
+
 def test_the_carrier_status_frame_decodes():
     status = carrier.parse_status(bytes.fromhex('0707' + '5DC0' + '0002' + '0304'))
     assert status == {'sequence': 7, 'estop': 'pressed', 'supply_v': 24.0, 'can_errors': 2,

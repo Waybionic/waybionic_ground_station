@@ -26,7 +26,8 @@ REOPEN_EVERY_S = 1.0
 # The carrier sends its status ten times a second while open, so this much quiet means it is
 # closed: it reset, or it was still booting when the port opened.
 SILENCE_S = 1.0
-# Lines still waiting for an answer; past this the carrier is not answering empty lines.
+# Lines still waiting for an answer. The carrier answers within a millisecond or two, so this
+# many means it stopped answering, and later answers could no longer be matched to their lines.
 MAX_PENDING = 256
 BELL = 0x07
 CR = 0x0D
@@ -57,7 +58,7 @@ class SlcanBus:
         self.problem = ''
         self.outgoing, self.incoming, self.replies = bytearray(), bytearray(), deque()
         # Lines queued, then written but unanswered: a frame's (can_id, data) or a command.
-        self.queued, self.pending = [], deque(maxlen=MAX_PENDING)
+        self.queued, self.pending = [], deque()
         self.refusals, self.bell = [], False
         self.heard = self.next_try = 0.0
         # A missing adapter at start-up is a configuration error, so let it raise.
@@ -67,6 +68,11 @@ class SlcanBus:
     @property
     def connected(self):
         return self.serial is not None
+
+    @property
+    def unanswered(self):
+        """Return how many lines, queued or written, the carrier has not answered yet."""
+        return len(self.queued) + len(self.pending)
 
     def send(self, can_id, data):
         """Queue a frame for the next write; return False while the carrier is unplugged."""
@@ -142,6 +148,9 @@ class SlcanBus:
         self.outgoing.clear()
         self.pending.extend(self.queued)
         self.queued.clear()
+        if len(self.pending) > MAX_PENDING:
+            # Start again rather than pin a later answer, such as a refusal, on the wrong line.
+            self._lost('the carrier stopped answering its lines')
 
     def _read(self):
         if self.serial is None:

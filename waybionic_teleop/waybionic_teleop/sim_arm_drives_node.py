@@ -42,6 +42,8 @@ REPLY_TIMEOUT_S = 0.5
 CARRIER_TIMEOUT_S = 0.5
 # Zeroing waits for the joint commands to stop, so teleop must be disabled first.
 QUIET_BEFORE_ZERO_S = 1.0
+# How long closing waits for the carrier to take the last stops.
+CLOSE_TIMEOUT_S = 0.5
 # Every drive must confirm these before it moves, so none runs without its heartbeat stop.
 SETUP = (mks_can.SET_MODE, mks_can.SET_RESPONSE, mks_can.ENABLE, mks_can.SET_HEARTBEAT)
 # F5 replies of a drive that no longer follows its targets: run failed, as when stall
@@ -608,6 +610,15 @@ class SimArmDrives(Node):
     def close(self):
         """Stop the drives and release the bus; the drives' heartbeat would also stop them."""
         self.stop_all('Shutting down')
+        if self.interface == 'slcan':
+            # The carrier may refuse a stop after send() returned True, and no later tick would
+            # send it again, so wait for its answers and repeat refused stops before closing.
+            deadline = time.monotonic() + CLOSE_TIMEOUT_S
+            while (self.bus.connected and (self.stopping or self.bus.unanswered)
+                   and time.monotonic() < deadline):
+                time.sleep(0.002)
+                self.drain(time.monotonic())
+                self.send_stops()
         self.bus.shutdown()
 
 
