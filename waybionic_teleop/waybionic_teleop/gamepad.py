@@ -16,6 +16,9 @@ MAGIC = b'WBJY'
 VERSION = 1
 _PACKET = struct.Struct(f'<4sBBxxI{len(AXES)}fI')
 PACKET_SIZE = _PACKET.size
+# Sent back to the host bridge to rumble the controller; intensity 0 stops it.
+RUMBLE_MAGIC = b'WBRM'
+_RUMBLE = struct.Struct('<4sB3xf')
 
 
 def pack(sequence, axes, buttons, connected=True):
@@ -38,3 +41,18 @@ def unpack(data):
     if mask >> len(BUTTONS):
         raise ValueError('unknown button bits')
     return sequence, bool(flags), axes, [(mask >> index) & 1 for index in range(len(BUTTONS))]
+
+
+def pack_rumble(intensity):
+    """Encode a rumble request between 0 (off) and 1 (full)."""
+    return _RUMBLE.pack(RUMBLE_MAGIC, VERSION, min(max(float(intensity), 0.0), 1.0))
+
+
+def unpack_rumble(data):
+    """Return the intensity of a rumble request; raise ValueError for anything else."""
+    if len(data) != _RUMBLE.size:
+        raise ValueError(f'expected {_RUMBLE.size} bytes, got {len(data)}')
+    magic, version, intensity = _RUMBLE.unpack(data)
+    if magic != RUMBLE_MAGIC or version != VERSION or not 0.0 <= intensity <= 1.0:
+        raise ValueError('not a version 1 WayBionic rumble request')
+    return intensity
