@@ -19,7 +19,7 @@ setup(
     maintainer='Yassin Soliman',
     maintainer_email='solimanyassin@gmail.com',
     description=(
-        'Xbox controller teleoperation and MKS CAN joint drives, simulated or real, for the '
+        'Controller teleoperation and MKS CAN joint drives, simulated or real, for the '
         'WayBionic arm.'
     ),
     license='Apache-2.0',

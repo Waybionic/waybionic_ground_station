@@ -95,6 +95,19 @@ def test_f5_stop_is_immediate_and_a_new_negative_target_rearms_the_drive():
     assert servo.target == -0x4000 and servo.rpm < 0.0 and servo.axis < held
 
 
+def test_f7_emergency_stop_is_immediate():
+    servo = ready_servo()
+    servo.receive(mks_can.absolute_axis(1, 0x4000, 300, 0))
+    run(servo, 0.05)
+    held = servo.axis
+    assert servo.rpm > 0.0
+    assert servo.receive(mks_can.emergency_stop(1)) == [
+        mks_can.frame(1, mks_can.EMERGENCY_STOP, [1])]
+    assert servo.enabled and servo.target is None and servo.rpm == 0.0
+    run(servo, 0.4)
+    assert servo.axis == held
+
+
 def test_bus_routes_replies_and_counts_bad_frames():
     bus = SimulatedBus([SimulatedServo(1), SimulatedServo(2)], 500000)
     bus.send(2, mks_can.read_encoder(2))

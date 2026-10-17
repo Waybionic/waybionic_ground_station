@@ -292,9 +292,9 @@ Qt may report a default `XDG_RUNTIME_DIR`, and RViz may report that stereo is no
 supported; neither prevented this demo from starting. On Ctrl+C, the joint GUI
 can report exit code `-2`, indicating the requested SIGINT interruption.
 
-## Xbox Controller (Simulated Arm)
+## Xbox and PS5 Controllers (Simulated Arm)
 
-`teleop:=true` drives the arm with an Xbox controller through simulated CAN drives;
+`teleop:=true` drives the arm with a controller through simulated CAN drives;
 nothing is sent to hardware unless you choose a drive bus, as described in
 [Real arm](#real-arm-mks-drives-over-can). The controller mapping is in
 `waybionic_teleop/config/xbox_teleop.yaml`, and the joint-to-drive map (MKS
@@ -318,6 +318,36 @@ python -m waybionic_teleop.xinput_bridge
 
 The bridge sends the controller state to the container on `127.0.0.1:47300/udp`.
 Press **Ctrl+C** in each window to stop.
+
+**PS5 DualSense on Windows:** pair the controller in Windows Bluetooth settings or
+connect it by USB, then use the same `wslg-teleop` command above. In the second
+PowerShell window, use Python 3.13 or older, install Pygame once, and start the SDL
+bridge:
+
+```powershell
+python -m pip install pygame==2.6.1
+cd waybionic_teleop
+python -m waybionic_teleop.sdl_bridge
+```
+
+To enable Bluetooth rumble, restart the bridge with:
+
+```powershell
+python -m waybionic_teleop.sdl_bridge --bluetooth-rumble
+```
+
+This opt-in uses SDL extended reports. It can temporarily stop non-SDL
+DirectInput apps from using the controller; power-cycle the controller to restore
+normal DirectInput behavior. USB rumble does not need this option.
+
+Run only one Windows bridge at a time; the
+[self-running demo](#self-running-demo) opens the Xbox bridge, so close its window
+before starting the SDL bridge. The SDL bridge uses the first recognized
+controller by default; use `--index 1` (or another SDL index) if multiple controllers
+are connected. It waits for all controls to be released when the controller first
+connects or reconnects. Windows must show the controller as connected, and the bridge
+must print `Controller ready` before Options can enable teleoperation. If Pygame
+cannot see the controller over Bluetooth, try USB and report which connection worked.
 
 **Linux (native ROS):** with the controller plugged in, run
 `ros2 launch waybionic_bringup ground_station.launch.py teleop:=true`.
@@ -351,6 +381,15 @@ Bluetooth controllers are not listed in `/dev/input/by-id`; connect the controll
 | D-pad up/down | Speed: 10, 25, 50 or 100% of 60 deg/s, or of 50 mm/s and 30 deg/s of tilt in the Cartesian and incision groups |
 | A (hold) | Return to the zero pose (not in the incision group) |
 
+On PS5 DualSense, **Options** replaces Start/Menu, **Circle** replaces B,
+**Triangle** replaces Y, **Cross** replaces A, and the left/right triggers are
+L2/R2. The sticks, D-pad, and shoulder buttons keep the same positions. After
+connecting, test each row above with those names, and check that the controller
+rumbles when a move stops at a limit. Turn the controller off while
+teleoperation is enabled: the arm should hold its pose and show disabled. After
+reconnecting, teleoperation must remain disabled until you release the controls
+and press Options again.
+
 Start is refused until the sticks are centred and the triggers and motion buttons released;
 after Y changes groups with motion held, the new group waits until the controls are neutral.
 Stick and trigger movement inside the 15% deadzone is ignored, so a trigger that does not
@@ -367,7 +406,7 @@ RViz label also turns red and names the cause, for example `STOPPED-joint_3` or
 `OUT-OF-REACH`. If the drives stop the arm while teleop is still enabled, for example after
 rejecting a target or losing encoder feedback, the label shows `DRIVES-STOPPED` and the
 drives' reason, and the controller rumbles once; press B, then Start, to continue. Rumble
-works with a controller plugged into the ground station and through the Windows bridge.
+works with a controller plugged into the ground station and through either Windows bridge.
 
 When the bridge reports that the controller disconnected, every control is released once,
 so the arm slows to a stop. After 0.5 s without controller input, teleop disables and holds
@@ -442,8 +481,8 @@ updating the controller. The bridge keeps sending the last state it read, so the
 controller cannot stop the arm, not even with B. Press **Ctrl+C** in the bridge
 window; with no controller input, teleop disables and holds the arm after the
 0.5 s input timeout. Turn the controller off and on (or unplug and replug it),
-start the bridge again and press Start. Real drives need a stop that does not
-depend on the controller.
+start the bridge again and press Start/Options. Real drives need a stop that does
+not depend on the controller.
 
 ### Self-Running Demo
 

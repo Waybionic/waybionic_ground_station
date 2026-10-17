@@ -31,6 +31,10 @@ CAMERA_PATH = (Path(__file__).resolve().parents[2] / 'waybionic_bringup'
 _camera_spec = importlib.util.spec_from_file_location('waybionic_camera_shutdown', CAMERA_PATH)
 camera_module = importlib.util.module_from_spec(_camera_spec)
 _camera_spec.loader.exec_module(camera_module)
+_demo_spec = importlib.util.spec_from_file_location(
+    'waybionic_joint_demo_shutdown', CAMERA_PATH.with_name('joint_demo.py'))
+joint_demo_module = importlib.util.module_from_spec(_demo_spec)
+_demo_spec.loader.exec_module(joint_demo_module)
 
 POSE = {'joint_1': 0.8, 'joint_2': -0.8, 'joint_3': 0.8,
         'joint_4': 0.8, 'joint_5': 0.25, 'tool_grip': 0.8}
@@ -45,6 +49,7 @@ SHUTDOWN_NODES = [
     (sim_arm_drives_node, 'SimArmDrives'),
     (joy_udp_receiver, 'JoyUdpReceiver'),
     (camera_module, 'CameraFollower'),
+    (joint_demo_module, 'JointDemo'),
 ]
 
 
@@ -712,6 +717,30 @@ def test_binding_error_only_ignored_after_context_shutdown(module, class_name, m
     monkeypatch.setattr(module.rclpy, 'ok', lambda: True)
     spin.side_effect = error
     with pytest.raises(RuntimeError, match='Unable to convert call argument'):
+        module.main()
+    assert spin.call_count == 3
+    assert factory.return_value.destroy_node.call_count == 3
+
+
+@pytest.mark.parametrize('module, class_name', [
+    (camera_module, 'CameraFollower'), (joint_demo_module, 'JointDemo')])
+def test_tf_time_error_only_ignored_after_context_shutdown(module, class_name, monkeypatch):
+    factory = MagicMock()
+    error = TypeError('time must have sec and nanosec, or nanoseconds.')
+    spin = MagicMock(side_effect=error)
+    monkeypatch.setattr(module, class_name, factory)
+    monkeypatch.setattr(module.rclpy, 'init', MagicMock())
+    monkeypatch.setattr(module.rclpy, 'try_shutdown', MagicMock())
+    monkeypatch.setattr(module.rclpy, 'spin', spin)
+    monkeypatch.setattr(module.rclpy, 'ok', lambda: False)
+    module.main()
+
+    spin.side_effect = TypeError('unrelated type error')
+    with pytest.raises(TypeError, match='unrelated type error'):
+        module.main()
+    monkeypatch.setattr(module.rclpy, 'ok', lambda: True)
+    spin.side_effect = error
+    with pytest.raises(TypeError, match='time must have sec and nanosec'):
         module.main()
     assert spin.call_count == 3
     assert factory.return_value.destroy_node.call_count == 3

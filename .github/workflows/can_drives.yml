@@ -3,9 +3,9 @@ name: CAN Drives over vcan
 on:
   push:
     branches: [ "main" ]
-    paths: [ "waybionic_teleop/**", "docker/**", ".github/workflows/can_drives.yml" ]
+    paths: [ "waybionic_can/**", "waybionic_teleop/**", "docker/**", ".github/workflows/can_drives.yml" ]
   pull_request:
-    paths: [ "waybionic_teleop/**", "docker/**", ".github/workflows/can_drives.yml" ]
+    paths: [ "waybionic_can/**", "waybionic_teleop/**", "docker/**", ".github/workflows/can_drives.yml" ]
 
 permissions:
   contents: read
@@ -35,3 +35,10 @@ jobs:
           docker run --rm --network host --env WAYBIONIC_CAN_TEST=socketcan:vcan0
           waybionic-can-drives python3 -m pytest -v -p no:cacheprovider
           src/waybionic_ground_station/waybionic_teleop/test/test_can_drives.py
+
+      # --gtest_fail_if_skipped turns a missing vcan0 into a red job instead of 11 silent skips.
+      - name: Run the four-node vcan integration test
+        run: >
+          docker run --rm --network host waybionic-can-drives
+          /waybionic_ws/build/waybionic_can/test_vcan_four_node
+          --gtest_fail_if_skipped
