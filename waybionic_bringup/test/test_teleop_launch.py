@@ -15,6 +15,7 @@ import launch_testing.actions
 import pytest
 import rclpy
 from sensor_msgs.msg import JointState
+from visualization_msgs.msg import Marker, MarkerArray
 
 from waybionic_teleop import gamepad, mks_can
 
@@ -44,10 +45,14 @@ class TestTeleop(unittest.TestCase):
     def test_controller_moves_the_arm(self):
         rclpy.init()
         node = rclpy.create_node('teleop_test')
-        joints, diagnostics = {}, {}
+        joints, diagnostics, markers = {}, {}, {}
         node.create_subscription(
             JointState, '/joint_states',
             lambda message: joints.update(zip(message.name, message.position)), 10)
+        node.create_subscription(
+            MarkerArray, '/waybionic/teleop/markers',
+            lambda message: markers.update(
+                ((part.ns, part.id), part) for part in message.markers), 10)
         node.create_subscription(
             DiagnosticArray, '/diagnostics',
             lambda message: diagnostics.update(
@@ -71,18 +76,28 @@ class TestTeleop(unittest.TestCase):
             # Start, not a model) have the robot description and teleop receives the controller,
             # or the press is lost on a slow machine.
             while time.monotonic() < deadline and not (
-                    'tool_grip' in joints and 'teleop.group' in diagnostics
+                    {'joint_1', 'left_claw', 'right_claw'} <= set(joints)
+                    and 'teleop.group' in diagnostics
                     and diagnostics['teleop.input'].level == DiagnosticStatus.OK
                     and 'arm.command_gate' in diagnostics
                     and diagnostics['arm.command_gate'].level == DiagnosticStatus.WARN):
                 hold(0.1)
-            self.assertIn('tool_grip', joints, 'the simulated drives never reported positions')
+            self.assertIn('right_claw', joints, 'tool motors never reported positions')
             self.assertIn('teleop.group', diagnostics, 'teleop never loaded the robot description')
             self.assertEqual(diagnostics['teleop.input'].level, DiagnosticStatus.OK,
                              'teleop never received the controller packets')
             self.assertEqual(diagnostics['arm.command_gate'].level, DiagnosticStatus.WARN,
                              'the drives never loaded the robot description')
             hold(1.0, left_x=1.0)
+            hold(0.2)
+            self.assertEqual({key for key in markers if key[0] == 'tool_static'},
+                             {('tool_static', 0)})
+            self.assertEqual({key for key in markers if key[0] == 'tool'},
+                             {('tool', 0), ('tool', 1)})
+            self.assertEqual(markers['tool', 0].type, Marker.MESH_RESOURCE)
+            self.assertIn('assembly_static.stl', markers['tool_static', 0].mesh_resource)
+            self.assertIn('assembly_left_claw.stl', markers['tool', 0].mesh_resource)
+            open_left_rotation = markers['tool', 0].pose.orientation.x
             self.assertAlmostEqual(joints['joint_1'], 0.0, places=3, msg='moved while disabled')
             hold(0.2, 'start')
             hold(1.0, left_x=1.0)
@@ -92,14 +107,28 @@ class TestTeleop(unittest.TestCase):
             hold(1.0, left_x=1.0, right_y=1.0)
             self.assertAlmostEqual(joints['joint_1'], yaw, places=2)
             self.assertGreater(joints['joint_4'], 0.2)
-            hold(0.8, right_trigger=-1.0)
-            self.assertGreater(joints['tool_grip'], 0.3)
+            hold(1.5, right_trigger=-1.0)
+            self.assertGreater(joints['left_claw'], 0.2)
+            self.assertLess(abs(markers['tool', 0].pose.orientation.x),
+                            abs(open_left_rotation))
+            self.assertAlmostEqual(joints['right_claw'], 0.0, places=2)
+            hold(0.2, 'x')
+            hold(1.5, right_trigger=-1.0)
+            self.assertGreater(joints['right_claw'], 0.2)
+            left = joints['left_claw']
+            hold(0.2, 'x')
+            hold(1.0, right_trigger=-1.0)
+            self.assertGreater(joints['left_claw'], left + 0.1)
+            self.assertIn('tool.motor.left_1', diagnostics)
+            self.assertIn('tool.motor.left_2', diagnostics)
+            self.assertIn('tool.motor.right_1', diagnostics)
+            self.assertIn('tool.motor.right_2', diagnostics)
             hold(0.2, 'b')
             pitch = joints['joint_4']
             hold(0.75, right_y=1.0)
             self.assertAlmostEqual(joints['joint_4'], pitch, places=2, msg='moved after B')
             self.assertEqual(diagnostics['teleop.state'].values[0].value, 'disabled')
-            for drive in ('base_yaw', 'shoulder', 'elbow', 'wrist_left', 'wrist_right', 'tool'):
+            for drive in ('base_yaw', 'shoulder', 'elbow', 'wrist_left', 'wrist_right'):
                 values = {item.key: item.value for item in diagnostics[f'drive.{drive}'].values}
                 can_id = int(values['can_id'])
                 stop = mks_can.hex_frame(can_id, mks_can.absolute_axis(can_id, 0, 0, 0))

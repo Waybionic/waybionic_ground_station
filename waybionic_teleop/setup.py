@@ -31,6 +31,7 @@ setup(
             'mks_drive_sim = waybionic_teleop.mks_drive_sim:main',
             'mks_setup = waybionic_teleop.mks_setup:main',
             'autoplay = waybionic_teleop.autoplay_node:main',
+            'sim_tool_motors = waybionic_teleop.sim_tool_motors_node:main',
             'joy_udp_receiver = waybionic_teleop.joy_udp_receiver:main',
         ],
     },

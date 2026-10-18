@@ -75,13 +75,17 @@ class TestCartesian(unittest.TestCase):
 
         try:
             deadline = time.monotonic() + 30.0
-            # Press Start only once teleop has loaded the robot description (the group row
-            # appears) and receives the controller, or the press is lost on a slow machine.
+            # Wait for teleop, the controller, TF and the drive gate before Start.
+            # The tool simulator adds startup load, so TF alone is not readiness.
             while time.monotonic() < deadline and not (
                     'teleop.group' in diagnostics
                     and diagnostics['teleop.input'].level == DiagnosticStatus.OK
+                    and 'arm.command_gate' in diagnostics
+                    and diagnostics['arm.command_gate'].level == DiagnosticStatus.WARN
                     and buffer.can_transform('base_link', 'tool_link', Time())):
                 hold(0.1)
+            self.assertIn('arm.command_gate', diagnostics,
+                          'the arm drives did not become ready before Start')
             hold(0.2, 'start')
             hold(0.3, 'y')
             # Bend the shoulder, elbow and wrist away from the upright pose.

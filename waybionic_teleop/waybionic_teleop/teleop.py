@@ -5,7 +5,8 @@ import math
 
 from waybionic_teleop.gamepad import AXIS, BUTTON
 
-ACTIONS = ('enable', 'stop', 'group', 'home', 'faster', 'slower', 'lock', 'tilt_up', 'tilt_down')
+ACTIONS = ('enable', 'stop', 'group', 'home', 'faster', 'slower', 'lock',
+           'tilt_up', 'tilt_down', 'tool_mode')
 CARTESIAN_AXES = ('x', 'y', 'z', 'roll')
 INCISION_AXES = ('insert', 'pivot', 'roll')
 MOVES = {'cartesian': CARTESIAN_AXES, 'incision': INCISION_AXES}
@@ -45,7 +46,7 @@ class TeleopConfig:
 
     groups: list
     buttons: dict
-    tool_joint: str
+    tool_joints: list
     tool_limits: tuple
     tool_speed: float
     tool_close_axis: str
@@ -75,7 +76,7 @@ def config_from_parameters(params):
         config = TeleopConfig(
             groups=groups,
             buttons={action: params[f'{action}_button'] for action in ACTIONS},
-            tool_joint=params['tool_joint'],
+            tool_joints=list(params['tool_joints']),
             tool_limits=tuple(float(value) for value in params['tool_limits']),
             tool_speed=float(params['tool_speed']),
             tool_close_axis=params['tool_close_axis'],
@@ -129,6 +130,8 @@ def check_config(config):
         raise ValueError('initial_speed_level or deadzone out of range')
     if len(config.tool_limits) != 2 or not config.tool_limits[0] < config.tool_limits[1]:
         raise ValueError('tool_limits must be [open, closed] with open < closed')
+    if len(config.tool_joints) != 2 or len(set(config.tool_joints)) != 2:
+        raise ValueError('tool_joints must name two different claws')
 
 
 class ArmTeleop:
@@ -152,7 +155,13 @@ class ArmTeleop:
                 raise ValueError(
                     f'{group.mode.capitalize()} group {group.name} does not match the URDF chain')
         self.limits = dict(limits)
-        self.limits[config.tool_joint] = config.tool_limits
+        for joint in config.tool_joints:
+            if joint in self.limits:
+                raise ValueError(f'tool joint {joint} overlaps an arm joint')
+            self.limits[joint] = config.tool_limits
+        self.tool_mode = 0
+        self.tool_modes = [(config.tool_joints[0],), (config.tool_joints[1],),
+                           tuple(config.tool_joints)]
         self.enabled = False
         self.group = 0
         self.level = config.speed_level
@@ -198,6 +207,14 @@ class ArmTeleop:
             return True
         if 'enable' in pressed:
             self.enable(measured, axes)
+        if 'tool_mode' in pressed:
+            triggers = (self.trigger(axes, self.config.tool_close_axis),
+                        self.trigger(axes, self.config.tool_open_axis))
+            if max(triggers) <= self.config.deadzone:
+                self.tool_mode = (self.tool_mode + 1) % len(self.tool_modes)
+            else:
+                self.note = 'Release both triggers before switching claws'
+                self.warning = True
         if 'group' in pressed:
             self.change_group()
         if 'faster' in pressed:
@@ -240,7 +257,8 @@ class ArmTeleop:
     def motion_input_held(self, axes):
         config = self.config
         sticks = {axis for group in config.groups for axis in group.axes}
-        buttons = {config.buttons[action] for action in ('home', 'tilt_up', 'tilt_down')}
+        buttons = {config.buttons[action] for action in
+                   ('home', 'tilt_up', 'tilt_down', 'tool_mode')}
         return (any(self.stick(axes, axis) for axis in sticks)
                 or any(self.trigger(axes, axis)
                        for axis in (config.tool_close_axis, config.tool_open_axis))
@@ -290,25 +308,28 @@ class ArmTeleop:
         if homing and not incision:
             self.stop_cartesian()
             for joint, (lower, upper) in self.limits.items():
-                if joint != config.tool_joint:
+                if joint not in config.tool_joints:
                     error = clamp(0.0, lower, upper) - self.targets[joint]
                     desired[joint] = clamp(config.home_gain * error, -self.speed, self.speed)
         elif self.active_group.mode == 'cartesian':
             self.jog(axes, dt)
-            desired = {config.tool_joint: 0.0}
+            desired = dict.fromkeys(config.tool_joints, 0.0)
         elif incision:
             self.incise(axes, dt)
-            desired = {config.tool_joint: 0.0}
+            desired = dict.fromkeys(config.tool_joints, 0.0)
         else:
             group = self.active_group
             for joint, axis, scale in zip(group.joints, group.axes, group.scales):
                 desired[joint] += scale * self.stick(axes, axis) * self.speed
-        desired[config.tool_joint] = config.tool_speed * (
-            self.trigger(axes, config.tool_close_axis) - self.trigger(axes, config.tool_open_axis))
+        tool_rate = config.tool_speed * (
+            self.trigger(axes, config.tool_close_axis)
+            - self.trigger(axes, config.tool_open_axis))
+        for joint in config.tool_joints:
+            desired[joint] = tool_rate if joint in self.tool_modes[self.tool_mode] else 0.0
         step = config.max_accel * dt
         for joint, goal in desired.items():
             velocity = self.velocities[joint]
-            if joint == config.tool_joint:
+            if joint in config.tool_joints:
                 velocity = goal
             else:
                 velocity += clamp(goal - velocity, -step, step)
@@ -342,7 +363,7 @@ class ArmTeleop:
         if not worse:
             return
         for joint, position in before.items():
-            if joint != self.config.tool_joint:
+            if joint not in self.config.tool_joints:
                 # Revert the published lookahead too, so no command continues into the contact.
                 self.targets[joint] = self.command_targets[joint] = position
                 self.velocities[joint] = 0.0

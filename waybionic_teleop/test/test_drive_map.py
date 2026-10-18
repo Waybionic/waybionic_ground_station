@@ -16,14 +16,14 @@ def arm_map(parameters):
 
 
 def test_the_map_covers_every_arm_joint_with_the_cad_gear_ratios(arm_map):
-    assert arm_map.joints == ['joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5', 'tool_grip']
-    assert [drive.can_id for drive in arm_map.drives] == [1, 2, 3, 4, 5, 6]
+    assert arm_map.joints == ['joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5']
+    assert [drive.can_id for drive in arm_map.drives] == [1, 2, 3, 4, 5]
     # 26:1 cycloidal reducers on the base, shoulder and elbow; 3:1 belts on the wrist motors.
-    assert [drive.gear_ratio for drive in arm_map.drives] == [26.0, 26.0, 26.0, 3.0, 3.0, 1.0]
+    assert [drive.gear_ratio for drive in arm_map.drives] == [26.0, 26.0, 26.0, 3.0, 3.0]
 
 
 def test_positions_round_trip_through_counts(arm_map):
-    positions = dict(zip(arm_map.joints, [0.5, -1.2, 0.3, 0.7, -0.4, 0.8]))
+    positions = dict(zip(arm_map.joints, [0.5, -1.2, 0.3, 0.7, -0.4]))
     decoded = arm_map.to_positions(arm_map.to_counts(positions))
     assert all(abs(decoded[joint] - positions[joint]) <= 2 * math.pi / COUNTS
                for joint in positions)

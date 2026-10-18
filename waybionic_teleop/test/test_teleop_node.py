@@ -83,6 +83,7 @@ def test_description_reload_stops_a_moving_drive(
         node.publish_enabled(False)
         spin_until(lambda: not drives.awaiting_release, 'the drive never saw Start released')
         node.measured.update(drives.map.to_positions(drives.counts))
+        node.measured.update({'left_claw': 0.0, 'right_claw': 0.0})
         node.teleop.enable(node.measured, [0.0] * 8)
         assert node.teleop.enabled
         node.publish_enabled(True)
