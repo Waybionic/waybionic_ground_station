@@ -6,7 +6,7 @@
 	- The FPS may not be as good as it is with the DSLR camera. When testing with my webcam and my external webcam (before it broke on me), I was getting an average FPS of 28-30.
 
 ## Five Minute Experiment Results
-- Taking a picture of the timer and the doctor view, there is a 0.50ms difference. While it is on the higher end of latency, it is still within the necessary requirements.
+- Taking a picture of the timer and the doctor view, there is a 0.68ms difference. This high latency could be the result of the external webcam application I had to use with my camera.
 - The minimum camera delay was 3.05ms 
 - The maximum camera delay was 66.37ms
 - The average camera delay was 21.62ms
