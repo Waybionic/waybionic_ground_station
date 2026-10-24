@@ -777,14 +777,50 @@ def test_all_healthy_simulated_drive_rows_report_ok(node, monkeypatch):
     node.report()
 
     rows = {item.name: item for item in published[-1].status
-            if item.name.startswith('drive.')}
+            if item.name.startswith('drive.') and item.name != 'drive.summary'}
     assert set(rows) == {f'drive.{drive.name}' for drive in node.map.drives}
+    assert sum(item.name == 'drive.summary' for item in published[-1].status) == 1
     for row in rows.values():
         values = {value.key: value.value for value in row.values}
         assert row.level == DiagnosticStatus.OK
         assert values['state'] == DriveHealthState.OK.value
         assert 'target_encoder_error_deg' in values
         assert 'reply_age_sec' in values
+    summary = next(item for item in published[-1].status
+                   if item.name == 'drive.summary')
+    values = {value.key: value.value for value in summary.values}
+    assert summary.level == DiagnosticStatus.OK
+    assert values['state'] == DriveHealthState.OK.value
+    assert values['drive'] == 'all'
+
+
+def test_drive_summary_selects_worst_state_and_first_drive_in_configured_order(
+        node, monkeypatch):
+    ready(node)
+    drive_states = [
+        DriveHealthState.FOLLOWING_ERROR,
+        DriveHealthState.NOT_RESPONDING,
+        DriveHealthState.DISABLED,
+        DriveHealthState.STALLED,
+        DriveHealthState.OK,
+        DriveHealthState.OK,
+    ]
+    node.drive_health_monitors = [
+        MagicMock(evaluate=MagicMock(return_value=health_state))
+        for health_state in drive_states]
+    now = time.monotonic()
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: now)
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+
+    node.report()
+
+    summary = next(item for item in published[-1].status
+                   if item.name == 'drive.summary')
+    values = {value.key: value.value for value in summary.values}
+    assert summary.level == DiagnosticStatus.ERROR
+    assert values['state'] == DriveHealthState.DISABLED.value
+    assert values['drive'] == node.map.drives[2].name
 
 
 def test_following_error_is_reported_and_clears_on_a_current_pose_command(node, monkeypatch):
@@ -807,6 +843,11 @@ def test_following_error_is_reported_and_clears_on_a_current_pose_command(node, 
     assert values['state'] == DriveHealthState.FOLLOWING_ERROR.value
     assert float(values['target_encoder_error_deg']) == pytest.approx(6.0, abs=0.01)
     assert float(values['reply_age_sec']) == pytest.approx(0.1)
+    summary = next(item for item in published[-1].status
+                   if item.name == 'drive.summary')
+    summary_values = {value.key: value.value for value in summary.values}
+    assert summary_values['state'] == DriveHealthState.FOLLOWING_ERROR.value
+    assert summary_values['drive'] == 'base_yaw'
     assert clock[0] - now <= REPORT_PERIOD_S
 
     measured = node.map.to_positions(node.counts)
@@ -819,6 +860,11 @@ def test_following_error_is_reported_and_clears_on_a_current_pose_command(node, 
     values = {value.key: value.value for value in row.values}
     assert row.level == DiagnosticStatus.OK
     assert values['state'] == DriveHealthState.OK.value
+    summary = next(item for item in published[-1].status
+                   if item.name == 'drive.summary')
+    summary_values = {value.key: value.value for value in summary.values}
+    assert summary.level == DiagnosticStatus.OK
+    assert summary_values['state'] == DriveHealthState.OK.value
 
 
 def test_stalled_simulated_drive_is_reported_within_detection_window_and_recovers(
@@ -863,6 +909,11 @@ def test_stalled_simulated_drive_is_reported_within_detection_window_and_recover
     assert float(stalled[0][3]['target_encoder_error_deg']) == pytest.approx(3.0, abs=0.01)
     assert float(stalled[0][3]['reply_age_sec']) <= REPORT_PERIOD_S
     assert servo.axis == pytest.approx(0.0)
+    summary = next(item for item in published[-1].status
+                   if item.name == 'drive.summary')
+    summary_values = {value.key: value.value for value in summary.values}
+    assert summary_values['state'] == DriveHealthState.STALLED.value
+    assert summary_values['drive'] == 'base_yaw'
 
     servo.set_test_fault()
     for _ in range(round(REPORT_PERIOD_S / node.period)):
@@ -876,6 +927,11 @@ def test_stalled_simulated_drive_is_reported_within_detection_window_and_recover
     values = {value.key: value.value for value in row.values}
     assert row.level == DiagnosticStatus.OK
     assert values['state'] == DriveHealthState.OK.value
+    summary = next(item for item in published[-1].status
+                   if item.name == 'drive.summary')
+    summary_values = {value.key: value.value for value in summary.values}
+    assert summary.level == DiagnosticStatus.OK
+    assert summary_values['state'] == DriveHealthState.OK.value
 
 
 def test_not_responding_simulated_drive_is_stale_within_one_report_period_and_recovers(
@@ -912,6 +968,12 @@ def test_not_responding_simulated_drive_is_stale_within_one_report_period_and_re
     assert 'target_encoder_error_deg' in values and 'reply_age_sec' in values
     assert (float(values['reply_age_sec'])
             > node.drive_health_monitors[0].thresholds.reply_timeout_seconds)
+    summary = next(item for item in published[-1].status
+                   if item.name == 'drive.summary')
+    summary_values = {value.key: value.value for value in summary.values}
+    assert summary.level == DiagnosticStatus.STALE
+    assert summary_values['state'] == DriveHealthState.NOT_RESPONDING.value
+    assert summary_values['drive'] == 'base_yaw'
 
     servo.set_test_fault(None)
     clock[0] += node.period
@@ -927,6 +989,11 @@ def test_not_responding_simulated_drive_is_stale_within_one_report_period_and_re
     values = {value.key: value.value for value in row.values}
     assert row.level == DiagnosticStatus.OK
     assert values['state'] == DriveHealthState.OK.value
+    summary = next(item for item in published[-1].status
+                   if item.name == 'drive.summary')
+    summary_values = {value.key: value.value for value in summary.values}
+    assert summary.level == DiagnosticStatus.OK
+    assert summary_values['state'] == DriveHealthState.OK.value
 
 
 def test_disabled_simulated_drive_reports_error_and_recovers(node, monkeypatch):
@@ -949,6 +1016,12 @@ def test_disabled_simulated_drive_reports_error_and_recovers(node, monkeypatch):
     assert values['state'] == DriveHealthState.DISABLED.value
     assert float(values['target_encoder_error_deg']) == pytest.approx(0.0, abs=0.01)
     assert float(values['reply_age_sec']) == pytest.approx(0.1)
+    summary = next(item for item in published[-1].status
+                   if item.name == 'drive.summary')
+    summary_values = {value.key: value.value for value in summary.values}
+    assert summary.level == DiagnosticStatus.ERROR
+    assert summary_values['state'] == DriveHealthState.DISABLED.value
+    assert summary_values['drive'] == 'base_yaw'
 
     servo.set_test_fault(None)
     node.set_up(0)
@@ -959,6 +1032,11 @@ def test_disabled_simulated_drive_reports_error_and_recovers(node, monkeypatch):
     values = {value.key: value.value for value in row.values}
     assert row.level == DiagnosticStatus.OK
     assert values['state'] == DriveHealthState.OK.value
+    summary = next(item for item in published[-1].status
+                   if item.name == 'drive.summary')
+    summary_values = {value.key: value.value for value in summary.values}
+    assert summary.level == DiagnosticStatus.OK
+    assert summary_values['state'] == DriveHealthState.OK.value
 
 
 def test_drive_health_requires_host_confirmation_of_enable_setup(node, monkeypatch):

@@ -635,6 +635,51 @@ class SimArmDrives(Node):
                 + (f'; last {self.last_command[index]}' if self.last_command[index] else ''),
                 can_id=drive.can_id, last_command=self.last_command[index],
                 **health_values))
+        health_priority = (
+            DriveHealthState.DISABLED,
+            DriveHealthState.NOT_RESPONDING,
+            DriveHealthState.FOLLOWING_ERROR,
+            DriveHealthState.STALLED,
+            DriveHealthState.OK,
+        )
+        available_health = [
+            (index, health_state)
+            for index, health_state in enumerate(self.drive_health_states)
+            if health_state is not None
+        ]
+        unavailable_drives = [
+            drive.name for drive, health_state in zip(
+                self.map.drives, self.drive_health_states)
+            if health_state is None
+        ]
+        if available_health:
+            priority = {health_state: index
+                        for index, health_state in enumerate(health_priority)}
+            index, health_state = min(
+                available_health, key=lambda item: priority[item[1]])
+            drive_name = self.map.drives[index].name
+            if health_state is DriveHealthState.OK and unavailable_drives:
+                statuses.append(status(
+                    'drive.summary', DiagnosticStatus.WARN, '', '',
+                    'Drive health unavailable for: ' + ', '.join(unavailable_drives)))
+            else:
+                health_level = (
+                    DiagnosticStatus.OK if health_state is DriveHealthState.OK else
+                    DiagnosticStatus.STALE
+                    if health_state is DriveHealthState.NOT_RESPONDING else
+                    DiagnosticStatus.ERROR)
+                message = ('All drives healthy' if health_state is DriveHealthState.OK else
+                           f'Worst drive health: {health_state.value} ({drive_name})')
+                if unavailable_drives:
+                    message += '; health unavailable for: ' + ', '.join(unavailable_drives)
+                statuses.append(status(
+                    'drive.summary', health_level, health_state.value, '',
+                    message, state=health_state.value,
+                    drive='all' if health_state is DriveHealthState.OK else drive_name))
+        else:
+            statuses.append(status(
+                'drive.summary', DiagnosticStatus.WARN, '', '',
+                'Drive health unavailable for: ' + ', '.join(unavailable_drives)))
         message = DiagnosticArray(status=statuses)
         message.header.stamp = self.get_clock().now().to_msg()
         self.diagnostics_publisher.publish(message)
