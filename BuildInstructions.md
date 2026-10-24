@@ -86,12 +86,14 @@ docker compose --progress plain build test
 ```
 
 This builds every package inside the container and runs all of the tests. A
-failing test fails the build. The first build downloads ROS and takes about 20
-minutes; later builds reuse what was downloaded and take a few minutes.
+failing test fails the build. The first build downloads ROS, so its time depends
+mostly on your network (about 5 minutes on a fast connection). Later builds reuse
+the download and take a few minutes.
 
 **Expected result:** near the end, `Summary: ... 0 errors, 0 failures` and the
 build finishes without an error. The 11 CAN tests that need a Linux `vcan`
-interface are skipped here; CI runs them separately.
+interface are skipped here; CI runs them separately. A cache error near the start
+is harmless; see [Messages you can ignore](#messages-you-can-ignore).
 
 The image holds a copy of the source, so build again after you change files.
 
@@ -448,12 +450,15 @@ found, run Docker by its full path, for example:
 
 A build that reports `docker-credential-desktop` not found has the same cause.
 
-### The build prints `failed to configure registry cache importer`
+### Messages you can ignore
 
-Near the start of a build, Docker may print
-`ERROR: failed to configure registry cache importer ... 401 Unauthorized`. It's
-harmless: Docker couldn't read the shared image cache, so it builds everything on
-your computer instead.
+- `ERROR importing cache manifest from ghcr.io/waybionic/...` or
+  `failed to configure registry cache importer ... 401 Unauthorized` near the start
+  of a build. Docker couldn't read the shared image cache, so it builds everything
+  on your computer instead.
+- `XDG_RUNTIME_DIR not set` and `Stereo is NOT SUPPORTED` when RViz starts.
+- After Ctrl+C, the joint window exiting with code `-2`, and Docker suggesting you
+  debug a Compose error.
 
 ### RViz does not open or is black on Windows
 
@@ -468,8 +473,6 @@ your computer instead.
 
 - If Docker reports that the WSLg display socket is missing, restart Docker
   Desktop and WSL (`wsl --shutdown`) rather than creating the folder yourself.
-- Messages about `XDG_RUNTIME_DIR` or stereo not being supported are harmless, and
-  on Ctrl+C the joint window may exit with code `-2`.
 
 ### The Linux GUI script reports a missing display or cookie
 
@@ -491,7 +494,8 @@ image tagged with the commit's short hash, and also as
 newest on main. Pull requests build with read-only tokens and don't publish.
 
 Local builds reuse that image's layers when they can read it. While the GHCR
-package is private, builds print the cache warning above, and running main
+package is private, builds print the cache error listed under
+[Messages you can ignore](#messages-you-can-ignore), and running main
 without building needs `docker login ghcr.io`. To run main's image instead of
 building:
 
