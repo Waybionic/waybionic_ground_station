@@ -14,5 +14,9 @@
 - The average jitter was 10.11ms for capture jitter and 12.05ms for recieving jitter.
 
 ## Disconnect/Reconnect Behaviour
-- Doctor view freezes** not done
+- Doctor view went black and stopped sending frames. There was a camera warning in the alert section.
+	- The camera bridge in the terminal showed a message saying "Ground Station disconnected; retrying"
+- On reconnect, the camera simply came back to the doctor view and resumed as if nothing happened.
+	- The camera bridge in the terminal showed a message saying "Connected to ground"
+ - The latency monitor picks up on negative frames, missing and stale frames and shows it in the alert section.
 
