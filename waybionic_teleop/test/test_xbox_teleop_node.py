@@ -224,6 +224,29 @@ def test_a_stick_wavering_at_a_limit_rumbles_at_most_once_a_second(node, monkeyp
     assert rumbles[-1][1] == 0.0
 
 
+def test_a_stop_at_the_keep_in_box_is_named_on_the_label_and_in_the_diagnostics(
+        node, monkeypatch):
+    rows = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', rows.append)
+    node.load(String(data=URDF))
+    # The tool points straight down, its tip 125 mm above the box's 50 mm floor.
+    pose = {**dict.fromkeys(node.teleop.limits, 0.0), 'joint_1': 0.1, 'joint_2': 0.5,
+            'joint_3': 1.4, 'joint_4': math.pi - 1.9}
+    node.on_joint_states(JointState(name=list(pose), position=list(pose.values())))
+    tick(node)
+    for button in ('start', 'y', 'y', 'dpad_up'):
+        tick(node, button)
+        tick(node)
+    assert node.teleop.enabled and node.teleop.active_group.name == 'cartesian'
+    for _ in range(400):
+        tick(node, right_y=-1.0)
+    assert node.teleop.blocked == ['keep_in']
+    assert node.summary(True).endswith('ENABLED\nSTOPPED-keep_in')
+    node.report()
+    state = next(row for row in rows[-1].status if row.name == 'teleop.state')
+    assert state.message == 'At limit: keep_in'
+
+
 def test_a_drive_stop_while_enabled_is_named_and_rumbles_once(node, monkeypatch, parameters):
     drives = SimArmDrives(context=node.context, parameter_overrides=[
         Parameter(name, value=value)
