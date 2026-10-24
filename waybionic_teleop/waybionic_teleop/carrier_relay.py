@@ -143,7 +143,12 @@ def serve(open_port, bind, tcp_port, stop, log=print):
                     stop.wait(REOPEN_EVERY_S)
                     continue
                 problem = None
-                server = socket.create_server((bind, tcp_port))
+                try:
+                    server = socket.create_server((bind, tcp_port))
+                except OSError as error:
+                    raise SystemExit(
+                        f'Port {tcp_port} is already in use ({error}).'
+                        'Another carrier bridge may still be running, close it first.') from None
                 server.settimeout(POLL_S)
                 log('Carrier open; waiting for the ground station')
             try:

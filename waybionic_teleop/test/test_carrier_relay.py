@@ -99,3 +99,14 @@ def test_no_connection_while_the_carrier_is_unplugged():
     finally:
         stop.set()
         thread.join(2.0)
+
+
+def test_port_in_use_exits_with_a_message():
+    taken = socket.create_server(('127.0.0.1', 0))
+    tcp_port = taken.getsockname()[1]
+    stop = threading.Event()
+    try:
+        with pytest.raises(SystemExit, match='already in use'):
+            carrier_relay.serve(loop_carrier, '127.0.0.1', tcp_port, stop, lambda message: None)
+    finally:
+        taken.close()
