@@ -132,6 +132,16 @@ def test_demo_and_teleop_are_rejected_together(context):
         MODULE.check_files_exist(context)
 
 
+@pytest.mark.parametrize('options, sliders', [
+    ({}, True), ({'teleop': 'true'}, False), ({'demo_mode': 'true'}, False),
+    ({'use_joint_state_publisher_gui': 'false'}, False)])
+def test_the_collision_guard_runs_whenever_the_sliders_do(context, options, sliders):
+    context.launch_configurations.update(options)
+    guard = next(action for action in nodes() if action.node_executable == 'joint_state_guard')
+    assert node('joint_state_publisher_gui').condition.evaluate(context) is sliders
+    assert guard.condition.evaluate(context) is sliders
+
+
 def test_diagnostics_disabled(context):
     context.launch_configurations.update({
         'use_diagnostics': 'false', 'start_temporary_diagnostics_publisher': 'true',

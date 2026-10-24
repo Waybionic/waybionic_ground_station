@@ -75,13 +75,18 @@ class TestCartesian(unittest.TestCase):
 
         try:
             deadline = time.monotonic() + 30.0
-            # Press Start only once teleop has loaded the robot description (the group row
-            # appears) and receives the controller, or the press is lost on a slow machine.
+            # Press Start only once teleop (the group row) and the drives (a gate waiting for
+            # Start, not a model) have the robot description and teleop receives the controller,
+            # or the press is lost on a slow machine.
             while time.monotonic() < deadline and not (
                     'teleop.group' in diagnostics
                     and diagnostics['teleop.input'].level == DiagnosticStatus.OK
+                    and 'arm.command_gate' in diagnostics
+                    and diagnostics['arm.command_gate'].level == DiagnosticStatus.WARN
                     and buffer.can_transform('base_link', 'tool_link', Time())):
                 hold(0.1)
+            self.assertEqual(diagnostics['arm.command_gate'].level, DiagnosticStatus.WARN,
+                             'the drives never loaded the robot description')
             hold(0.2, 'start')
             hold(0.3, 'y')
             # Bend the shoulder, elbow and wrist away from the upright pose.

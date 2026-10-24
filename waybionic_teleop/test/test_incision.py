@@ -10,17 +10,15 @@ from waybionic_teleop.gamepad import AXES, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
-LIMITS = {'joint_1': (-math.pi, math.pi), 'joint_2': (-1.5708, 1.5708),
-          'joint_3': (-1.5708, 1.5708), 'joint_4': (-1.5708, 1.5708),
-          'joint_5': (-1.5708, 1.5708)}
+URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
+        / 'waybionic_arm.urdf').read_text(encoding='utf-8')
+LIMITS = joint_limits(URDF, ['joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5'])
 # The tool leaning forward and down, about 45 degrees from vertical.
 LEANING = {'joint_1': 0.3, 'joint_2': 0.4, 'joint_3': 1.2, 'joint_4': 0.8, 'joint_5': 0.0,
            'tool_grip': 0.0}
 # The tool leaning forward and down, its tip about 60 mm above the table.
 NEAR_TABLE = {'joint_1': 0.2, 'joint_2': 0.87, 'joint_3': 1.5, 'joint_4': -0.17, 'joint_5': 0.0,
               'tool_grip': 0.0}
-URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
-        / 'waybionic_arm.urdf').read_text(encoding='utf-8')
 DT = 1.0 / 120.0
 
 
@@ -139,10 +137,11 @@ def test_roll_turns_the_tool_without_moving_it_off_the_incision(teleop, arm):
     assert arm.forward(teleop.targets)[1] == pytest.approx(pitch, abs=1e-9)
 
 
-@pytest.mark.parametrize('axes, joint', [
-    ({'left_y': -1.0}, 'joint_4'), ({'right_y': 1.0}, 'joint_3'), ({'right_y': -1.0}, 'joint_4')])
+@pytest.mark.parametrize('axes, joint, bound', [
+    ({'left_y': -1.0}, 'joint_4', 1), ({'right_y': 1.0}, 'joint_4', 0),
+    ({'right_y': -1.0}, 'joint_4', 1)])
 def test_moving_into_a_joint_limit_sends_targets_within_the_urdf_limits(
-        parameters, arm, axes, joint):
+        parameters, arm, axes, joint, bound):
     limits = joint_limits(URDF, arm.joints)
     params = {**parameters('xbox_teleop.yaml', 'xbox_teleop'), 'initial_speed_level': 3}
     teleop = ArmTeleop(config_from_parameters(params), limits, arm)
@@ -158,29 +157,30 @@ def test_moving_into_a_joint_limit_sends_targets_within_the_urdf_limits(
             break
     else:
         pytest.fail(f'{joint} never reached its limit')
-    assert teleop.targets[joint] == pytest.approx(limits[joint][1], abs=1e-6)
+    assert teleop.targets[joint] == pytest.approx(limits[joint][bound], abs=1e-6)
     assert through(arm, teleop.targets, teleop.incision)[0] < 1e-6
 
 
-@pytest.mark.parametrize('into, back, contact', [
-    ({'left_y': 1.0}, {'left_y': -1.0}, 'tool_link: table'),
-    ({'right_y': -1.0}, {'right_y': 1.0}, 'tool_link: table'),
-    ({'right_y': 1.0}, {'right_y': -1.0}, 'forearm_link: table'),
+@pytest.mark.parametrize('inserted, into, back, contact', [
+    (1.0, {'left_y': 1.0}, {'left_y': -1.0}, 'tool_link: table'),
+    (1.6, {'right_y': -1.0}, {'right_y': 1.0}, 'tool_link: table'),
+    (1.0, {'right_y': 1.0}, {'right_y': -1.0}, 'wrist_pitch_link: table'),
 ], ids=['insert', 'pivot_tool_down', 'pivot_forearm_down'])
 def test_an_incision_move_into_the_table_is_refused_but_backing_out_is_not(
-        parameters, arm, into, back, contact):
+        parameters, arm, inserted, into, back, contact):
     check = ArmCollision.from_urdf(URDF)
     teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
                        LIMITS, arm, check)
     for button in ('start', 'y', 'y', 'y'):
         teleop.update(*sample(button), NEAR_TABLE, DT)
         teleop.update(*sample(), NEAR_TABLE, DT)
-    # With the tool 25 mm in, inserting further or pivoting either way reaches the table.
-    run(teleop, 1.0, left_y=1.0)
+    # With the tool 25 mm in, inserting further or pivoting the forearm down reaches the table;
+    # 40 mm in, so does pivoting the tool down, whose jaws reach about 55 mm past the incision.
+    run(teleop, inserted, left_y=1.0)
     run(teleop, 0.3)
     first = teleop.incision
     stopped = False
-    for _ in range(round(3.0 / DT)):
+    for _ in range(round(4.0 / DT)):
         before = dict(teleop.targets)
         teleop.update(*sample(**into), dict(teleop.targets), DT)
         assert check.hits(teleop.targets) == []
