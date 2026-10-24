@@ -223,6 +223,39 @@ def test_an_insertion_stops_at_the_keep_in_floor_with_the_tool_on_its_axis(param
     assert teleop.blocked == [] and arm.forward(teleop.targets)[0][2] > floor + 0.003
 
 
+@pytest.mark.parametrize('table_above_floor, stopper', [
+    (0.002, 'tool_link: table'), (-0.002, 'keep_in')], ids=['table_first', 'floor_first'])
+def test_an_insertion_toward_the_floor_and_the_table_stops_at_whichever_comes_first(
+        parameters, arm, table_above_floor, stopper):
+    config = config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop'))
+    floor = config.keep_in[0][2]
+    # The table check meets the bottom of the tool's box, a fixed drop below the tip while
+    # inserting, so place the table where it would stop the tip just above or below the floor.
+    high = 10.0
+    bottom = high - ArmCollision.from_urdf(URDF, table_z=high, clearance=0.0).check(
+        NEAR_TABLE)['tool_link: table']
+    drop = arm.forward(NEAR_TABLE)[0][2] - bottom
+    stop = floor + table_above_floor
+    clearance = ArmCollision.from_urdf(URDF).clearance
+    check = ArmCollision.from_urdf(URDF, table_z=stop - drop - clearance)
+    teleop = ArmTeleop(config, LIMITS, arm, check)
+    for button in ('start', 'y', 'y', 'y'):
+        teleop.update(*sample(button), NEAR_TABLE, DT)
+        teleop.update(*sample(), NEAR_TABLE, DT)
+    for _ in range(round(2.0 / DT)):
+        teleop.update(*sample(left_y=1.0), dict(teleop.targets), DT)
+        assert check.hits(teleop.targets) == []
+        assert arm.forward(teleop.targets)[0][2] >= floor - 1e-8
+    # Only the first one is named: the arm never reaches the other.
+    assert teleop.blocked == [stopper]
+    tip = arm.forward(teleop.targets)[0][2]
+    assert tip == pytest.approx(max(floor, stop), abs=1e-3) and tip >= max(floor, stop) - 1e-8
+    stopped_at = dict(teleop.targets)
+    run(teleop, 0.5, left_y=1.0)
+    assert teleop.blocked == [stopper]
+    assert teleop.targets == pytest.approx(stopped_at, abs=1e-9)
+
+
 def test_re_enabling_away_from_the_incision_point_moves_nothing(teleop, arm):
     run(teleop, 1.0, left_y=1.0)
     run(teleop, 0.3)
