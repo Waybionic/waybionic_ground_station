@@ -126,9 +126,12 @@ def test_not_responding_test_fault_suppresses_replies_and_recovers():
                       round(servo.axis).to_bytes(6, 'big', signed=True))]
 
 
-def test_disabled_test_fault_exposes_enabled_state_and_recovers():
+def test_disabled_test_fault_rejects_enable_and_recovers():
     servo = ready_servo()
     servo.set_test_fault('disabled')
+    assert not servo.enabled
+    assert servo.receive(mks_can.enable(1)) == [
+        mks_can.frame(1, mks_can.ENABLE, [0])]
     assert not servo.enabled
     assert servo.receive(mks_can.absolute_axis(1, 0x4000, 60, 0)) == [
         mks_can.frame(1, mks_can.ABSOLUTE_AXIS, [0])]
@@ -136,6 +139,8 @@ def test_disabled_test_fault_exposes_enabled_state_and_recovers():
     assert servo.axis == 0.0
 
     servo.set_test_fault()
+    assert servo.receive(mks_can.enable(1)) == [
+        mks_can.frame(1, mks_can.ENABLE, [1])]
     assert servo.enabled
     assert servo.receive(mks_can.absolute_axis(1, 0x4000, 60, 0)) == [RUNNING]
     run(servo, 0.1)

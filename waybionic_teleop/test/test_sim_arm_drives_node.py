@@ -938,20 +938,25 @@ def test_disabled_simulated_drive_reports_error_and_recovers(node, monkeypatch):
     servo = node.bus.drives[node.map.drives[0].can_id]
 
     servo.set_test_fault('disabled')
+    node.set_up(0)
+    node.drain(clock[0])
+    assert mks_can.ENABLE in node.unconfirmed[0]
+    clock[0] += 0.1
     node.report()
     row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
     values = {value.key: value.value for value in row.values}
-    assert not servo.enabled
     assert row.level == DiagnosticStatus.ERROR
     assert values['state'] == DriveHealthState.DISABLED.value
     assert float(values['target_encoder_error_deg']) == pytest.approx(0.0, abs=0.01)
     assert float(values['reply_age_sec']) == pytest.approx(0.1)
 
     servo.set_test_fault(None)
+    node.set_up(0)
+    node.drain(clock[0])
+    assert mks_can.ENABLE not in node.unconfirmed[0]
     node.report()
     row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
     values = {value.key: value.value for value in row.values}
-    assert servo.enabled
     assert row.level == DiagnosticStatus.OK
     assert values['state'] == DriveHealthState.OK.value
 

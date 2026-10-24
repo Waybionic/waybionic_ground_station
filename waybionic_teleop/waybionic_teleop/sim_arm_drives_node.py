@@ -596,10 +596,6 @@ class SimArmDrives(Node):
             else:
                 target = health_targets[index] if health_targets is not None else count
                 enabled = mks_can.ENABLE not in self.unconfirmed[index]
-                if self.interface == 'sim':
-                    servo = self.bus.drives.get(drive.can_id)
-                    if servo is not None:
-                        enabled = enabled and servo.enabled
                 self.drive_health_states[index] = self.drive_health_monitors[index].evaluate(
                     target_position=target * counts_to_joint_degrees,
                     encoder_position=count * counts_to_joint_degrees,

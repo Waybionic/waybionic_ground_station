@@ -70,8 +70,9 @@ class SimulatedServo:
         elif code == mks_can.SET_ZERO and not arguments:
             self.axis, self.rpm, self.target, status = 0.0, 0.0, None, 1
         elif code == mks_can.ENABLE and len(arguments) == 1:
-            self.enabled = bool(arguments[0]) and self.test_fault != 'disabled'
-            status = 1
+            rejected = bool(arguments[0]) and self.test_fault == 'disabled'
+            self.enabled = bool(arguments[0]) and not rejected
+            status = int(not rejected)
             if not self.enabled:
                 self.target, self.rpm = None, 0.0
         elif code == mks_can.ABSOLUTE_AXIS and len(arguments) == 6:
