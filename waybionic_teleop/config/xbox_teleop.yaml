@@ -21,6 +21,7 @@ xbox_teleop:
     lock_button: left_bumper
     tilt_up_button: dpad_right
     tilt_down_button: dpad_left
+    tool_mode_button: x
     groups: [base, upper, cartesian, incision]
     base:
       joints: [joint_1, joint_2, joint_3]
@@ -49,10 +50,7 @@ xbox_teleop:
     max_linear_speed_mm_s: 50.0
     max_linear_accel_mm_s2: 250.0
     max_tilt_speed_deg_s: 30.0
-    # Placeholder end effector until Biomedical defines the tool: 0 is open, 1 is closed.
-    tool_joint: tool_grip
-    tool_limits: [0.0, 1.0]
-    tool_speed: 1.0
+    tool_joints: [left_claw, right_claw]
     tool_close_axis: right_trigger
     tool_open_axis: left_trigger
     tool_frame: tool_link

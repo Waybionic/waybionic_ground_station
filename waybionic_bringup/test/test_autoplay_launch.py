@@ -79,7 +79,7 @@ class TestAutoplay(unittest.TestCase):
             bus = {item.key: item.value for item in rows['can.bus'].values}
             self.assertEqual(bus['rejected_commands'], '0')
             drives = [status for name, status in rows.items() if name.startswith('drive.')]
-            self.assertEqual(len(drives), 6)
+            self.assertEqual(len(drives), 5)
             for status in drives:
                 self.assertEqual(status.level, DiagnosticStatus.OK,
                                  f'{status.name}: {status.message}')

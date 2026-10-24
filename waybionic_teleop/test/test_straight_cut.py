@@ -17,7 +17,7 @@ LIMITS = {'joint_1': (-math.pi, math.pi), 'joint_2': (-1.5708, 1.5708),
           'joint_3': (-1.5708, 1.5708), 'joint_4': (-1.5708, 1.5708),
           'joint_5': (-1.5708, 1.5708)}
 DOWN = {'joint_1': 0.1, 'joint_2': 0.5, 'joint_3': 1.4, 'joint_4': math.pi - 1.9,
-        'joint_5': 0.0, 'tool_grip': 0.0}
+        'joint_5': 0.0, 'left_claw': 0.0, 'right_claw': 0.0}
 SUBSTEPS = 10
 
 
@@ -36,6 +36,11 @@ def arm_map(drives, ratio=None):
     return drive_map.drive_map_from_parameters(drives, mks_can.COUNTS_PER_REV)
 
 
+def arm_only(mapping, values):
+    """Select the five arm coordinates consumed by the arm drive map."""
+    return {joint: values[joint] for joint in mapping.joints}
+
+
 def extrapolate(pose, velocities, period):
     return {joint: value + velocities.get(joint, 0.0) * period
             for joint, value in pose.items()}
@@ -46,11 +51,10 @@ def test_every_drive_gets_the_speed_that_reaches_its_setpoint_in_one_period(driv
     counts = mapping.to_counts(DOWN)
     velocities = {'joint_1': 0.2, 'joint_2': -0.05, 'joint_4': 0.1, 'joint_5': 0.3}
     period = 1.0 / drives['rate_hz']
-    moves = mapping.synchronized(extrapolate(DOWN, velocities, period), counts, period,
-                                 drives['max_rpm'])
+    future = arm_only(mapping, extrapolate(DOWN, velocities, period))
+    moves = mapping.synchronized(future, counts, period, drives['max_rpm'])
     # The commanded-speed cap never slows a drive that keeps pace with its setpoint.
-    assert mapping.synchronized(extrapolate(DOWN, velocities, period), counts, period,
-                                drives['max_rpm'], velocities) == moves
+    assert mapping.synchronized(future, counts, period, drives['max_rpm'], velocities) == moves
     for (axis, rpm), count in zip(moves, counts):
         distance = abs(axis - count) / mks_can.COUNTS_PER_REV
         # Rounding to whole rpm is the only difference between the drives' arrival times.
@@ -64,9 +68,9 @@ def test_a_drive_that_fell_behind_is_sped_up(drives):
     velocities = {'joint_1': 0.2}
     period = 1.0 / drives['rate_hz']
     future = extrapolate(DOWN, velocities, period)
-    on_time = mapping.synchronized(future, counts, period, drives['max_rpm'])
-    behind = mapping.synchronized(future, [counts[0] - 500, *counts[1:]], period,
-                                  drives['max_rpm'])
+    on_time = mapping.synchronized(arm_only(mapping, future), counts, period, drives['max_rpm'])
+    behind = mapping.synchronized(arm_only(mapping, future),
+                                  [counts[0] - 500, *counts[1:]], period, drives['max_rpm'])
     assert behind[0][0] == on_time[0][0] and behind[0][1] > on_time[0][1]
     assert behind[1:] == on_time[1:]
 
@@ -82,8 +86,8 @@ def test_the_next_joint_space_setpoint_stops_at_a_joint_limit(drives, parameters
     for _ in range(4):
         teleop.update(*sample(left_y=1.0), pose, period)
     assert teleop.targets['joint_2'] == teleop.command_targets['joint_2'] == upper
-    moves = mapping.synchronized(teleop.command_targets, mapping.to_counts(pose), period,
-                                 drives['max_rpm'])
+    moves = mapping.synchronized(arm_only(mapping, teleop.command_targets),
+                                 mapping.to_counts(pose), period, drives['max_rpm'])
     assert [axis for axis, rpm in moves] == mapping.to_counts(teleop.command_targets)
 
 
@@ -93,8 +97,8 @@ def test_a_saturated_drive_slows_every_drive_by_the_same_factor(drives):
     velocities = {'joint_1': 4.0, 'joint_2': 0.5}
     period, max_rpm = 1.0 / drives['rate_hz'], drives['max_rpm']
     future = extrapolate(DOWN, velocities, period)
-    free = mapping.synchronized(future, counts, period, 100 * max_rpm)
-    capped = mapping.synchronized(future, counts, period, max_rpm)
+    free = mapping.synchronized(arm_only(mapping, future), counts, period, 100 * max_rpm)
+    capped = mapping.synchronized(arm_only(mapping, future), counts, period, max_rpm)
     fastest = max(rpm for axis, rpm in free)
     assert fastest > max_rpm and max(rpm for axis, rpm in capped) == max_rpm
     assert [axis for axis, rpm in capped] == [axis for axis, rpm in free]
@@ -120,11 +124,12 @@ def cut(drives, teleop_params, ratio, level, seconds):
 
     def tick(*pressed, **axes):
         measured = mapping.to_positions([servo.axis for servo in servos])
+        measured.update({'left_claw': 0.0, 'right_claw': 0.0})
         teleop.update(*sample(*pressed, **axes), measured, period)
         if teleop.targets:
-            moves = mapping.synchronized(teleop.command_targets,
+            moves = mapping.synchronized(arm_only(mapping, teleop.command_targets),
                                          [servo.axis for servo in servos], period,
-                                         drives['max_rpm'], teleop.velocities)
+                                         drives['max_rpm'], arm_only(mapping, teleop.velocities))
             for servo, (axis, rpm) in zip(servos, moves):
                 servo.receive(mks_can.absolute_axis(servo.can_id, axis, rpm, drives['acc']))
         for _ in range(SUBSTEPS):
@@ -165,8 +170,9 @@ def test_cartesian_next_setpoint_stays_at_the_tip_when_tilt_hits_a_limit(drives,
         assert ahead == pytest.approx(tip, abs=1e-9)
         assert all(lower <= teleop.command_targets[joint] <= upper
                    for joint, (lower, upper) in LIMITS.items())
-        moves = mapping.synchronized(teleop.command_targets, mapping.to_counts(teleop.targets),
-                                     period, drives['max_rpm'])
+        moves = mapping.synchronized(arm_only(mapping, teleop.command_targets),
+                                     mapping.to_counts(teleop.targets), period,
+                                     drives['max_rpm'])
         assert [axis for axis, rpm in moves] == mapping.to_counts(teleop.command_targets)
         if 'joint_3' in teleop.blocked:
             break

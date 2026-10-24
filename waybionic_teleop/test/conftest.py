@@ -61,5 +61,10 @@ def flatten(values, prefix=''):
 def parameters():
     def load(file_name, node_name):
         with open(CONFIG / file_name, encoding='utf-8') as stream:
-            return flatten(yaml.safe_load(stream)[node_name]['ros__parameters'])
+            values = flatten(yaml.safe_load(stream)[node_name]['ros__parameters'])
+        # The launch passes both files to xbox_teleop. Mirror that for direct-node
+        # and pure-Python tests instead of silently using stale calibration.
+        if file_name == 'xbox_teleop.yaml' and node_name == 'xbox_teleop':
+            values.update(load('tool_drives.yaml', node_name))
+        return values
     return load

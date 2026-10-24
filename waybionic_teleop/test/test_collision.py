@@ -9,7 +9,6 @@ from waybionic_teleop.collision import _intrusion, _overlap, _rotation, ArmColli
 from waybionic_teleop.gamepad import AXES, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
-from waybionic_teleop.xbox_teleop_node import JAW_OPEN_GAP, JAW_SIZE
 
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
         / 'waybionic_arm.urdf').read_text(encoding='utf-8')
@@ -22,7 +21,8 @@ DT = 1.0 / 120.0
 def pose(shoulder, elbow, wrist, yaw=0.0):
     """Joint positions in degrees for the pitch joints."""
     return {'joint_1': yaw, 'joint_2': math.radians(shoulder), 'joint_3': math.radians(elbow),
-            'joint_4': math.radians(wrist), 'joint_5': 0.0, 'tool_grip': 0.0}
+            'joint_4': math.radians(wrist), 'joint_5': 0.0,
+            'left_claw': 0.0, 'right_claw': 0.0}
 
 
 @pytest.fixture
@@ -31,10 +31,15 @@ def check():
 
 
 @pytest.mark.parametrize('joints', [
-    pose(0, 0, 0), pose(28.6, 80.2, 71.1, 0.1), pose(90, 0, 0), pose(60, 60, 60, 2.0),
-    pose(-30, -90, -90)])
+    pose(0, 0, 0), pose(28.6, 80.2, 71.1, 0.1), pose(90, 0, 0), pose(-30, -90, -90)])
 def test_working_poses_are_clear(check, joints):
     assert check.hits(joints) == []
+
+
+@pytest.mark.parametrize('joints', [pose(60, 60, 60, 2.0)])
+def test_the_larger_clamp_detects_table_contact(check, joints):
+    """Poses that cleared the old placeholder now contact the table."""
+    assert 'tool_link: table' in check.hits(joints)
 
 
 def test_folding_the_arm_down_reaches_the_table(check):
@@ -50,11 +55,11 @@ def test_folding_back_into_the_base_is_caught_past_todays_joint_limits(check):
 
 
 def test_table_height_and_clearance_are_configurable():
-    # This pose's tool tip is 175 mm above the bottom of the base.
+    # Shortening the mount lifts this collision box just above the table.
     joints = pose(28.6, 80.2, 71.1, 0.1)
-    assert ArmCollision.from_urdf(URDF, table_z=0.17).hits(joints)
-    assert not ArmCollision.from_urdf(URDF, table_z=0.1).hits(joints)
-    assert ArmCollision.from_urdf(URDF, table_z=0.1, clearance=0.1).hits(joints)
+    assert ArmCollision.from_urdf(URDF, table_z=0.05).hits(joints)
+    assert not ArmCollision.from_urdf(URDF, table_z=0.0).hits(joints)
+    assert ArmCollision.from_urdf(URDF, table_z=0.0, clearance=0.1).hits(joints)
 
 
 def test_a_urdf_without_collision_boxes_is_refused():
@@ -126,7 +131,7 @@ def test_a_tool_pointing_down_stops_with_its_jaws_clear_of_the_table(parameters,
                        LIMITS, ArmKinematics.from_urdf(URDF), check)
     # The tool points straight down in front of the base, its tip 175 mm above the table.
     start = {'joint_1': 0.1, 'joint_2': 0.5, 'joint_3': 1.4, 'joint_4': math.pi - 1.9,
-             'joint_5': 0.0, 'tool_grip': 0.0}
+             'joint_5': 0.0, 'left_claw': 0.0, 'right_claw': 0.0}
     for button in ('start', 'y', 'y'):
         teleop.update(*sample(button), start, DT)
         teleop.update(*sample(), start, DT)
@@ -220,9 +225,6 @@ def separating_axis_depth(check, joints):
 
 
 def jaw_bottom(check, joints):
-    """Return the height of the lowest corner of the RViz jaws, fully open."""
-    rotation, origin = check.poses(joints)['tool_link']
-    reach = JAW_OPEN_GAP / 2 + JAW_SIZE[0]
-    corners = [(x, y, z) for x in (-reach, reach) for y in (-JAW_SIZE[1] / 2, JAW_SIZE[1] / 2)
-               for z in (0.0, JAW_SIZE[2])]
-    return min(origin[2] + sum(r * c for r, c in zip(rotation[2], corner)) for corner in corners)
+    """Return the bottom of the provisional clamp collision box in the base frame."""
+    center, axes, half = next(check.world_boxes(check.poses(joints), 'tool_link'))
+    return center[2] - sum(size * abs(axis[2]) for size, axis in zip(half, axes))

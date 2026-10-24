@@ -3,13 +3,13 @@
 # disc) on the base, shoulder and elbow, and 20T-to-60T belts (3:1) on the two wrist motors.
 # factors give each motor's output angle per joint angle: the 25T bevel differential turns both
 # wrist motors together for pitch and oppositely for roll. If a drive turns the wrong way on
-# the bench, negate its factors. The tool drive is a placeholder with no hardware behind it;
+# the bench, negate its factors. Biomedical tool motors use their separate simulator;
 # the tool board's motors answer on CAN IDs 7 to 10 (firmware/tool_board/README.md).
 sim_arm_drives:
   ros__parameters:
     rate_hz: 120.0
     # Set every drive to 1 Mbit/s first (mks_setup, or CanRate on its screen; MKS ships 500k):
-    # six drives at 120 Hz load the bus about 30% at 1 Mbit/s and 60% at 500 kbit/s.
+    # Five arm drives at 120 Hz leave bus capacity for the tool board.
     bitrate: 1000000
     # The carrier's USB serial speed (carrier_bridge.ino); only used with interface slcan.
     tty_baudrate: 1000000
@@ -33,10 +33,9 @@ sim_arm_drives:
     # Teleop republishes its enable every tick; stop the drives if it goes quiet this long (the
     # same as xbox_teleop's input_timeout_s).
     enable_timeout_s: 0.5
-    # The placeholder grip has no URDF joint yet; every modeled arm joint must have a limit.
-    # Simulation only: on a real bus every drive joint needs a URDF limit.
-    unmodeled_joints: [tool_grip]
-    drives: [base_yaw, shoulder, elbow, wrist_left, wrist_right, tool]
+    # Biomedical claws use a separate four-motor simulator, not the arm grip.
+    # Five-joint teleop commands only the five arm drives.
+    drives: [base_yaw, shoulder, elbow, wrist_left, wrist_right]
     # SERVO42D (NEMA17)
     base_yaw:
       can_id: 1
@@ -67,8 +66,3 @@ sim_arm_drives:
       gear_ratio: 3.0
       joints: [joint_4, joint_5]
       factors: [1.0, 1.0]
-    tool:
-      can_id: 6
-      gear_ratio: 1.0
-      joints: [tool_grip]
-      factors: [1.0]

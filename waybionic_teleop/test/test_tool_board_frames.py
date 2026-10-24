@@ -7,6 +7,7 @@ import subprocess
 import pytest
 
 from waybionic_teleop import mks_can
+from waybionic_teleop.tool_board_frames import move_frames, stop_frames
 
 FIRMWARE = Path(__file__).resolve().parents[2] / 'firmware' / 'tool_board'
 
@@ -113,6 +114,33 @@ def test_encoder_replies_decode_with_mks_can(firmware, value):
     code, arguments = mks_can.parse(10, bytes.fromhex(firmware(f'encoder 10 {value}')[0]))
     assert code == mks_can.READ_ENCODER
     assert mks_can.encoder_value(arguments) == value
+
+
+def test_four_tool_commands_and_stops_decode_in_firmware(firmware, parameters):
+    """Check PR #32's ID order, signed targets, F5 units and immediate stop."""
+    config = parameters('tool_drives.yaml', 'sim_tool_motors')
+    targets = {'left_1': 320, 'left_2': -320, 'right_1': -640, 'right_2': 640}
+    speeds = dict.fromkeys(targets, 160.0)
+    frames = move_frames(targets, speeds,
+                         acceleration=config['board_acceleration_code'],
+                         max_rpm=config['board_safe_rpm'])
+    assert {name: can_id for name, (can_id, _) in frames.items()} == {
+        'left_1': 7, 'left_2': 8, 'right_1': 9, 'right_2': 10}
+    for name, (can_id, data) in frames.items():
+        expected_axis = round(targets[name] * 16384 / 3200)
+        assert firmware(f'parse {can_id} {data.hex()}') == [
+            f'move 3 {config["board_acceleration_code"]} {expected_axis}']
+        assert firmware(f'parse {can_id + 1} {data.hex()}') == ['invalid']
+    for can_id, data in stop_frames().values():
+        assert firmware(f'parse {can_id} {data.hex()}') == ['move 0 0 0']
+
+
+def test_tool_host_rejects_targets_outside_firmware_axis(firmware):
+    targets = dict.fromkeys(('left_1', 'left_2', 'right_1', 'right_2'), 0)
+    speeds = dict.fromkeys(targets, 160.0)
+    targets['right_2'] = 2_000_000
+    with pytest.raises(ValueError, match='int24'):
+        move_frames(targets, speeds)
 
 
 @pytest.mark.parametrize('code, status', [

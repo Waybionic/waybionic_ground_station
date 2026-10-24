@@ -37,12 +37,12 @@ joint_demo_module = importlib.util.module_from_spec(_demo_spec)
 _demo_spec.loader.exec_module(joint_demo_module)
 
 POSE = {'joint_1': 0.8, 'joint_2': -0.8, 'joint_3': 0.8,
-        'joint_4': 0.8, 'joint_5': 0.25, 'tool_grip': 0.8}
+        'joint_4': 0.8, 'joint_5': 0.25}
 RATES = {'joint_1': 0.2, 'joint_2': -0.2, 'joint_3': 0.2,
-         'joint_4': 0.2, 'joint_5': 0.05, 'tool_grip': 0.2}
+         'joint_4': 0.2, 'joint_5': 0.05}
 # Tool pointing straight down in front of the base, where straight cuts start.
 DOWN = {'joint_1': 0.1, 'joint_2': 0.5, 'joint_3': 1.4, 'joint_4': math.pi - 1.9,
-        'joint_5': 0.0, 'tool_grip': 0.0}
+        'joint_5': 0.0}
 
 SHUTDOWN_NODES = [
     (xbox_teleop_node, 'XboxTeleop'),
@@ -586,7 +586,7 @@ def test_the_enable_timeout_must_be_positive_and_finite(monkeypatch, parameters,
         rclpy.try_shutdown(context=context)
 
 
-def test_zero_speed_f5_stops_six_drives_and_negative_targets_rearm(node):
+def test_zero_speed_f5_stops_five_drives_and_negative_targets_rearm(node):
     ready(node)
     node.max_rpm = 5
     node.on_command(command(node, velocities=RATES, **POSE))
@@ -611,9 +611,9 @@ def test_zero_speed_f5_stops_six_drives_and_negative_targets_rearm(node):
     node.on_enabled(Bool(data=False))
     node.on_enabled(Bool(data=True))
     reverse = dict.fromkeys(POSE, -0.4)
-    reverse.update(joint_5=0.1, tool_grip=0.2)
+    reverse.update(joint_5=0.1)
     rates = dict.fromkeys(POSE, -0.2)
-    rates.update(joint_5=0.05, tool_grip=0.2)
+    rates.update(joint_5=0.05)
     node.on_command(command(node, velocities=rates, **reverse))
     advance(node)
     assert node.authorized
@@ -622,7 +622,7 @@ def test_zero_speed_f5_stops_six_drives_and_negative_targets_rearm(node):
     assert int.from_bytes(sent_frame(node, 0)[1][3:], 'big', signed=True) < 0
 
 
-def test_six_drive_host_pause_drops_pending_targets_until_fresh_start(node):
+def test_five_drive_host_pause_drops_pending_targets_until_fresh_start(node):
     ready(node)
     node.max_rpm = 5
     node.on_command(command(node, velocities=RATES, **POSE))
@@ -656,16 +656,18 @@ def test_a_cartesian_tilt_into_a_joint_limit_keeps_the_drives_enabled(node, para
     arm = ArmKinematics.from_urdf(URDF)
     teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
                        joint_limits(URDF, arm.joints), arm)
-    teleop.enable(node.map.to_positions(node.counts), [0.0] * len(AXES))
+    measured = {**node.map.to_positions(node.counts), 'left_claw': 0.0, 'right_claw': 0.0}
+    teleop.enable(measured, [0.0] * len(AXES))
     teleop.group = [group.name for group in teleop.groups].index('cartesian')
     tilt_up = [int(name == 'dpad_right') for name in BUTTONS]
     at_limit = 0
     for _ in range(600):
         teleop.update([0.0] * len(AXES), tilt_up, {}, node.period)
         targets = teleop.command_targets
+        names = list(node.map.joints)
         node.on_enabled(Bool(data=True))
-        node.on_command(JointState(name=list(targets), position=list(targets.values()),
-                                   velocity=[teleop.velocities[joint] for joint in targets]))
+        node.on_command(JointState(name=names, position=[targets[name] for name in names],
+                                   velocity=[teleop.velocities[name] for name in names]))
         advance(node)
         assert node.authorized, node.stop_reason
         at_limit += 'joint_3' in teleop.blocked

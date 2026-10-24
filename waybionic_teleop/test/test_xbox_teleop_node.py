@@ -135,7 +135,8 @@ def test_a_silent_controller_disables_and_holds_the_measured_pose(node, monkeypa
         assert clock.now - last_input <= node.timeout + period + 1e-9
     assert enabled[-1].data is False
     hold = commands[-1]
-    assert dict(zip(hold.name, hold.position)) == pytest.approx(pose)
+    assert dict(zip(hold.name, hold.position)) == pytest.approx(
+        {name: value for name, value in pose.items() if name not in node.config.tool_joints})
     assert not any(hold.velocity)
 
 
