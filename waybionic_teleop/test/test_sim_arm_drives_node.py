@@ -1004,8 +1004,9 @@ def test_disabled_simulated_drive_reports_error_and_recovers(node, monkeypatch):
     monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
     servo = node.bus.drives[node.map.drives[0].can_id]
 
-    servo.set_test_fault('disabled')
-    node.set_up(0)
+    result = node.set_parameters([
+        Parameter('test_fault', Parameter.Type.STRING, 'base_yaw:disabled')])[0]
+    assert result.successful
     node.drain(clock[0])
     assert mks_can.ENABLE in node.unconfirmed[0]
     clock[0] += 0.1
@@ -1023,10 +1024,16 @@ def test_disabled_simulated_drive_reports_error_and_recovers(node, monkeypatch):
     assert summary_values['state'] == DriveHealthState.DISABLED.value
     assert summary_values['drive'] == 'base_yaw'
 
-    servo.set_test_fault(None)
-    node.set_up(0)
+    result = node.set_parameters([
+        Parameter('test_fault', Parameter.Type.STRING, 'none')])[0]
+    assert result.successful
+    clock[0] += REPLY_TIMEOUT_S + 0.1
+    node.check_replies()
     node.drain(clock[0])
     assert mks_can.ENABLE not in node.unconfirmed[0]
+    for drive in node.map.drives:
+        node.bus.send(drive.can_id, mks_can.read_encoder(drive.can_id))
+    node.drain(clock[0])
     node.report()
     row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
     values = {value.key: value.value for value in row.values}

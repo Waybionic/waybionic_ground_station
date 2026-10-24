@@ -721,6 +721,8 @@ class SimArmDrives(Node):
             self.bus.drives[can_id].set_test_fault(None)
         self.bus.drives[drive.can_id].set_test_fault(fault)
         self.test_fault = (drive.can_id, fault)
+        if fault == 'disabled':
+            self.set_up(self.index[drive.can_id])
         return SetParametersResult(successful=True)
 
     def carrier_status(self, now):
