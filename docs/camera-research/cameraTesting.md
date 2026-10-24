@@ -4,7 +4,7 @@
 - Data was redone with a Logitech Brio 100 Full HD Webcam that shoots in a maximum resolution of 1080p.
 
 ## Five Minute Experiment Results
-### Ran at 1280x720 at and average of 30fps
+### Ran at 1280x720 at an average of 30fps
 - Taking a picture of the timer and the doctor view, there is a 0.54ms difference in the timer.
 	- The monitor measures from when the bridge reads a frame from the camera to when the ground station receives it, while the stopwatch also includes the camera, the virtual webcam app and the screen. The stopwatch test only covers visible delays, not internal.
 - The minimum camera delay was 0.17ms 
