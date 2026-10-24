@@ -9,12 +9,14 @@
 
   <depend>diagnostic_msgs</depend>
   <depend>geometry_msgs</depend>
+  <depend>rcl_interfaces</depend>
   <depend>rclpy</depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
   <depend>std_srvs</depend>
   <depend>visualization_msgs</depend>
 
+  <exec_depend>waybionic_control</exec_depend>
   <exec_depend>python3-can</exec_depend>
   <!-- The collision check's link hulls (collision.py). -->
   <exec_depend>python3-numpy</exec_depend>

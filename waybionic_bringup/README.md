@@ -57,7 +57,7 @@ The robot state publisher still runs. With the joint-state GUI disabled, an
 external `/joint_states` publisher is needed to update movable joints unless demo mode
 or teleop is running. Real drives are used only with `teleop:=true` and a CAN
 `drive_interface`; see
-[Real MKS Drives over CAN](../BuildInstructions.md#real-mks-drives-over-can).
+[Real arm: MKS drives over CAN](../docs/operator_guide.md#real-arm-mks-drives-over-can).
 
 ## Diagnostics
 

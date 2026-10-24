@@ -30,6 +30,11 @@ sim_arm_drives:
     # speed, whose setpoints run one tick ahead.
     following_error_counts: 4096
     following_error_ticks: 12
+    # Provisional drive-health thresholds; tune them against real arm behavior.
+    health_following_error_degrees: 5.0
+    health_stall_movement_degrees: 1.0
+    health_stall_duration_seconds: 2.0
+    health_reply_timeout_seconds: 0.5
     # Teleop republishes its enable every tick; stop the drives if it goes quiet this long (the
     # same as xbox_teleop's input_timeout_s).
     enable_timeout_s: 0.5
