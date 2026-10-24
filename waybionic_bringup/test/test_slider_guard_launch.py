@@ -46,13 +46,16 @@ class TestSliderGuard(unittest.TestCase):
         self.assertTrue(check.hits(FOLDED))
         rclpy.init()
         node = rclpy.create_node('slider_guard_test')
-        states, requests = {}, {}
+        states, requests, accepted = {}, {}, {}
         node.create_subscription(
             JointState, '/joint_states',
             lambda message: states.update(zip(message.name, message.position)), 10)
         node.create_subscription(
             JointState, '/joint_states_requested',
             lambda message: requests.update(zip(message.name, message.position)), 10)
+        node.create_subscription(
+            JointState, '/joint_state_guard/accepted',
+            lambda message: accepted.update(zip(message.name, message.position)), 10)
         sliders = node.create_publisher(JointState, '/joint_states_requested', 10)
 
         def spin(seconds, until=lambda: False):
@@ -65,9 +68,20 @@ class TestSliderGuard(unittest.TestCase):
             spin(30.0, lambda: 'joint_3' in requests and 'joint_3' in states)
             self.assertIn('joint_3', requests, 'the slider window never published')
             self.assertIn('joint_3', states, 'the guard never passed the sliders on')
-            # Ask for the clashing pose as the sliders would.
-            sliders.publish(JointState(name=list(FOLDED), position=list(FOLDED.values())))
-            spin(3.0)
+            # The real slider window also publishes on this topic at 10 Hz. Retry until
+            # the guard acknowledges our pose; a single request can be replaced by a
+            # newer GUI message while the guard is checking collisions.
+            folded = JointState(name=list(FOLDED), position=list(FOLDED.values()))
+            deadline = time.monotonic() + 15.0
+            while time.monotonic() < deadline and accepted.get('joint_3', 0.0) <= 1.0:
+                sliders.publish(folded)
+                spin(0.1)
+            self.assertGreater(accepted.get('joint_3', 0.0), 1.0,
+                               'the guard did not accept the clashing request')
+            # Once the test stops publishing, the GUI should adopt the accepted pose.
+            spin(3.0, lambda: 'joint_3' in states and all(
+                abs(requests.get(joint, float('inf')) - states.get(joint, 0.0)) < 0.002
+                for joint in FOLDED))
             self.assertEqual(check.hits(states), [])
             self.assertGreater(states['joint_3'], 1.0, 'the arm did not move toward the pose')
             # The slider window was sent back to where the arm stopped and now asks for that.
