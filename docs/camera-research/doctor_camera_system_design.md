@@ -48,7 +48,7 @@
 | **Occlusion Risks** | View may be blocked or impacted by the tools of the arm. This needs to be considered in mounting position and arm movement. | Since the camera is so small, tools may have a bigger impact on the occlusion |
 | **Cable Routing** | Similar to motors on the arm | Similar to the motors on the arm |
 | **Lighting Conditions** | Must be able to handle very harsh light | Must work in darker areas (with light mounted?)|
-| **Mounting** | A removeable mount may be helpful for maintenance purpose | Directly attached  to arm |
+| **Mounting** | A removeable mount may be helpful for maintenance purpose | Directly attached to arm |
 
 > \* for personnel who are NOT scrubbed in... not sure if this applies for our robot
 
