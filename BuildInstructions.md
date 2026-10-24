@@ -593,6 +593,8 @@ On the Mac, listen on the network:
 ./scripts/macos.sh arm joy_source:=udp joy_udp_bind:=0.0.0.0
 ```
 
+The receiver takes controller packets from any computer that can reach its port, so do this only on a private network.
+
 ### On Windows
 
 Docker Desktop cannot open COM ports, so `carrier_relay` passes the carrier's port through `127.0.0.1:47320` and the drive node connects to it as `socket://host.docker.internal:47320`. The bridge needs Python 3 on Windows and pyserial:
@@ -601,7 +603,7 @@ Docker Desktop cannot open COM ports, so `carrier_relay` passes the carrier's po
 python -m pip install pyserial
 ```
 
-The carrier must already be flashed; see step 1 in #on-a-mac.
+The carrier must already be flashed; see step 1 in #on-macos.
 
 **In one step:** plug in only the carrier, put the arm in the zero pose, connect an Xbox controller and double-click `scripts\windows-arm.cmd`. It starts Docker Desktop, the carrier bridge and the controller bridge, each in its own window, then the ground station.
 Press **Ctrl+C** in its window to stop. The ground station stops first, then the bridge, which stops every drive.
@@ -623,7 +625,7 @@ Press **Ctrl+C** in its window to stop. The ground station stops first, then the
    & "$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin\docker.exe" compose run --rm --build demo ros2 run waybionic_teleop mks_setup --channel socket://host.docker.internal:47320 --bitrate 1000000 scan
    ```
 
-3. Start the ground station, then the controller bridge in a third window:
+3. With `tool` removed from `drives` in `arm_drives.yaml`, put the arm in the zero pose and start the ground station, then the controller bridge in a third window:
 
    ```powershell
    & "$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin\docker.exe" compose run --rm --build --service-ports wslg-arm
