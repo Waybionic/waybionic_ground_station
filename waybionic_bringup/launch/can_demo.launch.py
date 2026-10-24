@@ -45,6 +45,7 @@ def generate_launch_description():
         parameters=[
             {'can_interface': LaunchConfiguration('can_interface')},
             {'transport': LaunchConfiguration('transport')},
+            {'mock_test_mode': LaunchConfiguration('start_mock_drives')},
         ]
     )
 
