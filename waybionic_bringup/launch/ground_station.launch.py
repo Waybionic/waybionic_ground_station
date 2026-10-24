@@ -247,12 +247,26 @@ def generate_launch_description():
     sim_time = {'use_sim_time': LaunchConfiguration('use_sim_time')}
     # Demo mode and teleop publish joint states themselves.
     simulated_joints = OrSubstitution(demo_mode, teleop)
+    sliders = AndSubstitution(LaunchConfiguration('use_joint_state_publisher_gui'),
+                              NotSubstitution(simulated_joints))
 
+    # The sliders ask for a pose; the guard moves the arm only as far as it goes without
+    # hitting itself or the table, with teleop's collision settings, and sends the sliders back
+    # to where it stopped.
     jsp_gui_node = Node(
         package='joint_state_publisher_gui', executable='joint_state_publisher_gui',
-        condition=IfCondition(AndSubstitution(
-            LaunchConfiguration('use_joint_state_publisher_gui'),
-            NotSubstitution(simulated_joints)))
+        condition=IfCondition(sliders),
+        parameters=[{'source_list': ['joint_state_guard/accepted']}],
+        remappings=[('joint_states', 'joint_states_requested')]
+    )
+
+    with open(os.path.join(teleop_config_dir, 'xbox_teleop.yaml'), encoding='utf-8') as source:
+        teleop_config = yaml.safe_load(source)['xbox_teleop']['ros__parameters']
+    guard_node = Node(
+        package='waybionic_teleop', executable='joint_state_guard', name='joint_state_guard',
+        output='screen', condition=IfCondition(sliders),
+        parameters=[{name: float(teleop_config[name]) for name in (
+            'table_height', 'collision_clearance', 'self_collision_clearance')}, sim_time]
     )
 
     # With autoplay, the controller goes through the autoplay node before it reaches teleop.
@@ -366,7 +380,7 @@ def generate_launch_description():
         drive_interface_arg, drive_channel_arg, joy_source_arg, autoplay_arg,
         joy_udp_bind_arg, joy_udp_port_arg, follow_camera_arg, use_sim_time_arg, camera_arg,
         camera_bind_arg, camera_log_arg,
-        launch_rviz_arg, rviz_config_arg, file_check, rsp_node, jsp_gui_node, joint_demo_node,
-        joy_node, joy_udp_node, autoplay_node, teleop_node, drives_node, camera_follower_node,
-        temp_diag_pub_node, camera_launch, rviz_node
+        launch_rviz_arg, rviz_config_arg, file_check, rsp_node, jsp_gui_node, guard_node,
+        joint_demo_node, joy_node, joy_udp_node, autoplay_node, teleop_node, drives_node,
+        camera_follower_node, temp_diag_pub_node, camera_launch, rviz_node
     ])

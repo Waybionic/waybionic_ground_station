@@ -18,6 +18,8 @@
 
   <exec_depend>waybionic_control</exec_depend>
   <exec_depend>python3-can</exec_depend>
+  <!-- The collision check's link hulls (collision.py). -->
+  <exec_depend>python3-numpy</exec_depend>
   <!-- The WayBionic carrier's USB serial link (slcan_bus.py). -->
   <exec_depend>python3-serial</exec_depend>
 

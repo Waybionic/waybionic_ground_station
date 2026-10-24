@@ -178,30 +178,61 @@ incision. With five joints, the tool can only tilt in the arm's vertical plane.
 
 ### Joint limits and collision checks
 
-The current arm URDF has provisional joint limits, and the collision checks model
-each link as a box. Don't change a wrist bound or power the motors until Mechanical
-identifies the URDF joint and measures its signed travel from upright zero,
-including any cable or gear stop.
+The arm URDF's joint limits are where its CAD parts touch, found by turning each
+joint from the upright pose and checking the exact meshes
+(`scripts/cad/exact_limits.py`):
 
-Every group stops a move before any part of the arm comes within 10 mm of the table
-or folds into the arm's own base. You can see the boxes by ticking
-**Collision Enabled** on RViz's RobotModel display. The tool's box is a placeholder
-around the RViz jaws, which reach 30 mm past `tool_link`, until the real tool is
-modelled; a longer tool needs a longer box.
+| Joint | Limit, either way | Where it stops |
+| --- | --- | --- |
+| `joint_1` base yaw | 360 degrees | Nothing touches; the cabling isn't modelled |
+| `joint_2` shoulder | 109.65 degrees | The straight arm meets the ground under the base |
+| `joint_3` elbow | 148.93 degrees | The forearm meets the shoulder's motor mount |
+| `joint_4` wrist pitch | 94.67 degrees | The tool mount meets the cap on the forearm, at the worst wrist roll |
+| `joint_5` wrist roll | 360 degrees | Nothing touches; the cabling isn't modelled |
 
+Don't power the motors until Mechanical confirms each joint's signed travel from
+upright zero on the built arm, including any cable or gear stop.
+
+Every group stops a move where any part of the arm would go below the table or into
+the arm's own base and shoulder.
+
+- Against the table, each link's lowest point comes from the convex hull of its CAD
+  parts (`waybionic_hull` in the URDF), so the arm stops where its real parts reach
+  the table.
+- Against the base and shoulder, the checks use a box around each CAD part, or a
+  cylinder where a part, or one side of it, is round about a joint axis: the base's
+  lid, the tool mount and the lower half of the wrist housing. You can see them by
+  ticking **Collision Enabled** on RViz's RobotModel display.
+- Those shapes are too coarse where the forearm folds against the shoulder or the
+  base, so there the elbow follows tables of its limits against the shoulder angle,
+  measured from the CAD (`waybionic_fold` in the URDF, from
+  `scripts/cad/joint_clearance.py`). The base's table holds at every yaw.
+- The tool's box is a placeholder around the RViz jaws, which reach 30 mm past
+  `tool_link`, until the real tool is modelled; a longer tool needs a longer box.
+- The joint sliders use the same check. `joint_state_guard` moves the arm toward the
+  sliders' pose, checking at least every half degree of each joint, stops at the
+  last pose before any part would touch, and moves the sliders back to it.
 - When a move stops, the diagnostics panel names the part, for example
   `At limit: forearm_link: table`.
 - If the arm stands on a raised mount, set `table_height` in
   `waybionic_teleop/config/xbox_teleop.yaml` to the table's height above the bottom
-  of the base. `collision_clearance` in the same file sets the 10 mm margin.
+  of the base. `collision_clearance` in the same file keeps a gap to the table, and
+  `self_collision_clearance` to the base and shoulder. Both are 0, so the arm stops
+  where its parts touch; raise them for a margin on the real arm.
 - If the arm is already touching something, the only moves allowed are ones that
   back out of it. A move that presses any contact further in is refused, even if it
   would ease another contact at the same time.
-- A `robot_description` without a collision box for the base, shoulder, upper arm,
+- A `robot_description` without collision shapes for the base, shoulder, upper arm,
   forearm, wrist, wrist roll or tool leaves teleop disabled, and the diagnostics
   panel names the missing links.
 - Reloading the description while teleop is enabled disables teleop and holds the
   arm, and the drives stop, so release Start and press it again.
+
+After any change to the CAD, the limits or the collision shapes, run
+`scripts/cad/check_collision_model.py`. It tests about 300,000 poses that the checks
+call clear (random poses, poses with a joint at a limit, and the poses where moves
+stop) against the exact CAD meshes, and fails if two parts or the tool's box
+intersect, or a part goes below the ground.
 
 ### If the controller stops responding on Windows
 

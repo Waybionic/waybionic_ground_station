@@ -1,6 +1,7 @@
 """The teleop node stays off for an arm whose description has no collision boxes."""
 
 from pathlib import Path
+import re
 
 import pytest
 import rclpy
@@ -36,10 +37,11 @@ def node(context, parameters):
 
 
 def without_box(link):
-    """Return the arm description with one link's collision box taken out."""
-    start = URDF.index('<collision>', URDF.index(f'<link name="{link}">'))
-    end = URDF.index('</collision>', start) + len('</collision>')
-    return URDF[:start] + URDF[end:]
+    """Return the arm description with one link's collision boxes taken out."""
+    start = URDF.index(f'<link name="{link}">')
+    end = URDF.index('</link>', start)
+    return URDF[:start] + re.sub(r'<collision .*?</collision>', '', URDF[start:end],
+                                 flags=re.S) + URDF[end:]
 
 
 def test_the_arm_description_starts_teleop_with_its_collision_checks(node):
