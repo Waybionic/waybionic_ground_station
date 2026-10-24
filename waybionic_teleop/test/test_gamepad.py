@@ -58,3 +58,14 @@ def test_rumble_requests_round_trip_within_zero_to_one(intensity, expected):
 def test_anything_else_is_not_a_rumble_request(packet):
     with pytest.raises(ValueError):
         gamepad.unpack_rumble(packet)
+
+
+def test_a_bridge_answers_a_ping_with_the_same_time():
+    ping = gamepad.pack_ping(2**32 + 3, 1234.5)
+    assert gamepad.unpack_pong(gamepad.pong(ping)) == (3, 1234.5)
+    # A ping is neither a controller packet nor a rumble request, and pongs are not echoed.
+    for unpack in (gamepad.unpack, gamepad.unpack_rumble, gamepad.unpack_pong):
+        with pytest.raises(ValueError):
+            unpack(ping)
+    assert gamepad.pong(gamepad.pong(ping)) is None
+    assert gamepad.pong(gamepad.pack(1, NEUTRAL, [])) is None
