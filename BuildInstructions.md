@@ -533,7 +533,7 @@ The computer running ROS needs the carrier or USB CAN adapter. Docker Desktop on
 and macOS cannot reach USB devices, so use native ROS on macOS (RoboStack, below) or
 Linux, or Docker on Linux with `--network host` for a SocketCAN adapter.
 
-### On a Mac
+### On macOS
 
 Do the [macOS setup](#macos-apple-silicon) first. Then, from the repository root:
 
@@ -593,8 +593,57 @@ On the Mac, listen on the network:
 ./scripts/macos.sh arm joy_source:=udp joy_udp_bind:=0.0.0.0
 ```
 
-The receiver takes controller packets from any computer that can reach its port, so do
-this only on a private network.
+The receiver takes controller packets from any computer that can reach its port, so do this only on a private network.
+
+### On Windows
+
+Docker Desktop cannot open COM ports, so `carrier_relay` passes the carrier's port through `127.0.0.1:47320` and the drive node connects to it as `socket://host.docker.internal:47320`. The bridge needs Python 3 on Windows and pyserial:
+
+```powershell
+python -m pip install pyserial
+```
+
+The carrier must already be flashed; see step 1 in #on-macos.
+
+**In one step:** plug in only the carrier, put the arm in the zero pose, connect an Xbox controller and double-click `scripts\windows-arm.cmd`. It starts Docker Desktop, the carrier bridge and the controller bridge, each in its own window, then the ground station.
+Press **Ctrl+C** in its window to stop. The ground station stops first, then the bridge, which stops every drive.
+
+**Step by step**, from the repository root:
+
+1. Start the carrier bridge in its own PowerShell window and leave it running. It finds the carrier as the only Arduino COM port; otherwise pass `--port COM5`.
+
+   ```powershell
+   cd waybionic_teleop
+   python -m waybionic_teleop.carrier_relay
+   ```
+
+   Wait for `Carrier open; waiting for the ground station`. Start it before anything that uses the carrier: the drive node stops at startup if the bridge is not listening.
+
+2. Scan the drives (and set IDs or bit rates, as on the Mac) in a second window. The bridge serves one connection at a time, so let each command finish before the next:
+
+   ```powershell
+   & "$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin\docker.exe" compose run --rm --build demo ros2 run waybionic_teleop mks_setup --channel socket://host.docker.internal:47320 --bitrate 1000000 scan
+   ```
+
+3. With `tool` removed from `drives` in `arm_drives.yaml`, put the arm in the zero pose and start the ground station, then the controller bridge in a third window:
+
+   ```powershell
+   & "$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin\docker.exe" compose run --rm --build --service-ports wslg-arm
+   ```
+
+   ```powershell
+   cd waybionic_teleop
+   python -m waybionic_teleop.xinput_bridge
+   ```
+
+4. Zero the drives with teleop still disabled, then press Start on the controller:
+
+   ```powershell
+   $docker = "$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin\docker.exe"
+   & $docker exec -it (& $docker ps -q --filter label=com.docker.compose.service=wslg-arm) /entrypoint.sh ros2 service call /sim_arm_drives/zero std_srvs/srv/Trigger
+   ```
+
+Stopping the bridge or unplugging the carrier closes the connection, so the drive node loses the carrier exactly as when the USB cable is pulled on a Mac: every drive stops and the arm must be zeroed again. The bridge listens only on `127.0.0.1`; keep it local, because anything that connects to it can drive the arm.
 
 ### The engineering monitor
 
