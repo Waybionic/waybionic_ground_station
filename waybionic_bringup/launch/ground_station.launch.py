@@ -284,8 +284,9 @@ def generate_launch_description():
     teleop_node = Node(
         package='waybionic_teleop', executable='xbox_teleop', name='xbox_teleop',
         output='screen', condition=IfCondition(teleop),
-        parameters=[os.path.join(teleop_config_dir, 'xbox_teleop.yaml'), diagnostics_topic,
-                    sim_time]
+        parameters=[os.path.join(teleop_config_dir, 'xbox_teleop.yaml'),
+                    os.path.join(teleop_config_dir, 'tool_drives.yaml'),
+                    diagnostics_topic, sim_time]
     )
 
     tool_drives_node = Node(

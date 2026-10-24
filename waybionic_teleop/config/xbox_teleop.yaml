@@ -50,10 +50,7 @@ xbox_teleop:
     max_linear_speed_mm_s: 50.0
     max_linear_accel_mm_s2: 250.0
     max_tilt_speed_deg_s: 30.0
-    # Provisional normalized claw travel. Replace with measured angular limits.
     tool_joints: [left_claw, right_claw]
-    tool_limits: [0.0, 1.0]
-    tool_speed: 0.25
     tool_close_axis: right_trigger
     tool_open_axis: left_trigger
     tool_frame: tool_link

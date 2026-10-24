@@ -61,6 +61,37 @@ assembly/CAD, tool-flange mounting transform and file units, plus any obstructio
 or fault behavior. If line routing makes motor steps non-linear in claw angle,
 obtain a measured calibration curve rather than one steps-per-degree value.
 
+## Provisional-value replacement checklist (PR #43)
+
+All host-side unmeasured values below are in `waybionic_teleop/config/tool_drives.yaml`.
+The `xbox_teleop` section is loaded by teleop and the `sim_tool_motors` section by
+the simulator. ROS does not support YAML aliases here, so update the shared
+normalized limits and command speed in both sections; a test checks they agree.
+Record the measurement, units, fixture, direction, and reviewer before
+changing a value. Rerun the named tests and record an RViz check. Do not treat
+the current numbers as hardware authorization.
+
+| YAML value | Unit | How Biomedical should confirm it | Test or check using it |
+| --- | --- | --- | --- |
+| `xbox_teleop.tool_limits` / each `*_claw.lower`, `upper` | normalized closure (0 open, 1 closed) | Keep normalization; establish physical open/closed stops and map them with the motor steps below. Change these bounds only if the command convention changes. | `test_teleop.py`, `test_tool_sim.py`; RViz endpoints |
+| `xbox_teleop.tool_speed` / each `*_claw.max_speed` | normalized closure/s | Time repeatable safe open/close motions for each claw under load; use the lower safe common rate for teleop. | `test_teleop.py`, `test_tool_sim.py`; stop demonstration |
+| each `*_claw.reference` | normalized closure | Identify and mark the reproducible home pose, separately for left and right. | `test_tool_motor_map.py`, `test_tool_sim.py` |
+| each `left_1`, `left_2`, `right_1`, `right_2` `.steps_per_unit` | microsteps/normalized closure | Count microsteps from measured fully open to fully closed for each cable/motor, at the board's actual microstep setting; use a calibration curve if non-linear. | `test_tool_motor_map.py`, `test_tool_sim.py`, `test_tool_board_frames.py` |
+| each motor `.direction` | sign (+1 or -1) | Move each motor individually at a safe low speed and confirm which winding opens its claw and which paired motor turns oppositely. | `test_tool_motor_map.py`, `test_tool_sim.py`; RViz motion |
+| each motor `.reference_steps` | microsteps | Home each motor safely and read its step count at the reference pose. | `test_tool_motor_map.py`, `test_tool_sim.py` |
+| `xbox_teleop.tool_mesh_scale_m_per_unit` | m/STL unit | Compare a known dimension of the final exported assembly with a physical or CAD dimension. | `test_tool_visual.py`; RViz size |
+| `xbox_teleop.tool_assembly_origin_m` | x, y, z metres in `tool_link` | Measure the tool flange to assembly datum and confirm clearance in the final CAD. | `test_tool_visual.py`; RViz mounting |
+| `xbox_teleop.tool_assembly_quaternion_xyzw` | unit quaternion in `tool_link` | Measure the tool flange to assembled mesh orientation and verify the axis convention. | `test_tool_visual.py`; RViz mounting |
+| `xbox_teleop.tool_claw_pivot_m` | x, y, z metres in assembly mesh coordinates | Locate the actual claw rotation axis in final CAD and check both moving meshes against it. | `test_tool_visual.py`; RViz open/close |
+| `xbox_teleop.tool_preview_open_angles_rad` | signed left and right radians | Measure each claw's open-to-closed angle and direction from the final assembly. | `test_tool_visual.py`; RViz endpoints |
+| `sim_tool_motors.board_safe_rpm` | motor rpm | Establish the safe motor rate under load; it must stay at or below PR #32 firmware's 60 rpm ceiling. | `test_tool_board_frames.py`; no powered test without lead and E-stop |
+| `sim_tool_motors.board_acceleration_code` | F5 protocol byte, 0–255 | Agree on a safe acceleration ramp with the board team; this is *not* steps/s². | `test_tool_board_frames.py`; firmware parser |
+
+The PR #32 firmware separately hard-codes CAN IDs 7–10, 3200 microsteps/rev,
+placeholder ±3200-microstep travel and a 20000 steps/s² cap. Check wiring,
+microstep jumpers and board limits with the board team before flashing or powered
+tests. Changing this host YAML does **not** update those firmware constants.
+
 ## Proposed software boundary
 
 The controller commands two claw positions. A separate tool mapping converts

@@ -13,6 +13,16 @@ def simulator(parameters):
     return SimulatedTool(tool_map_from_parameters(values))
 
 
+def test_teleop_and_simulator_share_provisional_limits(parameters):
+    """ROS disallows YAML aliases, so duplicated calibration must stay equal."""
+    teleop = parameters('tool_drives.yaml', 'xbox_teleop')
+    sim = parameters('tool_drives.yaml', 'sim_tool_motors')
+    for claw in ('left_claw', 'right_claw'):
+        assert sim[f'{claw}.lower'] == teleop['tool_limits'][0]
+        assert sim[f'{claw}.upper'] == teleop['tool_limits'][1]
+        assert sim[f'{claw}.max_speed'] == teleop['tool_speed']
+
+
 def test_left_claw_moves_only_its_motor_pair(simulator):
     """Independent claw commands leave the other pair at its reference."""
     simulator.command({'left_claw': 0.5, 'right_claw': 0.0})

@@ -23,7 +23,7 @@ from waybionic_teleop.collision import ArmCollision
 from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
-from waybionic_teleop.tool_visual import ASSEMBLY_ORIGIN, claw_pose, STL_TO_METRES
+from waybionic_teleop.tool_visual import claw_pose, ToolVisual
 
 # One short rumble each time a move is stopped at a limit.
 RUMBLE_INTENSITY = 0.6
@@ -62,6 +62,7 @@ class XboxTeleop(Node):
         params = {name: self.get_parameter(name).value
                   for name in self.list_parameters([], 0).names}
         self.config = config_from_parameters(params)
+        self.tool_visual = ToolVisual.from_parameters(params)
         self.timeout = float(params['input_timeout_s'])
         if not 0 < self.timeout < math.inf:
             raise ValueError('input_timeout_s must be positive and finite')
@@ -274,16 +275,18 @@ class XboxTeleop(Node):
         part.mesh_resource = TOOL_MESH_ROOT + 'assembly_static.stl'
         part.mesh_use_embedded_materials = False
         (part.pose.position.x, part.pose.position.y,
-         part.pose.position.z) = ASSEMBLY_ORIGIN
-        part.pose.orientation.w = 1.0
-        part.scale.x = part.scale.y = part.scale.z = STL_TO_METRES
+         part.pose.position.z) = self.tool_visual.assembly_origin
+        (part.pose.orientation.x, part.pose.orientation.y,
+         part.pose.orientation.z,
+         part.pose.orientation.w) = self.tool_visual.assembly_quaternion
+        part.scale.x = part.scale.y = part.scale.z = self.tool_visual.mesh_scale
         part.color.r, part.color.g, part.color.b, part.color.a = 0.55, 0.58, 0.65, 1.0
         markers.markers.append(part)
         for index, (side, joint) in enumerate(
                 zip((-1.0, 1.0), self.config.tool_joints)):
             closed = min(max((self.measured.get(joint, low) - low) / (high - low),
                              0.0), 1.0)
-            position, quaternion = claw_pose(int(side), closed)
+            position, quaternion = claw_pose(int(side), closed, self.tool_visual)
             jaw = Marker(ns='tool', id=index, type=Marker.MESH_RESOURCE,
                          action=Marker.ADD,
                          frame_locked=True)
@@ -295,7 +298,7 @@ class XboxTeleop(Node):
              jaw.pose.position.z) = position
             (jaw.pose.orientation.x, jaw.pose.orientation.y,
              jaw.pose.orientation.z, jaw.pose.orientation.w) = quaternion
-            jaw.scale.x = jaw.scale.y = jaw.scale.z = STL_TO_METRES
+            jaw.scale.x = jaw.scale.y = jaw.scale.z = self.tool_visual.mesh_scale
             jaw.color.r, jaw.color.g, jaw.color.b, jaw.color.a = 0.3, 0.75, 1.0, 0.9
             markers.markers.append(jaw)
         label = Marker(ns='status', id=0, type=Marker.TEXT_VIEW_FACING, action=Marker.ADD,

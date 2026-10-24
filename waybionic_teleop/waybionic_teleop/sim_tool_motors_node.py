@@ -14,7 +14,7 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool
 
 from waybionic_teleop import mks_can
-from waybionic_teleop.tool_board_frames import move_frames, stop_frames
+from waybionic_teleop.tool_board_frames import BOARD_MAX_RPM, move_frames, stop_frames
 from waybionic_teleop.tool_sim import (
     SimulatedTool, tool_map_from_parameters, ToolSafety)
 
@@ -38,6 +38,15 @@ class SimToolMotors(Node):
                          automatically_declare_parameters_from_overrides=True)
         params = {name: self.get_parameter(name).value
                   for name in self.list_parameters([], 0).names}
+        self.board_safe_rpm = params['board_safe_rpm']
+        self.board_acceleration_code = params['board_acceleration_code']
+        if (not isinstance(self.board_safe_rpm, int) or isinstance(self.board_safe_rpm, bool)
+                or not 1 <= self.board_safe_rpm <= BOARD_MAX_RPM):
+            raise ValueError('board_safe_rpm must be 1-60')
+        if (not isinstance(self.board_acceleration_code, int)
+                or isinstance(self.board_acceleration_code, bool)
+                or not 0 <= self.board_acceleration_code <= 255):
+            raise ValueError('board_acceleration_code must be an F5 byte')
         self.sim = SimulatedTool(tool_map_from_parameters(params))
         stalled = params.get('simulated_stalled_motor', '')
         self.sim.set_stalled_motors([stalled] if stalled else [])
@@ -77,7 +86,9 @@ class SimToolMotors(Node):
         try:
             if self.safety.command(positions, time.monotonic()):
                 self.last_frames = move_frames(
-                    self.sim.targets, self.sim.speeds)
+                    self.sim.targets, self.sim.speeds,
+                    acceleration=self.board_acceleration_code,
+                    max_rpm=self.board_safe_rpm)
         except ValueError:
             self.rejected += 1
 
