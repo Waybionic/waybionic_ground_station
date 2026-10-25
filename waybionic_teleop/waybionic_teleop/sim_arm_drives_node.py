@@ -4,7 +4,9 @@ Run the arm's joint drives: /joint_commands in, MKS CAN frames, /joint_states ou
 The drives are simulated on an in-process bus unless ``interface`` names a bus: ``slcan`` for
 the WayBionic carrier on a USB serial port, or another python-can interface (socketcan,
 udp_multicast, ...) with ``channel`` naming the adapter. The same frames then go to the real MKS
-SERVO drives, and the command, feedback and diagnostics path is identical.
+SERVO drives, and the command, feedback and diagnostics path is identical. On a real bus, the
+drives in ``simulated_drives`` stay simulated in the host because they have no hardware yet; a
+joint only they move holds still at zero if the URDF limits it.
 
 The encoders count from where the drives were powered on, so nothing moves until every drive
 has been zeroed with the arm in the zero pose: at start-up in simulation, and through the
@@ -41,7 +43,7 @@ from waybionic_control.drive_health import (
 from waybionic_teleop import carrier, mks_can
 from waybionic_teleop.drive_map import drive_map_from_parameters
 from waybionic_teleop.kinematics import joint_limits
-from waybionic_teleop.sim_drives import SimulatedBus, SimulatedServo
+from waybionic_teleop.sim_drives import PartlySimulatedBus, SimulatedBus, SimulatedServo
 
 REPLY_TIMEOUT_S = 0.5
 REPORT_PERIOD_S = 0.5
@@ -100,17 +102,30 @@ class SimArmDrives(Node):
         self.heartbeat_s = self.heartbeat_ms / 1000.0
         self.interface = params.get('interface', 'sim')
         channel = params.get('channel', '')
+        simulated = set(params.get('simulated_drives', [])) if self.interface != 'sim' else set()
+        if not simulated <= {drive.name for drive in self.map.drives}:
+            raise ValueError('simulated_drives must name drives in drives')
+        real_joints = {joint for drive in self.map.drives if drive.name not in simulated
+                       for joint in drive.factors}
+        if any(drive.name in simulated and real_joints & set(drive.factors)
+               for drive in self.map.drives):
+            # The twin would show a pose the arm is not in.
+            raise ValueError('a simulated drive cannot share a joint with a real one')
+        simulated_joints = [joint for joint in self.map.joints if joint not in real_joints]
         unmodeled = set(params['unmodeled_joints'])
         if self.interface != 'sim':
             # Real drives move only joints whose URDF limits are known.
-            unmodeled = set()
+            unmodeled &= set(simulated_joints)
         elif not unmodeled <= set(self.map.joints):
             raise ValueError('unmodeled_joints must name drives in the simulated map')
         self.modeled_joints = [joint for joint in self.map.joints if joint not in unmodeled]
         if not self.modeled_joints:
             raise ValueError('at least one drive joint needs a URDF limit')
+        # A simulated joint with a URDF limit stays in the zero pose, where the arm was zeroed.
+        self.held_joints = [joint for joint in simulated_joints if joint not in unmodeled]
         drives = self.map.drives
         self.index = {drive.can_id: index for index, drive in enumerate(drives)}
+        self.simulated = {drive.can_id for drive in drives if drive.name in simulated}
         if self.interface == 'sim':
             self.bus = SimulatedBus([SimulatedServo(drive.can_id) for drive in drives],
                                     self.bitrate)
@@ -128,6 +143,9 @@ class SimArmDrives(Node):
             from waybionic_teleop.can_bus import CanBus
             self.bus = CanBus(self.interface, channel, self.bitrate)
             self.bus_label = f'{self.interface} {channel}'
+        if self.simulated:
+            self.bus = PartlySimulatedBus(self.bus, SimulatedBus(
+                [SimulatedServo(can_id) for can_id in sorted(self.simulated)], self.bitrate))
         self.test_fault = None
         if self.interface == 'sim':
             self.declare_parameter('test_fault', 'none')
@@ -193,6 +211,11 @@ class SimArmDrives(Node):
             self.get_logger().info(f'Simulated drives: {drive_list} (no hardware)')
         else:
             self.get_logger().info(f'MKS drives on {self.bus_label}: {drive_list}')
+        if self.simulated:
+            self.get_logger().warning(
+                'Simulated in the host, no hardware: '
+                + ', '.join(drive.name for drive in drives if drive.can_id in self.simulated)
+                + ('. Held at zero: ' + ', '.join(self.held_joints) if self.held_joints else ''))
         if not zero_on_start:
             self.get_logger().warning(f'Not zeroed. {self.zero_hint()}')
 
@@ -251,6 +274,7 @@ class SimArmDrives(Node):
             self.stop_reason = f'Joint limits unavailable: {error}'
             self.get_logger().error(self.stop_reason)
             return
+        self.limits.update(dict.fromkeys(self.held_joints, (0.0, 0.0)))
         self.description_valid = True
 
     def feedback_fresh(self, now):
@@ -635,7 +659,9 @@ class SimArmDrives(Node):
                         level = DiagnosticStatus.ERROR
             statuses.append(status(
                 f'drive.{drive.name}', level, turns, 'rev',
-                f'CAN ID {drive.can_id}: {text}'
+                f'CAN ID {drive.can_id}'
+                + (', simulated (no hardware)' if drive.can_id in self.simulated else '')
+                + f': {text}'
                 + (f'; last {self.last_command[index]}' if self.last_command[index] else ''),
                 can_id=drive.can_id, last_command=self.last_command[index],
                 **health_values))

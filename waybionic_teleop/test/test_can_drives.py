@@ -32,8 +32,10 @@ from waybionic_teleop.sim_drives import SimulatedServo
 BITRATE = 1000000
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
         / 'waybionic_arm.urdf').read_text(encoding='utf-8')
-# The arm's drives without the placeholder tool, whose joint has no URDF limit yet.
-ARM_DRIVES = ['base_yaw', 'shoulder', 'elbow', 'wrist_left', 'wrist_right']
+# The arm's five drives, all on the bus, without the placeholder tool, whose joint has no URDF
+# limit yet.
+ARM_DRIVES = {'drives': ['base_yaw', 'shoulder', 'elbow', 'wrist_left', 'wrist_right'],
+              'simulated_drives': []}
 # A target sent once must stay within following_error_counts: 3390 of 4096 counts at 26:1.
 NEAR_TARGET = 0.05
 
@@ -249,7 +251,7 @@ def test_the_host_drives_mks_servos_over_can(make_node):
     thread = threading.Thread(target=serve, args=(drives_bus, servos, stop), daemon=True)
     thread.start()
     try:
-        node, executor = make_node(interface=interface, channel=channel, drives=ARM_DRIVES)
+        node, executor = make_node(interface=interface, channel=channel, **ARM_DRIVES)
         assert spin_until(executor, lambda: all(state == 'ready' for state in node.state))
         spin_for(executor, 0.1)
         # Real drives are not driven, and no joint states are published, until zeroed.
@@ -355,9 +357,9 @@ def carrier_row(node, monkeypatch):
 def test_the_host_drives_the_arm_through_the_carrier(make_node, carrier_port, monkeypatch):
     port, servos = carrier_port, carrier_port.servos
     node, executor = make_node(interface='slcan', channel='/dev/cu.usbmodem1101',
-                               drives=ARM_DRIVES)
+                               **ARM_DRIVES)
     # The carrier opens at the drives' bit rate, and the monitor waits for its first report.
-    assert port.writes[0] == b'C\rS8\rO\r'
+    assert port.writes[0] == b'C\rS6\rO\r'
     assert carrier_row(node, monkeypatch).level == DiagnosticStatus.WARN
     port.flags = carrier.ESTOP_WIRED
     assert spin_until(executor, lambda: all(state == 'ready' for state in node.state))
@@ -395,8 +397,37 @@ def test_the_host_drives_the_arm_through_the_carrier(make_node, carrier_port, mo
     assert 'USB link lost' in carrier_row(node, monkeypatch).message
     port.unplugged = False
     assert spin_until(executor, lambda: not any(node.lost))
-    assert node.bus.reopens == 1 and port.writes.count(b'C\rS8\rO\r') == 2
+    assert node.bus.reopens == 1 and port.writes.count(b'C\rS6\rO\r') == 2
     assert node.bus.refused == 0
+
+
+def test_the_arm_runs_on_the_carrier_with_its_unwired_drives_simulated(make_node, monkeypatch):
+    # J2 waits for its PCB and the tool is a placeholder, so only these drives are on the bus.
+    port = FakeCarrier({can_id: SimulatedServo(can_id) for can_id in (1, 3, 4, 5)})
+    port.flags = carrier.ESTOP_WIRED
+    monkeypatch.setattr(slcan_bus.serial, 'serial_for_url', lambda *args, **kwargs: port)
+    node, executor = make_node(interface='slcan', channel='/dev/cu.usbmodem1101')
+    assert port.writes[0] == b'C\rS6\rO\r'
+    assert spin_until(executor, lambda: all(state == 'ready' for state in node.state))
+    assert zero(node).success
+    assert spin_until(executor, lambda: node.commanded is not None)
+    press_start(node)
+    assert node.authorized, node.stop_reason
+    # J2 has a URDF limit but no drive, so it holds the zero pose; the tool's joint has no limit.
+    assert node.limits['joint_2'] == (0.0, 0.0) and 'tool_grip' not in node.limits
+    assert move(node, executor, joint_1=0.3, joint_3=-0.2, joint_5=0.2)
+    assert positions(node)['joint_2'] == 0.0
+    sent = {int(line[1:4], 16) for write in port.writes for line in write.split(b'\r')
+            if line[:1] == b't'}
+    assert sent == {1, 3, 4, 5}
+    reports = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', reports.append)
+    node.report()
+    shoulder = next(row for row in reports[-1].status if row.name == 'drive.shoulder')
+    assert 'simulated' in shoulder.message and shoulder.level == DiagnosticStatus.OK
+    # Moving J2 stops the arm rather than put the twin out of step with it.
+    command(node, joint_2=0.1)
+    assert not node.authorized and 'joint_2' in node.stop_reason
 
 
 def test_frames_the_carrier_refuses_go_out_again(make_node, carrier_port, monkeypatch):
@@ -412,7 +443,7 @@ def test_frames_the_carrier_refuses_go_out_again(make_node, carrier_port, monkey
         return True
     port.refuse = busy
     node, executor = make_node(interface='slcan', channel='/dev/cu.usbmodem1101',
-                               drives=ARM_DRIVES)
+                               **ARM_DRIVES)
     reports = []
     monkeypatch.setattr(node.diagnostics_publisher, 'publish', reports.append)
     assert spin_until(executor, lambda: all(state == 'ready' for state in node.state))
@@ -438,7 +469,7 @@ def test_a_real_bus_needs_a_urdf_limit_for_every_drive_joint(make_node, mock_dri
     assert sim.description_valid and 'tool_grip' not in sim.limits
     # Simulation runs the placeholder tool drive without a limit; real drives never hold or
     # take a command until the URDF limits every joint they move.
-    node, executor = make_node(interface='virtual', channel=channel)
+    node, executor = make_node(interface='virtual', channel=channel, simulated_drives=[])
     assert spin_until(executor, lambda: all(state == 'ready' for state in node.state))
     assert zero(node).success
     assert spin_until(executor, lambda: node.commanded is not None)

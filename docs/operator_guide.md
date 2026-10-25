@@ -299,22 +299,26 @@ bridge needs `python3-opencv`.
 ## Real arm: MKS drives over CAN
 
 The controller plugs into the computer, not the Arduino. The computer runs teleop,
-the Cartesian moves, the joint limits and collision checks, the RViz twin and the
-monitor, then sends MKS frames through the carrier board: a UNO R4 WiFi with a
-TJA1051T transceiver running `waybionic_can/arduino/carrier_bridge`. The carrier
-only passes frames between USB and the CAN bus, and reports its own status.
+the joint limits and collision checks, the RViz twin and the monitor, then sends MKS
+frames through the carrier board: a UNO R4 WiFi with an MCP2515 CAN module (8 MHz
+crystal, CS on D10, INT on D2) running `waybionic_can/arduino/carrier_bridge_mcp2515`.
+The carrier only passes frames between USB and the CAN bus, and reports its own status.
 
 ```text
-controller -> computer (ROS 2) -> USB, 1 Mbaud -> carrier -> CAN, 1 Mbit/s -> 5 MKS drives
+controller -> computer (ROS 2) -> USB, 1 Mbaud -> carrier -> CAN, 500 kbit/s -> MKS drives
 ```
 
 `waybionic_teleop/config/arm_drives.yaml` maps the joints to the drives: CAN IDs 1
 to 5 (base yaw, shoulder, elbow, wrist left, wrist right), 26:1 cycloidal reducers
-on the first three joints and 3:1 belts on the two wrist motors. Its `tool` drive
-(CAN ID 6) is a placeholder with no hardware behind it, and the host waits for every
-drive in the list, so **remove `tool` from `drives`** before driving the real arm.
-On a real bus, every drive joint needs a URDF limit before the host holds or moves
-anything (`unmodeled_joints` applies to simulation only).
+on the first three joints and 3:1 belts on the two wrist motors. The bus runs at the
+drives' factory 500 kbit/s, because the module's crystal can't run 1 Mbit/s.
+
+The drives in its `simulated_drives` list run in the computer instead: for now the
+shoulder (J2), which waits for its PCB, and the placeholder `tool` (CAN ID 6). J2 then
+holds still at zero in teleop and in the twin, so it must stay in the zero pose, and
+the Cartesian and incision groups are off because they need all five joints. Take
+`shoulder` off that list once J2 is wired. On a real bus, every joint a real drive
+moves needs a URDF limit before the host holds or moves anything.
 
 **Before the drives are first powered:** Mechanical confirms each joint's signed
 travel from the zero pose against the URDF limits, including any cable or gear stop,
@@ -340,21 +344,22 @@ then run these from the repository root.
    ./scripts/macos.sh flash
    ```
 
-2. **Set up each drive once,** alone on the bus: give it its CAN ID (they all ship
-   as 1), then switch it to 1 Mbit/s. The carrier keeps its first bit rate until it
-   resets, so replug it, connect every drive, and check they all answer.
+   To go back to the serial console that first drove the arm, run
+   `./scripts/macos.sh flash manual_arm_console`.
+
+2. **Check the drives answer.** A new drive ships as CAN ID 1, so give it its ID alone
+   on the bus first, for example `./scripts/macos.sh drives set-id 1 2` for J2. Then,
+   with every wired drive on the bus:
 
    ```bash
-   ./scripts/macos.sh drives set-id 1 3            # for example the elbow
-   ./scripts/macos.sh drives set-bitrate 3 1000000
-   # after every drive is switched: replug the carrier
-   ./scripts/macos.sh drives --bitrate 1000000 scan
+   ./scripts/macos.sh drives scan --ids 1 2 3 4 5
    ```
 
-3. **Start the ground station.** With `tool` removed from `drives` in
-   `arm_drives.yaml`, put the arm in the zero pose (upright, as RViz shows it before
-   anything moves), and run the command below. A controller plugged into the Mac, by
-   USB or Bluetooth, drives the arm and its twin together.
+   Each wired drive prints one encoder line: 1, 3, 4 and 5 until J2 is wired.
+
+3. **Start the ground station.** Put the arm in the zero pose (upright, as RViz shows
+   it before anything moves), including J2, and run the command below. A controller
+   plugged into the Mac, by USB or Bluetooth, drives the arm and its twin together.
 
    ```bash
    ./scripts/macos.sh arm
@@ -404,7 +409,7 @@ ros2 launch waybionic_bringup ground_station.launch.py teleop:=true drive_interf
 With a SocketCAN adapter (candleLight firmware):
 
 ```bash
-sudo ip link set can0 up type can bitrate 1000000
+sudo ip link set can0 up type can bitrate 500000
 ros2 launch waybionic_bringup ground_station.launch.py teleop:=true drive_interface:=socketcan drive_channel:=can0
 ```
 

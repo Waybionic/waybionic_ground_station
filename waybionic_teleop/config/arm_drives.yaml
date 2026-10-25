@@ -8,9 +8,9 @@
 sim_arm_drives:
   ros__parameters:
     rate_hz: 120.0
-    # Set every drive to 1 Mbit/s first (mks_setup, or CanRate on its screen; MKS ships 500k):
-    # six drives at 120 Hz load the bus about 30% at 1 Mbit/s and 60% at 500 kbit/s.
-    bitrate: 1000000
+    # The drives ship at 500 kbit/s, and the carrier's MCP2515 module (8 MHz crystal) cannot run
+    # 1 Mbit/s. Six drives at 120 Hz load the bus about 60%, the four now wired about 40%.
+    bitrate: 500000
     # The carrier's USB serial speed (carrier_bridge.ino); only used with interface slcan.
     tty_baudrate: 1000000
     # Teleop ramps the speed. A steep drive ramp keeps the drives in step with each other: a
@@ -42,6 +42,11 @@ sim_arm_drives:
     # Simulation only: on a real bus every drive joint needs a URDF limit.
     unmodeled_joints: [tool_grip]
     drives: [base_yaw, shoulder, elbow, wrist_left, wrist_right, tool]
+    # On a real bus these drives are simulated in the host because they have no hardware yet: the
+    # shoulder (J2) waits for its PCB, and the tool is a placeholder. J2 holds still at zero, so
+    # put it in the zero pose before zeroing. Take a drive off this list once it is wired, and
+    # delete the line when none is left (a parameter file cannot hold an empty list).
+    simulated_drives: [shoulder, tool]
     # SERVO42D (NEMA17)
     base_yaw:
       can_id: 1

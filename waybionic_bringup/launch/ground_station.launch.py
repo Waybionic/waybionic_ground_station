@@ -58,6 +58,20 @@ def _without_diagnostics(config):
     ])
 
 
+def simulated_joints(path):
+    """Return the joints that only the simulated_drives of a drive config move."""
+    try:
+        params = yaml.safe_load(_read_file(path, 'drive config'))['sim_arm_drives'][
+            'ros__parameters']
+        simulated = set(params.get('simulated_drives', []))
+        moved = {name: set(params[name]['joints']) for name in params['drives']}
+    except (KeyError, TypeError, yaml.YAMLError) as exc:
+        raise ValueError(f"Invalid drive config '{path}': {exc}") from exc
+    real = set().union(*(joints for name, joints in moved.items() if name not in simulated))
+    only = set().union(*(joints for name, joints in moved.items() if name in simulated))
+    return sorted(only - real)
+
+
 def check_files_exist(context, *args, **kwargs):
     """Validate active resources before any nodes start."""
     model_path = LaunchConfiguration('model').perform(context)
@@ -99,6 +113,15 @@ def check_files_exist(context, *args, **kwargs):
                 f'teleop={str(teleop).lower()}, '
                 f'use_diagnostics={str(use_diagnostics).lower()}'),
     ]
+    # Drives with no hardware yet are simulated on a real bus, so teleop holds their joints.
+    locked = []
+    if teleop and LaunchConfiguration('drive_interface').perform(context) != 'sim':
+        locked = simulated_joints(os.path.join(
+            get_package_share_directory('waybionic_teleop'), 'config', 'arm_drives.yaml'))
+    context.launch_configurations['locked_joints'] = ','.join(locked)
+    if locked:
+        actions.append(LogInfo(msg='No drive yet, so these joints hold still: '
+                               + ', '.join(locked)))
     rviz_path = LaunchConfiguration('rvizconfig').perform(context)
     context.launch_configurations['effective_rvizconfig'] = rviz_path
     if IfCondition(LaunchConfiguration('launch_rviz')).evaluate(context):
@@ -285,6 +308,8 @@ def generate_launch_description():
         package='waybionic_teleop', executable='xbox_teleop', name='xbox_teleop',
         output='screen', condition=IfCondition(teleop),
         parameters=[os.path.join(teleop_config_dir, 'xbox_teleop.yaml'), diagnostics_topic,
+                    {'locked_joints': ParameterValue(LaunchConfiguration('locked_joints'),
+                                                     value_type=str)},
                     sim_time]
     )
 

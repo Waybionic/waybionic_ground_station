@@ -26,7 +26,9 @@ Every setting is at the top of `tool_board.ino`:
 
 - **Enable:** D8, active low, shared by all four drivers.
 - **Microstepping:** 1/16 (3200 steps per turn).
-- **CAN bitrate:** 1 Mbit/s.
+- **CAN bitrate:** 1 Mbit/s. The arm's bus runs at 500 kbit/s (its carrier's MCP2515
+  module can't run 1 Mbit/s), so set `CAN_BITRATE` to `CanBitRate::BR_500k` before this
+  board joins it.
 - **UNO R4 Minima:** its CAN pins are D4 and D5, so the sketch refuses to compile
   for it until the pins are moved.
 
@@ -109,7 +111,8 @@ are IDs 1 to 5. The host waits for every listed drive to answer before it publis
 joint states, and zeroing fails while one is silent, so the placeholder must not stay.
 Keep the tool joints' URDF limits inside this board's travel limits: the host treats a
 move that stops at an end limit (status 3) as a fault and stops every drive.
-Polling all nine drives at 120 Hz uses a little under half of the 1 Mbit/s bus.
+Polling all nine drives at 120 Hz uses a little under half of a 1 Mbit/s bus, and so
+nearly all of the arm's 500 kbit/s one.
 
 The tool's CAN IDs are provisional until the team settles them. To change them, edit
 `FIRST_CAN_ID` in `tool_board.ino` and the drive list together.

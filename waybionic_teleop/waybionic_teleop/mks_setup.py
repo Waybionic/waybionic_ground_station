@@ -1,16 +1,16 @@
 """
 Set up the arm's MKS drives on the bench: find them, give each its CAN ID, set the bit rate.
 
-The drives ship as CAN ID 1 at 500 kbit/s. Connect one drive at a time to give it the CAN ID
-in arm_drives.yaml, then move every drive to the bus bit rate and check they all answer:
+The drives ship as CAN ID 1 at 500 kbit/s, the bus bit rate in arm_drives.yaml. Connect one
+drive at a time to give it the CAN ID in arm_drives.yaml, then check they all answer:
 
     ros2 run waybionic_teleop mks_setup --channel /dev/cu.usbmodem1101 scan
     ros2 run waybionic_teleop mks_setup --channel /dev/cu.usbmodem1101 set-id 1 3
-    ros2 run waybionic_teleop mks_setup --channel /dev/cu.usbmodem1101 set-bitrate 3 1000000
-    ros2 run waybionic_teleop mks_setup --channel /dev/cu.usbmodem1101 --bitrate 1000000 scan
+    ros2 run waybionic_teleop mks_setup --channel /dev/cu.usbmodem1101 scan --ids 1 2 3 4 5
 
-The drives' screens (CanID and CanRate) do the same. Stop the ground station's drive node
-first: two programs on one carrier would answer each other's frames.
+set-bitrate moves a drive to another bit rate, which the carrier's MCP2515 (8 MHz crystal)
+can only follow up to 500 kbit/s. The drives' screens (CanID and CanRate) do the same. Stop the
+ground station's drive node first: two programs on one carrier would answer each other's frames.
 """
 
 import argparse

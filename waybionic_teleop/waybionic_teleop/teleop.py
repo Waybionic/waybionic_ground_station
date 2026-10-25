@@ -60,6 +60,8 @@ class TeleopConfig:
     speed_level: int
     deadzone: float
     home_gain: float
+    # Joints with no drive behind them yet, such as J2 before its PCB arrives: never moved.
+    locked_joints: tuple = ()
 
 
 def config_from_parameters(params):
@@ -72,6 +74,9 @@ def config_from_parameters(params):
                         [float(scale) for scale in params[f'{name}.scales']],
                         params.get(f'{name}.mode', 'joint'))
                   for name in params['groups']]
+        # The launch file passes a comma-separated string.
+        locked = params.get('locked_joints', '')
+        locked = locked.split(',') if isinstance(locked, str) else list(locked)
         config = TeleopConfig(
             groups=groups,
             buttons={action: params[f'{action}_button'] for action in ACTIONS},
@@ -89,7 +94,8 @@ def config_from_parameters(params):
             speed_levels=[float(level) for level in params['speed_levels']],
             speed_level=int(params['initial_speed_level']),
             deadzone=float(params['deadzone']),
-            home_gain=float(params['home_gain']))
+            home_gain=float(params['home_gain']),
+            locked_joints=tuple(joint.strip() for joint in locked if joint.strip()))
     except KeyError as missing:
         raise ValueError(f'missing teleop parameter {missing}') from None
     check_config(config)
@@ -129,6 +135,9 @@ def check_config(config):
         raise ValueError('initial_speed_level or deadzone out of range')
     if len(config.tool_limits) != 2 or not config.tool_limits[0] < config.tool_limits[1]:
         raise ValueError('tool_limits must be [open, closed] with open < closed')
+    moved = {joint for group in config.groups for joint in group.joints} | {config.tool_joint}
+    if not set(config.locked_joints) <= moved:
+        raise ValueError('locked_joints must name joints that the groups or the tool move')
 
 
 class ArmTeleop:
@@ -140,9 +149,12 @@ class ArmTeleop:
         self.config = config
         self.kinematics = kinematics
         self.collision = collision
-        # Without kinematics for this arm, the Cartesian and incision groups are left out.
+        self.locked = set(config.locked_joints)
+        # Without kinematics for this arm, the Cartesian and incision groups are left out, and
+        # so they are when a joint of the chain is locked: they need every one of them.
         self.groups = [group for group in config.groups
-                       if group.mode not in MOVES or kinematics is not None]
+                       if group.mode not in MOVES
+                       or (kinematics is not None and not self.locked & set(group.joints))]
         if not self.groups:
             raise ValueError('no joint-space group or compatible Cartesian kinematics')
         for group in self.groups:
@@ -305,6 +317,8 @@ class ArmTeleop:
                 desired[joint] += scale * self.stick(axes, axis) * self.speed
         desired[config.tool_joint] = config.tool_speed * (
             self.trigger(axes, config.tool_close_axis) - self.trigger(axes, config.tool_open_axis))
+        for joint in self.locked & desired.keys():
+            desired[joint] = 0.0
         step = config.max_accel * dt
         for joint, goal in desired.items():
             velocity = self.velocities[joint]

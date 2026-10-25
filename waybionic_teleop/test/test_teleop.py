@@ -177,6 +177,26 @@ def test_holding_a_returns_to_the_zero_pose(teleop):
     assert teleop.targets['joint_1'] == pytest.approx(0.0, abs=1e-3)
 
 
+def test_locked_joints_hold_still_and_leave_out_the_five_joint_groups(params, arm):
+    # J2 has no drive before its PCB arrives, and the placeholder tool none at all.
+    teleop = ArmTeleop(config_from_parameters({**params, 'locked_joints': 'joint_2,tool_grip'}),
+                       LIMITS, arm)
+    assert [group.name for group in teleop.groups] == ['base', 'upper']
+    press(teleop, 'start', {**HOME, 'joint_2': 0.4})
+    run(teleop, 1.0, left_x=1.0, left_y=-1.0, right_y=0.5, right_trigger=-1.0)
+    targets = teleop.targets
+    assert targets['joint_1'] > 0.3 and targets['joint_3'] > 0.1
+    assert targets['joint_2'] == 0.4 and targets['tool_grip'] == 0.0 and not teleop.blocked
+    run(teleop, 5.0, 'a')
+    assert teleop.targets['joint_1'] == pytest.approx(0.0, abs=1e-3)
+    assert teleop.targets['joint_2'] == 0.4
+
+
+def test_locked_joints_must_be_ones_teleop_moves(params):
+    with pytest.raises(ValueError, match='locked_joints'):
+        config_from_parameters({**params, 'locked_joints': 'joint_9'})
+
+
 def test_the_cartesian_group_moves_the_tip_along_a_straight_line(arm, cartesian):
     assert cartesian.active_group.name == 'cartesian'
     start, pitch = arm.forward(cartesian.targets)

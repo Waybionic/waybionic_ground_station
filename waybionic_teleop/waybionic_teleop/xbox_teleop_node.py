@@ -134,6 +134,9 @@ class XboxTeleop(Node):
         self.problem = ''
         self.get_logger().info('Xbox teleop ready (press Start to enable): ' + '; '.join(
             f'{group.name}: {group.describe()}' for group in self.teleop.groups))
+        if self.teleop.locked:
+            self.get_logger().warning('No drive yet, so these joints hold still: '
+                                      + ', '.join(sorted(self.teleop.locked)))
 
     def on_joy(self, message):
         if (len(message.axes) != len(AXES) or len(message.buttons) != len(BUTTONS)

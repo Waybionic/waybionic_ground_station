@@ -217,3 +217,30 @@ class SimulatedBus:
     def _count(self, data):
         self.frames += 1
         self.bits += mks_can.frame_bits(data)
+
+
+class PartlySimulatedBus:
+    """Simulate the drives that have no hardware yet; send every other frame on the real bus."""
+
+    def __init__(self, bus, simulated):
+        self.bus, self.simulated = bus, simulated
+
+    def send(self, can_id, data):
+        if can_id in self.simulated.drives:
+            return self.simulated.send(can_id, data)
+        return self.bus.send(can_id, data)
+
+    def receive(self):
+        reply = self.simulated.receive()
+        return reply if reply is not None else self.bus.receive()
+
+    def step(self, dt):
+        self.simulated.step(dt)
+        self.bus.step(dt)
+
+    def shutdown(self):
+        self.bus.shutdown()
+
+    def __getattr__(self, name):
+        # Frame counts, errors and the carrier's link state describe the real bus.
+        return getattr(self.bus, name)

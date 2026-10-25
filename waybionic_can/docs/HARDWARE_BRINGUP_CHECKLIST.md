@@ -2,7 +2,8 @@
 
 Use this checklist with Yassin or Mujtaba present. It prepares the five arm drives (IDs 1-5)
 for the real-arm ground station. No powered step in this document has been completed or
-validated by the `waybionic_can` software-only tests.
+validated by the `waybionic_can` software-only tests. Until J2's PCB arrives, the host simulates
+the shoulder (ID 2) and holds J2 still, so skip its rows.
 
 ## Safety and prerequisites
 
@@ -11,7 +12,7 @@ validated by the `waybionic_can` software-only tests.
   minimum, and the physical emergency stop is within reach.
 - [ ] The physical E-stop removes motor energy independently of this firmware. A software stop,
   the MKS heartbeat, USB monitoring, and the carrier status frame are not safety substitutes.
-- [ ] Electrical has confirmed transceiver power/mode, common reference, connector pinout, two
+- [ ] Electrical has confirmed the CAN module's power, common reference, connector pinout, two
   120-ohm end terminations, and the powered-off CAN_H-to-CAN_L resistance.
 - [ ] Record the repository commit, operator/lead names, date, wiring photos, drive labels, and
   supply/current-limit settings in the results template below.
@@ -24,19 +25,20 @@ changing bus wiring.
 
 ## 1. Flash and verify the carrier
 
-With only the UNO R4 WiFi connected over USB:
+With only the UNO R4 WiFi and its MCP2515 module connected over USB:
 
 ```bash
 brew install arduino-cli
 ./scripts/macos.sh flash
 ```
 
-Expected: the helper finds one `/dev/cu.usbmodem*`, compiles `carrier_bridge`, uploads it, and
-prints `Flashed carrier_bridge to ...`. If several ports exist, set
+Expected: the helper finds one `/dev/cu.usbmodem*`, compiles `carrier_bridge_mcp2515`, uploads
+it, and prints `Flashed carrier_bridge_mcp2515 to ...`. If several ports exist, set
 `WAYBIONIC_CARRIER=/dev/cu.usbmodem...`. The firmware uses **1,000,000 baud on USB serial**.
-That is independent of the selected **1,000,000 bit/s CAN bus** rate.
+That is independent of the **500 kbit/s CAN bus**, the drives' factory rate: the module's 8 MHz
+crystal can't run 1 Mbit/s.
 
-Before changing drive settings, connect one factory drive at 500 kbit/s and run:
+Before changing drive settings, connect one factory drive and run:
 
 ```bash
 ./scripts/macos.sh drives scan --ids 1
@@ -64,32 +66,19 @@ Expected after each `set-id`: `The drive on CAN ID 1 now answers on N`. The CLI 
 that already answers. If verification fails, power down and leave that drive isolated; do not
 connect it to the shared bus until its displayed/configured ID is known.
 
-## 3. Change each drive to 1 Mbit/s
+## 3. Check every drive answers
 
-While each drive is still alone, at the carrier's current 500 kbit/s session:
-
-```bash
-./scripts/macos.sh drives set-bitrate 1 1000000
-./scripts/macos.sh drives set-bitrate 2 1000000
-./scripts/macos.sh drives set-bitrate 3 1000000
-./scripts/macos.sh drives set-bitrate 4 1000000
-./scripts/macos.sh drives set-bitrate 5 1000000
-```
-
-Run only the line for the isolated drive. Expected: `CAN ID N now runs at 1000000 bit/s`.
-The drive switches after replying, while the carrier retains the rate at which it first opened.
-Do not interpret the expected loss of communication after the reply as a failed change.
-
-After all five are configured, unplug/replug the carrier, connect all five drives with power
-off, verify termination, power them, and run:
+Leave every drive at its factory 500 kbit/s. Connect the drives with power off, verify
+termination, power them, and run:
 
 ```bash
-./scripts/macos.sh drives --bitrate 1000000 scan --ids 1 2 3 4 5
+./scripts/macos.sh drives scan --ids 1 2 3 4 5
 ```
 
-Expected: exactly one encoder line for every ID 1-5. This is also the required `31h` encoder
-read. Save all five values. Missing IDs suggest power, wiring, bitrate, or ID problems; unstable
-or duplicate responses suggest duplicate IDs or bus integrity problems. Do not command motion.
+Expected: exactly one encoder line for every wired ID (1, 3, 4 and 5 until J2 is wired). This
+is also the required `31h` encoder read. Save the values. Missing IDs suggest power, wiring,
+bitrate, or ID problems; unstable or duplicate responses suggest duplicate IDs or bus integrity
+problems. Do not command motion.
 
 ## 4. Start, zero, and move one joint at a time
 
@@ -146,9 +135,9 @@ logs, and do not resume until Yassin reviews the programmed `98h` heartbeat and 
 
 ## 6. Collect load, errors, and evidence
 
-With all five drives connected at 1 Mbit/s, capture:
+With every wired drive connected, capture:
 
-- the five-drive scan output and encoder values;
+- the drive scan output and encoder values;
 - `can.carrier` monitor values: status sequence/freshness, CAN controller errors, failed writes,
   refused serial lines, E-stop state, and supply state;
 - `can.bus` frame rate/load from the engineering monitor;
@@ -166,7 +155,7 @@ Date / repository commit:
 Operators / lead present:
 Carrier port / firmware result:
 USB serial baud: 1000000
-CAN bitrate: 1000000 bit/s
+CAN bitrate: 500000 bit/s
 Termination / powered-off resistance:
 Supply setting / current limit:
 

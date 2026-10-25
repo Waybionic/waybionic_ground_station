@@ -48,7 +48,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description='Simulate MKS SERVO42D/57D drives on CAN.')
     parser.add_argument('--interface', default='socketcan', help='python-can interface')
     parser.add_argument('--channel', default='vcan0', help='for example vcan0 or 239.74.163.2')
-    parser.add_argument('--bitrate', type=int, default=1000000)
+    parser.add_argument('--bitrate', type=int, default=500000)
     parser.add_argument('--ids', type=int, nargs='+', default=[1, 2, 3, 4, 5, 6],
                         help='CAN IDs of the simulated drives')
     args = parser.parse_args(argv)

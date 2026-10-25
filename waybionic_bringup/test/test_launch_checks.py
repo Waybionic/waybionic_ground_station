@@ -23,7 +23,8 @@ def check(**arguments):
         'rvizconfig': str(ROOT / 'rviz' / 'waybionic_unified.rviz'),
         'diagnostics_topic': '/diagnostics', 'teleop': 'true', 'joy_source': 'udp',
         'drive_interface': 'sim', 'autoplay': 'true', **arguments})
-    return ground_station.check_files_exist(context)
+    ground_station.check_files_exist(context)
+    return context.launch_configurations
 
 
 def test_autoplay_runs_with_teleop_on_simulated_drives():
@@ -32,6 +33,13 @@ def test_autoplay_runs_with_teleop_on_simulated_drives():
 
 def test_real_drives_run_without_autoplay():
     check(autoplay='false', drive_interface='socketcan')
+
+
+def test_teleop_holds_the_joints_that_only_simulated_drives_move():
+    # J2 waits for its PCB and the tool is a placeholder; in simulation every joint moves.
+    assert check(autoplay='false', drive_interface='slcan')['locked_joints'] == (
+        'joint_2,tool_grip')
+    assert check()['locked_joints'] == ''
 
 
 def test_autoplay_without_teleop_is_refused():
