@@ -76,6 +76,15 @@ if(BUILD_TESTING)
     endif()
   endforeach()
 
+  # carrier_bridge_mcp2515's transport, against a modeled chip in place of AA_MCP2515 and SPI.
+  ament_add_gtest(test_mcp2515_transport tests/unit/test_mcp2515_transport.cpp
+    arduino/carrier_bridge_mcp2515/Mcp2515CanTransport.cpp)
+  if(TARGET test_mcp2515_transport)
+    target_include_directories(test_mcp2515_transport BEFORE PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/fake_mcp2515 ${CMAKE_CURRENT_SOURCE_DIR}/arduino)
+    target_link_libraries(test_mcp2515_transport waybionic_can_common)
+  endif()
+
   # Skips itself when the vcan interface is missing. The can_drives.yml job runs this binary
   # with vcan0 and fails if any case skips, so a missing vcan0 cannot pass CI.
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

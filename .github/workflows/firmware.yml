@@ -36,6 +36,8 @@ jobs:
         sketch:
           - single_drive_bringup
           - carrier_bridge
+          - carrier_bridge_mcp2515
+          - manual_arm_console
           - four_node_bench/gateway
           - four_node_bench/receiver
 
@@ -46,10 +48,12 @@ jobs:
       - name: Install Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
-      - name: Install UNO R4 core
+      - name: Install UNO R4 core and AA_MCP2515
         run: |
           arduino-cli core update-index
           arduino-cli core install arduino:renesas_uno
+          arduino-cli lib update-index
+          arduino-cli lib install AA_MCP2515@1.0.7
 
       - name: Compile ${{ matrix.sketch }} for ${{ matrix.board }}
         run: >

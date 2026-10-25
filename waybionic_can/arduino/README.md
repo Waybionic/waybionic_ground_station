@@ -14,6 +14,8 @@ For the supervised session with all five arm drives, use the
 | `four_node_bench/gateway/` | Arduino 1 of the four-node bench: the laptop types commands, the board puts them on the bus and tracks which receiver answered | Only when typed |
 | `four_node_bench/receiver/` | Arduinos 2-4: answer MKS frames like a drive, with a software-only actuator | No (software only) |
 | `carrier_bridge/` | Laptop USB serial ↔ CAN bridge speaking a subset of SLCAN, so python-can can use it | Forwards whatever the host sends |
+| `carrier_bridge_mcp2515/` | The same bridge for the arm's carrier, whose CAN goes through an MCP2515 module: see [below](#the-arms-carrier-mcp2515-module) | Forwards whatever the host sends |
+| `manual_arm_console/` | The serial console that first drove the arm's J1, J3, J4 and J5, through the MCP2515 module | When you type a move |
 | `libraries/WaybionicCan/` | Shared code: MKS framing, receiver/gateway logic, console, SLCAN, UNO R4 CAN transport | - |
 
 ## Safety rules (read before powering a drive)
@@ -29,13 +31,16 @@ For the supervised session with all five arm drives, use the
   These are bench limits on top of the `mks_can.py` protocol limits (signed 24-bit axis
   -0x800000..0x7FFFFF, 0-3000 rpm, acc 0-255). They are constants in the sketch
   (`benchPolicy()` / `MotionPolicy`). Change them only with the leads, then re-upload.
-- The human-readable bench sketches stay at the drive's factory **500 kbit/s**. The real-arm
-  host and `carrier_bridge` select **1 Mbit/s CAN** after each drive is configured.
+- The human-readable bench sketches, `carrier_bridge_mcp2515` and the real-arm host all run at
+  the drive's factory **500 kbit/s**.
 - `estop <id>` sends the manual's F7h immediate emergency-stop command. It is a software
   command and does not replace the physical E-stop. Drive-ID (8Bh) and bitrate (8Ah) are not
   implemented in the merged `mks_can.py` or this shared library.
 
 ## Hardware topology
+
+This is the wiring for the UNO R4's own CAN pins. The arm's carrier uses an MCP2515 module
+instead: see [The arm's carrier](#the-arms-carrier-mcp2515-module).
 
 ```text
 laptop (USB serial: 1000000 baud for carrier_bridge, 115200 for the consoles)
@@ -62,16 +67,15 @@ UNO R4 WiFi -- CAN TX = D10 --> TJA1051T TXD
 | --- | --- | --- |
 | MKS drives as shipped | 500 kbit/s | Factory default |
 | Bench sketches (`kCanBitrate`) | 500 kbit/s | Match drives as shipped |
-| Real-arm host through `carrier_bridge` | 1 Mbit/s | Target for the five arm drives |
+| Real-arm host through `carrier_bridge_mcp2515` | 500 kbit/s | The arm's bus: the MCP2515 module's 8 MHz crystal can't run 1 Mbit/s |
 | Carrier USB serial | 1,000,000 baud | Separate serial-link setting, not CAN bitrate |
 
-Configure each drive alone before using the real-arm host. The carrier keeps the CAN rate at
-which it first opened until reset, so replug it before checking the shared 1 Mbit/s bus:
+Give each drive its CAN ID alone on the bus before using the real-arm host; the drives keep
+their factory bitrate:
 
 ```bash
-./scripts/macos.sh drives set-bitrate 3 1000000
-# after every drive is switched, replug the carrier
-./scripts/macos.sh drives --bitrate 1000000 scan --ids 1 2 3 4 5
+./scripts/macos.sh drives set-id 1 3
+./scripts/macos.sh drives scan --ids 1 2 3 4 5
 ```
 
 If the carrier and a drive disagree on CAN bitrate, no frames are ACKed.
@@ -261,14 +265,41 @@ unknown for both. Electrical has not specified the input pins, active polarity, 
 voltage-divider values, ADC reference/scaling, or valid voltage limits. The physical E-stop
 must remain effective with the carrier absent or failed.
 
+## The arm's carrier: MCP2515 module
+
+The arm's UNO R4 WiFi reaches the bus through an MCP2515 CAN module rather than its own CAN
+pins, so `./scripts/macos.sh flash` uploads `carrier_bridge_mcp2515`. It speaks the same SLCAN
+subset as `carrier_bridge`, except that only `S4`, `S5` and `S6` open: the module's 8 MHz
+crystal can't run 1 Mbit/s, so `S8` then `O` answers BELL.
+
+| UNO R4 WiFi | MCP2515 module |
+| --- | --- |
+| D10 | CS |
+| D11, D12, D13 | SPI: SI, SO, SCK |
+| D2 | INT (wired as for `manual_arm_console`; the bridge polls the chip instead) |
+
+Both MCP2515 sketches need the AA_MCP2515 library at the version that first drove the arm,
+`arduino-cli lib install AA_MCP2515@1.0.7`, which the flash command installs. The bridge resets
+and configures the chip through the library, but sends and receives through the chip's
+registers without waiting, because the library's `write()` waits for each frame to leave the
+bus while the two receive buffers fill up. It sends from one transmit buffer at a time, so frames
+leave in the host's order, and lets a frame roll over into the second receive buffer. A frame
+lost to a full receive buffer counts as a CAN error in the carrier status.
+`../tests/unit/test_mcp2515_transport.cpp` runs the transport against a modeled chip; it has
+not run on the module yet.
+
+`manual_arm_console` is the sketch that drove J1, J3, J4 and J5 before the ground station did
+(115200 baud, type `HELP`). It runs the drives in speed mode and estimates the wrist angles
+from running time. Flash it back with `./scripts/macos.sh flash manual_arm_console`.
+
 ## Adding drives one at a time
 
 1. Bring up each drive **alone** because all five ship as ID 1.
 2. Using the drive setup tooling, assign base 1, shoulder 2, elbow 3, left wrist motor 4,
-   and right wrist motor 5; then set that isolated drive to 1 Mbit/s.
-3. Add it to the shared bus with power off. Move the termination so the 120 Ω resistors stay
+   and right wrist motor 5.
+3. Add it to the shared bus with power off. Move the termination so the 120 Î© resistors stay
    at the two physical ends.
-4. Replug the carrier and scan IDs 1-5 at 1 Mbit/s. Every ID must produce exactly one `31h`
+4. Scan IDs 1-5 at 500 kbit/s. Every ID must produce exactly one `31h`
    encoder reply. Missing or duplicate replies block motion testing.
 5. **Record bus load and errors.** The bench console's `status` command demonstrates the
    package-local estimate and counters:
@@ -304,7 +335,8 @@ must remain effective with the carrier absent or failed.
 | Shared library logic (framing, receiver, gateway, console, SLCAN, bus load) | Unit-tested on the host with gtest |
 | Frame bytes vs merged `mks_can.py` | Cross-check command documented; rerun results belong in the PR/test report |
 | SLCAN bridge vs python-can's `slcan` driver | Tested against `../sim/slcan_sim` on a pseudo-terminal |
-| Sketches compiled for UNO R4 WiFi and Minima | **Pass.** All four sketches compile for `unor4wifi` and `minima`: `single_drive_bringup`, `four_node_bench/gateway`, `four_node_bench/receiver` and `carrier_bridge`. CI repeats this matrix. |
+| Sketches compiled for UNO R4 WiFi and Minima | **Pass.** All six sketches compile for `unor4wifi` and `minima`: `single_drive_bringup`, `four_node_bench/gateway`, `four_node_bench/receiver`, `carrier_bridge`, `carrier_bridge_mcp2515` and `manual_arm_console`. CI repeats this matrix. |
+| MCP2515 transport | Unit-tested on the host against a modeled chip (`test_mcp2515_transport`) |
 | Upload to a board in this assignment | **Not performed.** No hardware was flashed in this software session. |
 | Any acceptance test on the UNO R4, TJA1051T or MKS drives | **Not performed.** No new bench logs, measurements, photos or video were produced. |
 | Frame bytes vs the MKS manual | **Not directly in this package.** The manual is not committed; merged host vectors are checked. |
@@ -313,7 +345,7 @@ must remain effective with the carrier absent or failed.
 
 - Confirm the physical labels match IDs 1-5 and the wrist-left/right mapping with Yassin and
   Mujtaba.
-- Run and record the 1 Mbit/s five-drive session; factory drives still begin at 500 kbit/s.
+- Run and record the five-drive session at 500 kbit/s once J2 is wired.
 - E-stop sensing: Electrical must provide a dry/isolated sense source, UNO pin, polarity,
   pull-up/down behavior, and fail/disconnect semantics.
 - Motor-supply sensing: Electrical must provide pin, divider/isolation, ADC reference,

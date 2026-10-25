@@ -20,7 +20,8 @@ Commands:
   setup    Create/update the RoboStack environment and build the workspace
   build    Build the workspace
   launch   Launch the ground station visualization
-  flash    Compile and upload carrier_bridge to the UNO R4 WiFi (needs arduino-cli)
+  flash    Compile and upload the carrier firmware to the UNO R4 WiFi (needs arduino-cli):
+           carrier_bridge_mcp2515 by default, or name manual_arm_console or carrier_bridge
   drives   Set up the MKS drives through the carrier, e.g. drives scan (see mks_setup)
   arm      Drive the real arm: controller on this Mac, carrier on USB
   run      Run any command inside the ROS workspace
@@ -157,20 +158,24 @@ find_carrier() {
 }
 
 flash_carrier() {
+  local name="${1:-carrier_bridge_mcp2515}"
   local fqbn="arduino:renesas_uno:unor4wifi"
-  local sketch="$ROOT/waybionic_can/arduino/carrier_bridge"
+  local sketch="$ROOT/waybionic_can/arduino/$name"
   local library="$ROOT/waybionic_can/arduino/libraries/WaybionicCan"
 
-  [[ -f "$sketch/carrier_bridge.ino" ]] \
-    || fail "carrier_bridge is not in this checkout yet: it comes with PR #40 (waybionic_can)"
+  [[ -f "$sketch/$name.ino" ]] \
+    || fail "no sketch $name: use carrier_bridge_mcp2515, manual_arm_console or carrier_bridge"
   command -v arduino-cli >/dev/null 2>&1 \
     || fail "install arduino-cli first: brew install arduino-cli"
   find_carrier
   arduino-cli core update-index
   arduino-cli core install arduino:renesas_uno
+  # The MCP2515 sketches use the library the arm was first driven with, at that version.
+  arduino-cli lib update-index
+  arduino-cli lib install AA_MCP2515@1.0.7
   arduino-cli compile --fqbn "$fqbn" --library "$library" "$sketch"
   arduino-cli upload --fqbn "$fqbn" --port "$CARRIER" "$sketch"
-  echo "Flashed carrier_bridge to $CARRIER"
+  echo "Flashed $name to $CARRIER"
 }
 
 command_name="${1:-help}"
@@ -200,7 +205,7 @@ case "$command_name" in
     ;;
   flash)
     check_host
-    flash_carrier
+    flash_carrier "$@"
     ;;
   drives)
     [[ $# -gt 0 ]] || fail "drives needs an mks_setup command, such as scan"

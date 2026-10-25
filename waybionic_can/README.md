@@ -1,10 +1,12 @@
 # waybionic_can
 
 This package provides hardware-independent MKS CAN framing, gateway/node simulations, test
-tools, and UNO R4 firmware for the WayBionic arm. The real carrier is an UNO R4 WiFi connected
-through a TJA1051T transceiver to five MKS drives (IDs 1-5). The laptop reaches that bus over a
-1,000,000-baud USB SLCAN link; the CAN bus itself runs at 1,000,000 bit/s. Those two rates are
-configured independently.
+tools, and UNO R4 firmware for the WayBionic arm. The arm's carrier is an UNO R4 WiFi with an
+MCP2515 CAN module (`carrier_bridge_mcp2515`) on the MKS drives' bus (IDs 1-5). The laptop
+reaches that bus over a 1,000,000-baud USB SLCAN link; the CAN bus itself runs at the drives'
+factory 500,000 bit/s, the most the module's 8 MHz crystal allows. Those two rates are
+configured independently. `carrier_bridge` does the same through the UNO R4's own CAN pins and a
+TJA1051T transceiver.
 
 The four-node Arduino/SocketCAN bench and software actuators remain simulation tools. They do
 not demonstrate that a real drive, E-stop input, or voltage input has been validated.
