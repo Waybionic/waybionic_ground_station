@@ -906,7 +906,8 @@ def test_not_responding_simulated_drive_is_stale_within_one_report_period_and_re
     node.report()
     row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
     values = {value.key: value.value for value in row.values}
-    assert clock[0] - fault_started <= REPORT_PERIOD_S
+    # Adding up the periods can overshoot by a rounding error.
+    assert clock[0] - fault_started <= REPORT_PERIOD_S + 1e-9
     assert row.level == DiagnosticStatus.STALE
     assert values['state'] == DriveHealthState.NOT_RESPONDING.value
     assert 'target_encoder_error_deg' in values and 'reply_age_sec' in values
