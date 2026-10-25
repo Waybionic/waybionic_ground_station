@@ -73,6 +73,8 @@ select_manager() {
 prepare() {
   check_host
   select_manager
+  # A sysroot set by hand is used as is; otherwise build_workspace checks that Xcode's links.
+  SYSROOT_CHOSEN="${CONDA_BUILD_SYSROOT:-}"
   if [[ -z "${CONDA_BUILD_SYSROOT:-}" ]]; then
     CONDA_BUILD_SYSROOT="$(xcrun --show-sdk-path)"
     export CONDA_BUILD_SYSROOT
@@ -108,8 +110,50 @@ run_environment() {
   fi
 }
 
+# True if the environment's compiler builds and links a program against the SDK at $1.
+sdk_links() {
+  local dir status
+  dir="$(mktemp -d)"
+  printf 'int main(void) { return 0; }\n' > "$dir/probe.c"
+  export CONDA_BUILD_SYSROOT="$1"
+  # shellcheck disable=SC2016
+  run_environment bash -c '"${CC:-cc}" -isysroot "$1" "$2/probe.c" -o "$2/probe"' \
+    _ "$1" "$dir" > /dev/null 2>&1
+  status=$?
+  rm -rf "$dir"
+  return "$status"
+}
+
+# A newer Xcode can ship an SDK whose libSystem.tbd the environment's linker can't read yet
+# ("malformed file"), so fall back to the newest Command Line Tools SDK that links.
+choose_sysroot() {
+  local candidates found sdk i
+  if [[ -n "${SYSROOT_CHOSEN:-}" ]]; then
+    return
+  fi
+  candidates=("$CONDA_BUILD_SYSROOT")
+  shopt -s nullglob
+  found=(/Library/Developer/CommandLineTools/SDKs/MacOSX[0-9]*.sdk)
+  shopt -u nullglob
+  for (( i = ${#found[@]} - 1; i >= 0; i-- )); do
+    candidates+=("${found[i]}")
+  done
+  for sdk in "${candidates[@]}"; do
+    if sdk_links "$sdk"; then
+      if [[ "$sdk" != "${candidates[0]}" ]]; then
+        echo "Xcode's SDK doesn't link with $ENV_NAME's compiler; using $sdk"
+      fi
+      SYSROOT_CHOSEN="$sdk"
+      return
+    fi
+  done
+  fail "no macOS SDK links with $ENV_NAME's compiler; install the Command Line Tools \
+(xcode-select --install) or set CONDA_BUILD_SYSROOT to an older SDK"
+}
+
 build_workspace() {
   ensure_environment
+  choose_sysroot
   echo "Building workspace..."
   (
     cd "$ROOT"

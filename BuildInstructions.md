@@ -303,6 +303,12 @@ If it isn't listed, run `./scripts/macos.sh setup` again.
 `/System/Library/Frameworks/OpenGL.framework/Headers`.** Run `git pull`, then
 `./scripts/macos.sh build`.
 
+**The C compiler "is not able to compile a simple test program", with
+`libSystem.tbd ... malformed file` and `unknown architecture`.** Xcode's newest SDK
+is newer than the environment's linker. `./scripts/macos.sh build` then builds with
+an older SDK from the Command Line Tools; if it reports that none links, run
+`xcode-select --install` and build again.
+
 **RViz stays on `Initializing`.** Stop it, clear any Fast DDS override with
 `unset RMW_IMPLEMENTATION`, and launch again.
 
