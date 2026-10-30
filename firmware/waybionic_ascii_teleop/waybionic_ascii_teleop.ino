@@ -1,3 +1,16 @@
+// =====================================================
+// CHANGELOG (newest first) - update this on every edit
+// =====================================================
+// 2026-10-30 18:10 MDT
+//   - Finish hand-track restore polish: coastCurrentMa=250 docs/comments
+//   - ASCII-safe approx/degree comments; stale Ma=0 comment fixed
+// 2026-10-30 18:00 MDT
+//   - Restore OG hand-track firmware (pre CAN-debug / J1+J3-only smoke)
+//   - Source: ground_station bd19abb waybionic_ascii_teleop
+//   - J1+J3+J4+J5, Config_8MHz_500kbps, DISABLE=coast for hand ENC
+//   - Keep digit printI64 (R4 %lld prints "ld ld"); coast Ma=250 (Ma=0 freezes ENC)
+// =====================================================
+
 #include "AA_MCP2515.h"
 
 // =====================================================
@@ -40,13 +53,13 @@ const uint16_t J5 = 5;
 // J1/J3: SERVO42D + 26:1 gearbox
 // J4/J5: SERVO42D + 3:1 reduction
 //
-// MKS 0xF6 speed is motor shaft RPM. Joint rate ≈ motor_rpm / gear.
+// MKS 0xF6 speed is motor shaft RPM. Joint rate ~= motor_rpm / gear.
 // Reflected inertia scales ~gear^2, so arm needs much higher accel
 // than wrist or it stalls / never reaches the commanded RPM.
 //
 // Targets (approx joint-space):
-//   arm   ~28 deg/s  -> motor_rpm = 28/6 * 26 ≈ 121
-//   wrist ~180 deg/s -> motor_rpm = 180/6 * 3 ≈ 90
+//   arm   ~28 deg/s  -> motor_rpm = 28/6 * 26 ~= 121
+//   wrist ~180 deg/s -> motor_rpm = 180/6 * 3 ~= 90
 //
 // =====================================================
 
@@ -65,7 +78,7 @@ uint8_t wristAccel  = 45;
 //
 // Allowed estimated range:
 //
-//      -270° -------- 0° -------- +270°
+//      -270 deg -------- 0 deg -------- +270 deg
 //
 // IMPORTANT:
 // This is estimated from commanded runtime.
@@ -105,7 +118,7 @@ unsigned long lastAngleUpdate = 0;
 // Active joints J1/J3/J4/J5 = SERVO42D. J2 = SERVO57D (unused).
 // Host parses: ENC <c1> <c3> <c4> <c5>
 // Counts from 35h raw magnetic multi-turn (0x4000 counts/rev).
-// DISABLE coasts (Ma=0, F3 on) so ENC still tracks hand motion.
+// DISABLE coasts (Ma=coastCurrentMa, F3 on) so ENC still tracks hand motion.
 // =====================================================
 
 int64_t encJ1 = 0;
@@ -238,9 +251,30 @@ void storeEncoder(uint32_t id, int64_t value)
 
 void printI64(int64_t value)
 {
+    // UNO R4 / newlib often breaks "%lld" (Serial shows "ld ld").
+    if (value < 0)
+    {
+        Serial.print('-');
+        value = -value;
+    }
     char buf[24];
-    snprintf(buf, sizeof(buf), "%lld", (long long)value);
-    Serial.print(buf);
+    uint8_t i = 0;
+    if (value == 0)
+    {
+        buf[i++] = '0';
+    }
+    else
+    {
+        while (value > 0 && i < sizeof(buf) - 1)
+        {
+            buf[i++] = '0' + (char)(value % 10);
+            value /= 10;
+        }
+    }
+    while (i > 0)
+    {
+        Serial.print(buf[--i]);
+    }
 }
 
 
@@ -331,6 +365,9 @@ void readCAN()
 
 // Working current for SERVO42D (mA). Restored on ENABLE after coast.
 uint16_t workCurrentMa = 1600;
+// Soft freewheel current. Ma=0 often FREEZES 42D encoder updates so hand-turn
+// never reaches RViz. Small Ma keeps magnetic ENC alive while shaft is free.
+uint16_t coastCurrentMa = 250;
 
 void enableMotor(uint16_t id)
 {
@@ -346,7 +383,7 @@ void enableMotor(uint16_t id)
 
 void disableMotor(uint16_t id)
 {
-    // True coil power-down (F3=0). Encoder often freezes — prefer coastMotor.
+    // True coil power-down (F3=0). Encoder often freezes - prefer coastMotor.
     uint8_t data[3];
 
     data[0] = 0xF3;
@@ -390,12 +427,12 @@ void setMotorCurrentMa(uint16_t id, uint16_t ma, bool save)
 void coastMotor(uint16_t id)
 {
     // Soft freewheel: stay F3-enabled so magnetic encoder keeps updating,
-    // but drop runtime current to 0 so the shaft can be turned by hand.
+    // drop runtime current so the shaft can be turned by hand.
     stopMotor(id);
     delay(2);
     enableMotor(id);
     delay(2);
-    setMotorCurrentMa(id, 0, false);
+    setMotorCurrentMa(id, coastCurrentMa, false);
 }
 
 
@@ -1122,13 +1159,20 @@ void processCommand(String cmd)
 void setup()
 {
     Serial.begin(115200);
-
-    delay(1500);
+    // UNO R4 native USB: wait briefly so host sees boot lines.
+    unsigned long serialWait = millis();
+    while (!Serial && (millis() - serialWait) < 3000)
+    {
+        delay(10);
+    }
+    delay(200);
 
     Serial.println();
     Serial.println("WAYBIONIC CONTROLLER");
+    Serial.println("HAND-TRACK RESTORE J1+J3+J4+J5");
+    Serial.println("CAN INIT...");
 
-
+    uint8_t canTries = 0;
     while (
         CAN.begin(
             CANController::Mode::Normal
@@ -1136,17 +1180,27 @@ void setup()
         != CANController::OK
     )
     {
-        Serial.println("CAN INIT FAILED");
-        delay(1000);
+        canTries++;
+        Serial.print("CAN INIT FAILED try=");
+        Serial.println(canTries);
+        delay(500);
+        if (canTries >= 10)
+        {
+            Serial.println("CAN INIT GIVING UP - serial alive");
+            break;
+        }
     }
 
-
-    Serial.println("CAN INIT OK");
+    if (canTries < 10)
+    {
+        Serial.println("CAN INIT OK");
+    }
 
     lastAngleUpdate = millis();
 
     j4Angle = 0.0;
     j5Angle = 0.0;
+    Serial.println("SETUP DONE");
 }
 
 

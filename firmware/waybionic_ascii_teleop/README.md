@@ -11,7 +11,7 @@ Pairs with the host package `waybionic_embedded_bridge/` (Windows teleop + RViz 
 ## Notable firmware behavior
 
 - Streams `ENC c1 c3 c4 c5` from MKS **35h** raw magnetic counts (~25 Hz)
-- `DISABLE` = **coast** (keep enabled, runtime Ma=0) so encoders can keep updating
+- `DISABLE` = **coast** (keep enabled, runtime `coastCurrentMa=250`) so encoders keep updating (`Ma=0` freezes 42D ENC)
 - `POWEROFF` = hard `F3=0` (coils off; encoder may freeze)
 - Gear-aware defaults: arm 120 RPM / accel 240 (26:1); wrist 90 RPM / accel 45 (3:1)
 

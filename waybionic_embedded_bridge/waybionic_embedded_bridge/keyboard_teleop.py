@@ -67,7 +67,7 @@ def _windows_loop(
     print("Hold to move, release to stop. Space=STOP all. Ctrl+C quits.")
     if viz:
         print("RViz twin: closed-loop MKS encoders (26:1 arm / 3:1 wrist).")
-        print("Q=DISABLE coasts (torque off, encoders live) — hand-move updates RViz.")
+        print("Q=DISABLE soft-coast (Ma=250, encoders live) — hand-move updates RViz.")
     print("Tip: don't type in other apps while teleop is running (keys are global).")
 
     while True:
@@ -114,7 +114,7 @@ def _windows_loop(
                         client.send("ENCON")
                     except Exception:
                         pass
-                    print("> DISABLE/coast (Ma=0, encoders live for RViz)")
+                    print("> DISABLE/coast (Ma=250, encoders live for RViz)")
                 elif name == "p":
                     client.pos()
                     print("> POS")

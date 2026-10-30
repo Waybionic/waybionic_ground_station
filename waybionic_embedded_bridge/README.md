@@ -57,11 +57,11 @@ Keys: `E` enable, hold arrows (J1/J3) / WASD (wrist), release to stop, `Q` coast
    with the URDF twin — expect further KEY_DOWN / `differential*` sign fixes.
 
 2. **Coast-DISABLE + live magnetic encoder is implemented but not fully tested yet.**
-   `DISABLE` now coasts (`F3` stays on, runtime `83h` Ma=0) and encoder poll uses
-   `35h` raw, because hard `F3=0` was observed to freeze encoder updates.
-   Hand-moving a joint after `Q` and watching RViz follow has **not** been verified
-   end-to-end on hardware after the latest firmware flash. Use `POWEROFF` for true
-   coil shutdown (encoder may freeze again).
+   `DISABLE` coasts (`F3` on, runtime `83h` Ma=`coastCurrentMa` default **250**;
+   `Ma=0` freezes 42D ENC) and encoder poll uses `35h` raw, because hard `F3=0`
+   was observed to freeze encoder updates. Hand-moving a joint after `Q` and
+   watching RViz follow still needs end-to-end hardware confirmation after flash.
+   Use `POWEROFF` for true coil shutdown (encoder may freeze again).
 
 ## Related upstream path
 
