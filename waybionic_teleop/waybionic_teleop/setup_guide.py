@@ -183,6 +183,17 @@ class SetupGuide(Node):
 
     def on_diagnostics(self, message):
         now = time.monotonic()
+        names = {row.name for row in message.status}
+        positions = [name for name in names
+                     if name.startswith('arm.') and name not in ('arm.zero', 'arm.command_gate')]
+        # The drive node reports arm.zero or the joints' positions, never both, so one appearing
+        # ends the other, though its last row would count as fresh for a few seconds more.
+        if 'arm.zero' in names:
+            for name in [name for name in self.rows if name.startswith('arm.')
+                         and name not in ('arm.zero', 'arm.command_gate')]:
+                del self.rows[name]
+        elif positions:
+            self.rows.pop('arm.zero', None)
         for row in message.status:
             self.rows[row.name] = (row, now)
 

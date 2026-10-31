@@ -236,3 +236,19 @@ def test_a_problem_is_only_reported_once_it_has_lasted(guide, monkeypatch):
     assert drives()[0] == OK
     clock[0] += 0.5
     assert drives(silent)[0] == WORKING
+
+
+def test_a_zero_that_succeeded_is_not_offered_again(guide):
+    # The drive node reports arm.zero or the joints' positions, never both, so one appearing
+    # ends the other even though its last row is still fresh.
+    joints = {f'arm.joint_{number}': None for number in range(1, 6)}
+    unzeroed = ready_rows(**{'arm.zero': row('arm.zero', WARN, 'Not zeroed.', 'no'), **joints})
+    guide.on_diagnostics(DiagnosticArray(status=list(unzeroed.values())))
+    assert step(guide.fresh_rows(), 'zero').action == 'zero'
+    guide.on_diagnostics(DiagnosticArray(status=list(ready_rows().values())))
+    assert 'arm.zero' not in guide.fresh_rows()
+    assert step(guide.fresh_rows(), 'zero').state == OK
+    # And when the arm loses its zero, the old positions are no longer true.
+    guide.on_diagnostics(DiagnosticArray(status=list(unzeroed.values())))
+    assert not any(name.startswith('arm.joint_') for name in guide.fresh_rows())
+    assert step(guide.fresh_rows(), 'zero').action == 'zero'
