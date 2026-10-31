@@ -335,7 +335,7 @@ def test_the_simulated_carrier_answers_through_a_carrier_relay():
 
 @pytest.fixture
 def relay_end():
-    """The far end of a socket:// port, as a carrier relay presents the carrier: (server, url)."""
+    """Listen as a carrier relay does, yielding (server, url) for a socket:// port."""
     server = socket.create_server(('127.0.0.1', 0))
     server.settimeout(2.0)
     yield server, f'socket://127.0.0.1:{server.getsockname()[1]}'
