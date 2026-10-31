@@ -6,7 +6,6 @@ import xml.etree.ElementTree as ET
 
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 import rclpy
-from rclpy._rclpy_pybind11 import RCLError
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
@@ -14,6 +13,7 @@ from rclpy.time import Time
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 import tf2_ros
+from waybionic_teleop.ros_shutdown import is_shutdown_error
 
 ANGLE_TOLERANCE = math.radians(0.1)
 OFFSET_TOLERANCE = 1e-4
@@ -256,18 +256,8 @@ def main():
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
-    except RCLError as error:
-        # SIGINT can shut down the context before spin recreates its wait set.
-        if rclpy.ok() or 'the given context is not valid' not in str(error):
-            raise
-    except RuntimeError as error:
-        # Jazzy's binding error when a subscription's context is invalidated during SIGINT.
-        if (rclpy.ok() or not str(error).startswith(
-                "Unable to convert call argument '0' to Python object")):
-            raise
-    except TypeError as error:
-        # tf2 can no longer read the lookup time once SIGINT has invalidated the context.
-        if rclpy.ok() or not str(error).startswith('time must have sec and nanosec'):
+    except (RuntimeError, TypeError) as error:
+        if not is_shutdown_error(error):
             raise
     finally:
         node.destroy_node()

@@ -21,7 +21,14 @@ from waybionic_control.drive_health import (
     DriveHealthState,
     DriveHealthThresholds,
 )
-from waybionic_teleop import joy_udp_receiver, mks_can, sim_arm_drives_node, xbox_teleop_node
+from waybionic_teleop import (
+    autoplay_node,
+    joy_udp_receiver,
+    mks_can,
+    ros_shutdown,
+    sim_arm_drives_node,
+    xbox_teleop_node,
+)
 from waybionic_teleop.gamepad import AXES, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 from waybionic_teleop.sim_arm_drives_node import (
@@ -60,6 +67,7 @@ SHUTDOWN_NODES = [
     (joy_udp_receiver, 'JoyUdpReceiver'),
     (camera_module, 'CameraFollower'),
     (joint_demo_module, 'JointDemo'),
+    (autoplay_node, 'Autoplay'),
 ]
 
 
@@ -797,7 +805,7 @@ def test_following_error_is_reported_and_clears_on_a_current_pose_command(node, 
 
     node.on_command(command(
         node,
-        velocities={joint: 0.0 for joint in node.map.joints},
+        velocities=dict.fromkeys(node.map.joints, 0.0),
         joint_1=math.radians(6.0)))
     clock[0] += 0.1
     node.report()
@@ -859,7 +867,7 @@ def test_stalled_simulated_drive_is_reported_within_detection_window_and_recover
                              clock[0], servo.enabled, servo.target, servo.rpm)
     assert stalled, states
     assert stalled[0][1] == DiagnosticStatus.ERROR
-    assert stalled[0][0] - fault_started <= 2.0 + REPORT_PERIOD_S
+    assert stalled[0][0] - fault_started <= 2.0 + REPORT_PERIOD_S + 1e-6
     assert float(stalled[0][3]['target_encoder_error_deg']) == pytest.approx(3.0, abs=0.01)
     assert float(stalled[0][3]['reply_age_sec']) <= REPORT_PERIOD_S
     assert servo.axis == pytest.approx(0.0)
@@ -906,7 +914,8 @@ def test_not_responding_simulated_drive_is_stale_within_one_report_period_and_re
     node.report()
     row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
     values = {value.key: value.value for value in row.values}
-    assert clock[0] - fault_started <= REPORT_PERIOD_S
+    # The clock is a float sum of tick periods, which can overshoot by a rounding error.
+    assert clock[0] - fault_started <= REPORT_PERIOD_S + 1e-6
     assert row.level == DiagnosticStatus.STALE
     assert values['state'] == DriveHealthState.NOT_RESPONDING.value
     assert 'target_encoder_error_deg' in values and 'reply_age_sec' in values
@@ -1123,8 +1132,14 @@ def test_a_cartesian_tilt_into_a_joint_limit_keeps_the_drives_enabled(node, para
     assert node.commanded['joint_3'] == pytest.approx(node.limits['joint_3'][1], abs=1e-9)
 
 
+@pytest.fixture
+def short_shutdown_grace(monkeypatch):
+    monkeypatch.setattr(ros_shutdown, 'SHUTDOWN_GRACE_S', 0.05)
+
+
 @pytest.mark.parametrize('module, class_name', SHUTDOWN_NODES)
-def test_shutdown_only_ignores_an_invalid_shutdown_context(module, class_name, monkeypatch):
+def test_shutdown_only_ignores_an_invalid_shutdown_context(
+        module, class_name, monkeypatch, short_shutdown_grace):
     factory = MagicMock()
     spin = MagicMock(side_effect=RCLError('the given context is not valid'))
     monkeypatch.setattr(module, class_name, factory)
@@ -1146,7 +1161,8 @@ def test_shutdown_only_ignores_an_invalid_shutdown_context(module, class_name, m
 
 
 @pytest.mark.parametrize('module, class_name', SHUTDOWN_NODES)
-def test_binding_error_only_ignored_after_context_shutdown(module, class_name, monkeypatch):
+def test_binding_error_only_ignored_after_context_shutdown(
+        module, class_name, monkeypatch, short_shutdown_grace):
     factory = MagicMock()
     error = RuntimeError("Unable to convert call argument '0' to Python object")
     spin = MagicMock(side_effect=error)
@@ -1170,7 +1186,8 @@ def test_binding_error_only_ignored_after_context_shutdown(module, class_name, m
 
 @pytest.mark.parametrize('module, class_name', [
     (camera_module, 'CameraFollower'), (joint_demo_module, 'JointDemo')])
-def test_tf_time_error_only_ignored_after_context_shutdown(module, class_name, monkeypatch):
+def test_tf_time_error_only_ignored_after_context_shutdown(
+        module, class_name, monkeypatch, short_shutdown_grace):
     factory = MagicMock()
     error = TypeError('time must have sec and nanosec, or nanoseconds.')
     spin = MagicMock(side_effect=error)
@@ -1190,3 +1207,22 @@ def test_tf_time_error_only_ignored_after_context_shutdown(module, class_name, m
         module.main()
     assert spin.call_count == 3
     assert factory.return_value.destroy_node.call_count == 3
+
+
+@pytest.mark.parametrize('error', [
+    RCLError('the given context is not valid'),
+    RuntimeError("Unable to convert call argument '0' to Python object")])
+@pytest.mark.parametrize('module, class_name', SHUTDOWN_NODES)
+def test_shutdown_error_waits_for_the_signal_thread_to_shut_rclpy_down(
+        module, class_name, error, monkeypatch):
+    # rclpy's SIGINT thread wakes spin before it shuts the context down.
+    factory = MagicMock()
+    running = iter([True, True, True])
+    monkeypatch.setattr(module, class_name, factory)
+    monkeypatch.setattr(module.rclpy, 'init', MagicMock())
+    monkeypatch.setattr(module.rclpy, 'try_shutdown', MagicMock())
+    monkeypatch.setattr(module.rclpy, 'spin', MagicMock(side_effect=error))
+    monkeypatch.setattr(module.rclpy, 'ok', lambda: next(running, False))
+    module.main()
+    assert next(running, None) is None
+    assert factory.return_value.destroy_node.call_count == 1
