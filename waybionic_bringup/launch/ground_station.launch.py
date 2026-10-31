@@ -332,6 +332,12 @@ def generate_launch_description():
                     arm_profile, sim_time]
     )
 
+    # Tells the operator what to do next to start the arm (see waybionic_teleop/setup_guide.py).
+    setup_guide_node = Node(
+        package='waybionic_teleop', executable='setup_guide', name='setup_guide',
+        condition=IfCondition(teleop), parameters=[diagnostics_topic, sim_time]
+    )
+
     drives_node = Node(
         package='waybionic_teleop', executable='sim_arm_drives', name='sim_arm_drives',
         output='screen', condition=IfCondition(teleop),
@@ -406,6 +412,7 @@ def generate_launch_description():
         camera_bind_arg, camera_log_arg,
         launch_rviz_arg, rviz_maximized_arg, rviz_config_arg, file_check,
         rsp_node, jsp_gui_node, joint_demo_node,
-        joy_node, joy_udp_node, autoplay_node, teleop_node, drives_node, camera_follower_node,
+        joy_node, joy_udp_node, autoplay_node, teleop_node, drives_node, setup_guide_node,
+        camera_follower_node,
         temp_diag_pub_node, camera_launch, rviz_node
     ])
