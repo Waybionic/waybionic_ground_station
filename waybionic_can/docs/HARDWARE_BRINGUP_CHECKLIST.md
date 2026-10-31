@@ -28,7 +28,7 @@ With only the UNO R4 WiFi connected over USB:
 
 ```bash
 brew install arduino-cli
-./scripts/macos.sh flash
+./scripts/macos.sh flash carrier_bridge
 ```
 
 Expected: the helper finds one `/dev/cu.usbmodem*`, compiles `carrier_bridge`, uploads it, and

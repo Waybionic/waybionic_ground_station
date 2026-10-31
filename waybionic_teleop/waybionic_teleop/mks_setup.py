@@ -5,6 +5,7 @@ The drives ship as CAN ID 1 at 500 kbit/s. Connect one drive at a time to give i
 in arm_drives.yaml, then move every drive to the bus bit rate and check they all answer:
 
     ros2 run waybionic_teleop mks_setup --channel /dev/cu.usbmodem1101 scan
+    ros2 run waybionic_teleop mks_setup --channel /dev/cu.usbmodem1101 read-error 3
     ros2 run waybionic_teleop mks_setup --channel /dev/cu.usbmodem1101 set-id 1 3
     ros2 run waybionic_teleop mks_setup --channel /dev/cu.usbmodem1101 set-bitrate 3 1000000
     ros2 run waybionic_teleop mks_setup --channel /dev/cu.usbmodem1101 --bitrate 1000000 scan
@@ -46,9 +47,13 @@ def request(bus, can_id, data, code, answer_ids=None, timeout=0.2):
             time.sleep(0.002)
             continue
         reply_id, reply = frame
+        if reply_id == carrier.STATUS_ID:
+            continue
         try:
             reply_code, arguments = mks_can.parse(reply_id, reply)
-        except ValueError:
+        except ValueError as error:
+            if reply_id in answer_ids:
+                raise SystemExit(str(error)) from error
             continue
         if reply_id in answer_ids and reply_code == code:
             return arguments
@@ -63,6 +68,18 @@ def scan(bus, ids):
         if arguments is not None:
             found[can_id] = mks_can.encoder_value(arguments)
     return found
+
+
+def read_error(bus, can_id):
+    """Read signed position error without changing the drive's configuration or motion."""
+    arguments = request(
+        bus, can_id, mks_can.read_position_error(can_id), mks_can.READ_POSITION_ERROR)
+    if arguments is None:
+        raise SystemExit(f'CAN ID {can_id} did not report its position error (39h)')
+    try:
+        return mks_can.position_error_value(arguments)
+    except ValueError as error:
+        raise SystemExit(f'CAN ID {can_id}: {error}') from error
 
 
 def set_id(bus, old, new):
@@ -140,6 +157,9 @@ def main(argv=None):
     commands = parser.add_subparsers(dest='command', required=True)
     scan_command = commands.add_parser('scan', help='list the drives that answer')
     scan_command.add_argument('--ids', type=int, nargs='+', default=list(range(1, 17)))
+    error_command = commands.add_parser(
+        'read-error', help='read signed motor position error (39h); does not move the motor')
+    error_command.add_argument('can_id', type=int)
     id_command = commands.add_parser('set-id', help='give one drive a new CAN ID')
     id_command.add_argument('old', type=int)
     id_command.add_argument('new', type=int)
@@ -149,6 +169,9 @@ def main(argv=None):
     commands.add_parser('stop', help='stop every drive at once (F7h to broadcast ID 0); give '
                         "the drives' --bitrate")
     args = parser.parse_args(argv)
+    if args.command == 'read-error' and (
+            not 1 <= args.can_id <= 0x7FF or args.can_id == carrier.STATUS_ID):
+        parser.error('read-error needs a drive CAN ID from 1 to 2047, excluding carrier ID 2032')
 
     bus = open_bus(args.interface, args.channel, args.bitrate, args.tty_baudrate)
     try:
@@ -164,6 +187,11 @@ def main(argv=None):
             print(set_id(bus, args.old, args.new))
         elif args.command == 'set-bitrate':
             print(set_bitrate(bus, args.can_id, args.rate))
+        elif args.command == 'read-error':
+            error = read_error(bus, args.can_id)
+            degrees = error * 360.0 / mks_can.ERROR_COUNTS_PER_REV
+            print(f'CAN ID {args.can_id}: position error {degrees:+.6f} motor deg '
+                  f'({error:+d} error counts)')
         else:
             stop = mks_can.emergency_stop(mks_can.BROADCAST_ID)
             if not send_confirmed(bus, mks_can.BROADCAST_ID, stop):

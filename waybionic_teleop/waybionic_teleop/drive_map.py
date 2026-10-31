@@ -69,10 +69,14 @@ class DriveMap:
         return [round(angle / (2 * math.pi) * self.counts_per_rev)
                 for angle in self._shaft(positions)]
 
+    def shaft_rpm(self, velocities):
+        """Return each drive's signed shaft speed in rpm (positive counts up) for rad/s."""
+        rates = self._shaft({joint: velocities.get(joint, 0.0) for joint in self.joints})
+        return [rate * 60.0 / (2 * math.pi) for rate in rates]
+
     def to_rpm(self, velocities):
         """Return each drive's shaft speed in rpm for joint velocities in rad/s."""
-        rates = self._shaft({joint: velocities.get(joint, 0.0) for joint in self.joints})
-        return [abs(rate) * 60.0 / (2 * math.pi) for rate in rates]
+        return [abs(rate) for rate in self.shaft_rpm(velocities)]
 
     def to_positions(self, counts):
         """Return joint positions in radians from one encoder reading per drive."""

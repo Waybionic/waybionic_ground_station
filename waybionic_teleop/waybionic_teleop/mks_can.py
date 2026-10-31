@@ -7,12 +7,16 @@ is the motor ID; the data is a function code, big-endian arguments and a checksu
 """
 
 COUNTS_PER_REV = 0x4000
+ERROR_COUNTS_PER_REV = 51200
 MAX_SPEED_RPM = 3000
 MIN_AXIS, MAX_AXIS = -0x800000, 0x7FFFFF
 # Every drive acts on a frame to this ID, and none replies (manual part 5, note 1).
 BROADCAST_ID = 0
 
 READ_ENCODER = 0x31
+READ_RAW_ENCODER = 0x35
+READ_POSITION_ERROR = 0x39
+READ_ZERO_STATUS = 0x3B
 SET_MODE = 0x82
 SET_BITRATE = 0x8A
 SET_CAN_ID = 0x8B
@@ -80,10 +84,49 @@ def read_encoder(can_id):
 
 
 def encoder_value(arguments):
-    """Decode the signed 48-bit value of a 31h reply."""
+    """Decode the signed 48-bit value of a 31h or 35h reply."""
     if len(arguments) != 6:
         raise ValueError('an encoder reply carries 6 bytes')
     return int.from_bytes(arguments, 'big', signed=True)
+
+
+def read_raw_encoder(can_id):
+    """
+    Request the raw cumulative encoder value (35h), which a zero (92h) leaves alone.
+
+    It counts from the shaft's magnetic angle at power-on, so it minus the 31h value stays the
+    same from one zero until the drive loses power (bench, firmware V1.0.9).
+    """
+    return frame(can_id, READ_RAW_ENCODER)
+
+
+def read_position_error(can_id):
+    """Request motor-shaft position error (39h), not a fault code or force measurement."""
+    return frame(can_id, READ_POSITION_ERROR)
+
+
+def position_error_value(arguments):
+    """Decode signed int32 position error; 51200 units represent one motor turn."""
+    if len(arguments) != 4:
+        raise ValueError('a position error reply carries four bytes')
+    return int.from_bytes(arguments, 'big', signed=True)
+
+
+def read_zero_status(can_id):
+    """Request the zero status (3Bh); zero_is_set reads its reply."""
+    return frame(can_id, READ_ZERO_STATUS)
+
+
+def zero_is_set(arguments):
+    """
+    Return whether a 3Bh reply says the axis was zeroed since power-on.
+
+    The drives answer two bytes, the second 1 after a zero (92h) and 2 from power-on until one
+    (bench, firmware V1.0.9).
+    """
+    if len(arguments) != 2:
+        raise ValueError('a zero status reply carries 2 bytes')
+    return arguments[1] == 1
 
 
 def set_mode(can_id, mode=MODE_SR_VFOC):

@@ -32,9 +32,10 @@ def test_positions_round_trip_through_counts(arm_map):
 def test_wrist_differential_mixes_pitch_and_roll(arm_map):
     zero = dict.fromkeys(arm_map.joints, 0.0)
     # A quarter turn of the wrist is three quarters of a turn of each motor through the belts.
+    # The right motor counts the opposite way to the left one (bench arm).
     turn = 3 * COUNTS // 4
-    assert arm_map.to_counts({**zero, 'joint_4': math.pi / 2})[3:5] == [turn, turn]
-    assert arm_map.to_counts({**zero, 'joint_5': math.pi / 2})[3:5] == [-turn, turn]
+    assert arm_map.to_counts({**zero, 'joint_4': math.pi / 2})[3:5] == [turn, -turn]
+    assert arm_map.to_counts({**zero, 'joint_5': math.pi / 2})[3:5] == [-turn, -turn]
 
 
 def test_gear_ratio_scales_counts_and_speed():

@@ -12,9 +12,17 @@ such as a frame that arrives while its CAN controller is still busy. Each frame 
 followed by an empty line, which the carrier answers with CR, so every answer can be matched to
 the line it belongs to. take_refused() hands back the refused frames to be sent again. No more
 lines go unanswered at once than the carrier can queue; a frame beyond that is refused here.
+
+SLCAN has no sessions, so the carrier can still have answers to send from before: the last
+program may have closed the port with answers still in the carrier's USB buffer, or a quiet
+carrier may answer lines written before it was opened again. Each start therefore asks for the
+version first and drops everything until that answer, so no old answer is pinned on a new line.
+Shutdown waits briefly for the close acknowledgement before releasing USB: write() alone
+does not guarantee the carrier has received the final line.
 """
 
 from collections import deque
+import logging
 import time
 
 import serial
@@ -27,6 +35,7 @@ REOPEN_EVERY_S = 1.0
 # A carrier that stops reading its port fails the write, so the link is reopened rather than
 # the control loop blocking.
 WRITE_TIMEOUT_S = 0.1
+CLOSE_TIMEOUT_S = 0.25
 # The carrier sends its status ten times a second while open, so this much quiet means it is
 # closed: it reset, or it was still booting when the port opened.
 SILENCE_S = 1.0
@@ -142,22 +151,41 @@ class SlcanBus:
         self._start()
 
     def shutdown(self):
-        if self.serial is not None:
+        if self.serial is None:
+            return
+        errors, refused = self.errors, self.refused
+        try:
             self.outgoing += b'C\r'
             self.queued.append(b'C')
             self._flush()
-        if self.serial is not None:
-            self.serial.close()
-            self.serial = None
+            deadline = time.monotonic() + CLOSE_TIMEOUT_S
+            while self.serial is not None and self.pending and time.monotonic() < deadline:
+                self._read()
+                if self.pending:
+                    time.sleep(0.001)
+            if self.serial is not None and self.pending:
+                self.errors += 1
+                self.problem = f'carrier did not acknowledge close within {CLOSE_TIMEOUT_S:g} s'
+            if self.errors > errors or self.refused > refused:
+                if not self.problem:
+                    self.problem = 'carrier refused a command or sent malformed data while closing'
+                logging.getLogger(__name__).warning('Carrier close: %s', self.problem)
+        finally:
+            if self.serial is not None:
+                try:
+                    self.serial.close()
+                finally:
+                    self.serial = None
 
     def _start(self):
-        # Close in case it was left open, set the bit rate, open. Each answers \r, or \a.
+        # Close in case it was left open, set the bit rate, open. Each answers \r, or \a. The
+        # version's answer, such as V0100, comes first and marks where this start's answers begin.
         commands = [b'C', b'S' + BITRATE_CODES[self.bitrate], b'O']
-        self.outgoing[:0] = b''.join(command + b'\r' for command in commands)
+        self.outgoing[:0] = b'V\r' + b''.join(command + b'\r' for command in commands)
         self.queued[:0] = commands
-        # A carrier that reset will never answer the lines written before.
+        # Answers to the lines written before are dropped until the version's answer.
         self.pending.clear()
-        self.bell, self.full_since = False, None
+        self.syncing, self.bell, self.full_since = True, False, None
         self.heard = time.monotonic()
         self._flush()
 
@@ -190,7 +218,10 @@ class SlcanBus:
                 continue
             line = bytes(self.incoming[start:end])
             start = end + 1
-            if byte == BELL:
+            if self.syncing:
+                # Bytes from before may run into the answer, so look only at the line's end.
+                self.syncing = not (byte == CR and line[-5:-4] == b'V')
+            elif byte == BELL:
                 self._refused()
             elif not line:
                 self._answered()
@@ -212,8 +243,10 @@ class SlcanBus:
             self.bell = True
             return
         if self.pending and self.pending.popleft() == b'O':
-            # The carrier keeps the bit rate it first opened at until it resets.
-            self.problem = f'the carrier would not open at {self.bitrate} bit/s; replug it'
+            # An R4's own CAN controller keeps the rate it first opened at until it resets.
+            self.problem = (f'the carrier would not open CAN at {self.bitrate} bit/s: an 8 MHz '
+                            'MCP2515 runs 500000 at most, and one that opened at another rate '
+                            'needs a replug')
         self.errors += 1
 
     def _answered(self):

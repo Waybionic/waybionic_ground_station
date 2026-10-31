@@ -2,8 +2,9 @@
 Drive the arm from an Xbox controller: /joy in, /joint_commands out.
 
 Mapping and limits come from config/xbox_teleop.yaml and the robot_description joint limits;
-the logic lives in :mod:`waybionic_teleop.teleop`. The node also reports its state on
-/diagnostics and draws a placeholder end effector and a status label in RViz.
+a joint the arm profile (``arm_profile``) locks stays at its angle. The logic lives in
+:mod:`waybionic_teleop.teleop`. The node also reports its state on /diagnostics and draws a
+placeholder end effector and a status label in RViz.
 """
 
 import math
@@ -18,6 +19,7 @@ from sensor_msgs.msg import JointState, Joy, JoyFeedback
 from std_msgs.msg import Bool, String
 from visualization_msgs.msg import Marker, MarkerArray
 
+from waybionic_teleop.arm_profile import load_profile
 from waybionic_teleop.collision import ArmCollision
 from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
@@ -67,6 +69,7 @@ class XboxTeleop(Node):
         self.base_frame = params['base_frame']
         self.table_height = float(params.get('table_height', 0.0))
         self.clearance = float(params.get('collision_clearance', 0.01))
+        self.locked = load_profile(params.get('arm_profile', '')).locked_joints
         self.teleop = None
         self.problem = 'Waiting for robot_description'
         self.joy = None
@@ -126,7 +129,7 @@ class XboxTeleop(Node):
             kinematics = None
             self.get_logger().warning(f'Cartesian group unavailable: {error}')
         try:
-            self.teleop = ArmTeleop(self.config, limits, kinematics, collision)
+            self.teleop = ArmTeleop(self.config, limits, kinematics, collision, self.locked)
         except ValueError as error:
             self.teleop, self.problem = None, str(error)
             self.get_logger().error(f'Teleop disabled: {error}')
