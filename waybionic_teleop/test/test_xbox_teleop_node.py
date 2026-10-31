@@ -4,13 +4,14 @@ import math
 from pathlib import Path
 import time
 
+from diagnostic_msgs.msg import DiagnosticArray
 import pytest
 import rclpy
 from rclpy.parameter import Parameter
 from sensor_msgs.msg import JointState, Joy
 from std_msgs.msg import Bool, String
 
-from waybionic_teleop import xbox_teleop_node
+from waybionic_teleop import joint_control, xbox_teleop_node
 from waybionic_teleop.gamepad import AXES, BUTTONS
 from waybionic_teleop.sim_arm_drives_node import SimArmDrives
 from waybionic_teleop.xbox_teleop_node import XboxTeleop
@@ -281,3 +282,57 @@ def test_a_drive_stop_while_enabled_is_named_and_rumbles_once(node, monkeypatch,
         assert node.summary(True).endswith('DISABLED\nPRESS-MENU')
     finally:
         drives.destroy_node()
+
+
+def joint_control_report(*disabled):
+    names = ['joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5', 'tool_grip']
+    return DiagnosticArray(status=[
+        joint_control.joint_status(
+            joint, joint_control.DISABLED if joint in disabled else joint_control.ENABLED,
+            [], 0.0, 'disabled' if joint in disabled else 'enabled')
+        for joint in names])
+
+
+def test_a_joint_switched_off_while_enabled_holds_the_arm(node, monkeypatch):
+    enabled, commands = [], []
+    monkeypatch.setattr(node.enable_publisher, 'publish', enabled.append)
+    monkeypatch.setattr(node.command_publisher, 'publish', commands.append)
+    ready(node)
+    # A report that changes nothing leaves the arm enabled.
+    node.on_joint_control(joint_control_report())
+    assert node.teleop.enabled
+    node.measured['joint_3'] = 0.3
+    node.on_joint_control(joint_control_report('joint_3'))
+    assert not node.teleop.enabled and node.teleop.disabled == {'joint_3'}
+    assert 'Joint enable changed' in node.teleop.note
+    assert enabled[-1].data is False and not any(commands[-1].velocity)
+    assert dict(zip(commands[-1].name, commands[-1].position))['joint_3'] == pytest.approx(0.3)
+    # Start holds it where it is, and its stick does nothing.
+    tick(node)
+    tick(node, 'start')
+    for _ in range(20):
+        tick(node, right_y=-1.0)
+    assert node.teleop.enabled and node.teleop.targets['joint_3'] == pytest.approx(0.3)
+    assert node.teleop.blocked == []
+
+
+def test_a_joint_reported_off_before_the_description_still_applies(node):
+    node.on_joint_control(joint_control_report('joint_3'))
+    assert node.teleop is None
+    node.load(String(data=URDF))
+    assert node.teleop.disabled == {'joint_3'}
+    # The same report again, as the drive node repeats it, changes nothing.
+    node.on_joint_control(joint_control_report('joint_3'))
+    assert node.teleop.disabled == {'joint_3'}
+    node.on_joint_control(joint_control_report())
+    assert node.teleop.disabled == set()
+
+
+def test_the_state_row_names_the_joints_that_are_off(node, monkeypatch):
+    diagnostics = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', diagnostics.append)
+    node.load(String(data=URDF))
+    node.on_joint_control(joint_control_report('joint_3', 'joint_1'))
+    node.report()
+    row = next(item for item in diagnostics[-1].status if item.name == 'teleop.state')
+    assert row.message.startswith('Joints off: joint_1, joint_3; ')
