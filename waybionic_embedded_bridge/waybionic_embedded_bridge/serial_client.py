@@ -58,18 +58,42 @@ class UnoSerialClient:
         self._rx_buf.clear()
 
     def close(self) -> None:
+        """Release the COM port. Always closes the handle, even if STOP fails.
+
+        Critical on Windows: a wedged STOP write must not keep the port locked
+        after Ctrl+C / process exit.
+        """
+        ser = self._ser
+        self._ser = None
+        if ser is None:
+            return
         try:
-            self.send(protocol.STOP)
-            time.sleep(0.05)
+            if ser.is_open:
+                # Best-effort STOP; never block release on CDC quirks.
+                try:
+                    old_timeout = ser.write_timeout
+                except Exception:
+                    old_timeout = None
+                try:
+                    ser.write_timeout = 0.2
+                    ser.write(b"STOP\n")
+                    ser.flush()
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        if old_timeout is not None:
+                            ser.write_timeout = old_timeout
+                    except Exception:
+                        pass
+                try:
+                    ser.close()
+                except Exception:
+                    pass
         except Exception:
             pass
-        if self._ser is not None:
-            try:
-                if self._ser.is_open:
-                    self._ser.close()
-            except Exception:
-                pass
-        self._ser = None
+        # Brief pause so Windows finishes releasing the device handle.
+        time.sleep(0.15)
 
     def __enter__(self) -> "UnoSerialClient":
         self.open()

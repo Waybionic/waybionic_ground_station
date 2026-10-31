@@ -19,28 +19,31 @@ LIMITS = {
     "joint_1": (-2.0 * math.pi, 2.0 * math.pi),
     "joint_2": (-math.pi / 2, math.pi / 2),  # unused on hardware
     "joint_3": (-2.0 * math.pi, 2.0 * math.pi),
-    "joint_4": (-6.0 * math.pi, 6.0 * math.pi),
+    # Wrist pitch soft ROM +/-75 deg each side.
+    "joint_4": (-math.radians(75.0), math.radians(75.0)),
     "joint_5": (-6.0 * math.pi, 6.0 * math.pi),
 }
 
 # Fallback open-loop rates matched to gear-aware firmware targets:
 #   arm motor 120 RPM / 26:1 ≈ 28 deg/s joint
-#   wrist motor 90 RPM / 3:1 ≈ 180 deg/s joint
+# Pitch: 90 sim ~= 115 IRL -> open-loop rate * 115/90.
 ARM_VIZ_DEG_S = 28.0
-WRIST_VIZ_DEG_S = 180.0
+WRIST_VIZ_DEG_S = 90.0 * (115.0 / 90.0)
 
 DEFAULT_ARM_RATE = math.radians(ARM_VIZ_DEG_S)
 DEFAULT_WRIST_RATE = math.radians(WRIST_VIZ_DEG_S)
 
+# Arrows = arm; WASD = wrist pitch (j4) / roll (j5).
+# Roll signs flipped so open-loop twin matches IRL (2026-10-31).
 KEY_RATES = {
-    "up": ("joint_1", -1.0),    # matches J1 CW/CCW swap
+    "up": ("joint_1", -1.0),
     "down": ("joint_1", +1.0),
     "right": ("joint_3", +1.0),
     "left": ("joint_3", -1.0),
-    "w": ("joint_4", +1.0),     # pitch
+    "w": ("joint_4", +1.0),
     "s": ("joint_4", -1.0),
-    "a": ("joint_5", -1.0),     # roll
-    "d": ("joint_5", +1.0),
+    "a": ("joint_5", +1.0),
+    "d": ("joint_5", -1.0),
 }
 
 

@@ -3,13 +3,14 @@
 This is NOT the Waybionic ground-station SLCAN / carrier_bridge path.
 The UNO owns CAN (MCP2515 @ 500 kbps). The PC only sends newline-terminated
 ASCII at 115200 baud.
+
+Active joints: J1, J3, J4/J5 differential. J2 is intentionally absent.
 """
 
 from __future__ import annotations
 
 BAUD = 115200
 
-# System / safety
 ENABLE = "ENABLE"
 DISABLE = "DISABLE"
 STOP = "STOP"
@@ -18,7 +19,6 @@ AUTO = "AUTO"
 ZERO = "ZERO"
 POS = "POS"
 
-# Active joints: J1, J3, J4/J5 differential. J2 is intentionally absent.
 JOINT_CMDS = {
     "j1": {"cw": "J1_CW", "ccw": "J1_CCW", "stop": "J1_STOP"},
     "j3": {"cw": "J3_CW", "ccw": "J3_CCW", "stop": "J3_STOP"},
@@ -56,16 +56,18 @@ def degrate(deg_per_sec: float) -> str:
     return f"DEGRATE {deg_per_sec:g}"
 
 
-# Keyboard teleop map
+# Arrows = arm (J1/J3). WASD = wrist pitch/roll via DIFF_* (J4/J5).
+# 2026-10-31: J1 CW/CCW flipped so sim and IRL match.
+# WASD pitch/roll DIFF swapped (firmware DIFF_W/S were roll on this build).
 KEY_DOWN = {
-    "up": JOINT_CMDS["j1"]["ccw"],   # J1 CW/CCW swapped (user)
-    "down": JOINT_CMDS["j1"]["cw"],
+    "up": JOINT_CMDS["j1"]["cw"],
+    "down": JOINT_CMDS["j1"]["ccw"],
     "right": JOINT_CMDS["j3"]["cw"],
     "left": JOINT_CMDS["j3"]["ccw"],
-    "w": DIFF["w"],  # pitch
-    "s": DIFF["s"],  # pitch
-    "a": DIFF["a"],  # roll
-    "d": DIFF["d"],  # roll
+    "w": DIFF["a"],  # want pitch+; DIFF_A was pitching IRL
+    "s": DIFF["d"],  # want pitch-
+    "a": DIFF["w"],  # want roll-; DIFF_W was rolling IRL
+    "d": DIFF["s"],  # want roll+
     "escape": ESTOP,
 }
 
@@ -82,7 +84,6 @@ KEY_UP = {
 
 
 def velocity_to_joint_cmd(joint: str, velocity: float) -> str | None:
-    """Map a signed velocity to CW/CCW/STOP for j1 or j3. Returns None for unknown joints."""
     joint = joint.lower()
     if joint not in JOINT_CMDS:
         return None
@@ -92,7 +93,6 @@ def velocity_to_joint_cmd(joint: str, velocity: float) -> str | None:
 
 
 def wrist_axis_to_diff(axis: str, value: float, deadband: float = 0.2) -> str:
-    """Map a discrete wrist axis name to DIFF_* (placeholder until kinematics exist)."""
     aliases = {
         "pitch_pos": "w",
         "pitch_neg": "s",

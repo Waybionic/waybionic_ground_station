@@ -1,6 +1,39 @@
 // =====================================================
 // CHANGELOG (newest first) - update this on every edit
 // =====================================================
+// 2026-10-31 04:45 MDT
+//   - 16MHz tables also TXBO/rx=0 on this bench -> revert Config_8MHz_500kbps
+//   - Pause ENC TX while bus dead (stop digging TEC hole); CANRECOVER cmd
+//   - Set SR_vFOC (82h mode=05) on ENABLE per MKS bus-control path
+// 2026-10-31 04:30 MDT
+//   - Probe: TEC=128 TXBO rx=0 with 8MHz tables -> try Config_16MHz_500kbps
+//     (8M timing on 16M xtal ~= 1Mbit; motors @500k never ACK; ENC never arrives)
+//   - SPI 8 MHz; bus-off recover via CAN.begin+setFilters; XTAL printed at boot
+// 2026-10-31 04:15 MDT
+//   - CANDUMP: print raw RX hex so we can see 31h/35h/30h uplink shapes
+//   - Accept DLC>=7 encoder replies; CRC required only when DLC==8
+//   - Also decode 30h carry|value (manual 5.1.1) into cumulative counts
+//   - Longer settle after 31h TX (3ms) before RX drain
+// 2026-10-31 04:00 MDT
+//   - MKS V1.0.9 align: ENC uses 31h (cumulative, DLC8+CRC), not dual 35h/31h
+//   - MCP setFilters(false) after begin (default masks drop motor replies)
+//   - 8Ch respond=1/active=1 on setup + ENABLE so drives answer reads
+//   - Parse requires DLC==8 and CHECKSUM 8bit (id + body) & 0xFF
+// 2026-10-31 03:35 MDT
+//   - Wrist pitch soft ROM +/-75 deg (DIFF_W/S stop at limits)
+// 2026-10-31 03:30 MDT
+//   - coastCurrentMa back to 250 (user request)
+//   - Rate-limit CAN_TX_FAIL (was flooding CDC so host never saw ENC)
+//   - Also request 31h; accept std ID mask in storeEncoder
+// 2026-10-31 03:25 MDT
+//   - ENC never locked: burst 4x 35h without drain (MCP 2 RX bufs) + required
+//     all four haveEnc before print. Round-robin + ENC_WAIT + print partial.
+// 2026-10-31 03:20 MDT
+//   - DISABLE gravity-hold: coastCurrentMa default 800 (hand-move + anti-droop)
+//   - COASTMA <mA> runtime tune; ENC stays on so host can hand-follow in Q mode
+// 2026-10-30 18:12 MDT
+//   - Uploaded restored hand-track to UNO; Serial answers ENABLE/DISABLE/POS
+//   - Re-added R4 Serial wait + CAN init give-up (pure OG setup hung silent)
 // 2026-10-30 18:10 MDT
 //   - Finish hand-track restore polish: coastCurrentMa=250 docs/comments
 //   - ASCII-safe approx/degree comments; stale Ma=0 comment fixed
@@ -16,20 +49,47 @@
 // =====================================================
 // CAN SETUP
 // =====================================================
+// MCP2515 module crystal MUST match Config_* below.
+// 8M tables on a 16M crystal => ~1 Mbit on the wire => TX_FAIL / TXBO
+// while MKS drives look fine on the OLED (they stay at 500 kbit/s).
+// Common blue MCP2515 boards are 8M OR 16M — check the can on the module.
+// =====================================================
 
 const CANBitrate::Config CAN_BITRATE =
     CANBitrate::Config_8MHz_500kbps;
+const uint8_t CAN_XTAL_MHZ = 8;
 
 const uint8_t CAN_CS  = 10;
 const int8_t  CAN_INT = 2;
+const uint32_t CAN_SPI_HZ = 8000000;
 
 CANConfig config(
     CAN_BITRATE,
     CAN_CS,
-    CAN_INT
+    CAN_INT,
+    SPI,
+    CAN_SPI_HZ
 );
 
 CANController CAN(config);
+
+uint32_t canTxFailCount = 0;
+unsigned long lastCanRecoverMs = 0;
+
+bool recoverCanBus(const char *reason)
+{
+    Serial.print("CAN_RECOVER ");
+    Serial.println(reason ? reason : "");
+    if (CAN.begin(CANController::Mode::Normal) != CANController::OK)
+    {
+        Serial.println("CAN_RECOVER FAIL");
+        return false;
+    }
+    CAN.setFilters(false);
+    canTxFailCount = 0;
+    Serial.println("CAN_RECOVER OK");
+    return true;
+}
 
 
 // =====================================================
@@ -89,8 +149,9 @@ uint8_t wristAccel  = 45;
 float j4Angle = 0.0;
 float j5Angle = 0.0;
 
-const float J4_MIN = -270.0;
-const float J4_MAX =  270.0;
+// Pitch soft ROM: +/-75 deg each side of ZERO.
+const float J4_MIN = -75.0;
+const float J4_MAX =  75.0;
 
 const float J5_MIN = -270.0;
 const float J5_MAX =  270.0;
@@ -117,7 +178,8 @@ unsigned long lastAngleUpdate = 0;
 // =====================================================
 // Active joints J1/J3/J4/J5 = SERVO42D. J2 = SERVO57D (unused).
 // Host parses: ENC <c1> <c3> <c4> <c5>
-// Counts from 35h raw magnetic multi-turn (0x4000 counts/rev).
+// Manual V1.0.9 5.1.2: 31h cumulative multi-turn (0x4000 counts/rev).
+// Reply DLC=8: 31h + int48_t + CHECKSUM8. Coordinates for F4/F5 use 31h.
 // DISABLE coasts (Ma=coastCurrentMa, F3 on) so ENC still tracks hand motion.
 // =====================================================
 
@@ -144,7 +206,7 @@ const unsigned long ENC_PERIOD_MS = 40;
 
 uint8_t checksum(
     uint16_t id,
-    uint8_t *data,
+    const uint8_t *data,
     uint8_t len
 )
 {
@@ -180,28 +242,110 @@ void sendMKS(
 
     if (result != CANController::IOResult::OK)
     {
-        Serial.print("CAN_TX_FAIL ID ");
-        Serial.println(id);
+        canTxFailCount++;
+        // Do not flood USB CDC - host must still see ENC lines.
+        static unsigned long lastFailPrint = 0;
+        unsigned long now = millis();
+        if (now - lastFailPrint >= 1000)
+        {
+            lastFailPrint = now;
+            Serial.print("CAN_TX_FAIL ID ");
+            Serial.print(id);
+            Serial.print(" fails=");
+            Serial.print(canTxFailCount);
+            Serial.print(" xtal=");
+            Serial.print(CAN_XTAL_MHZ);
+            Serial.println("M");
+        }
+        if (canTxFailCount > 30 && (now - lastCanRecoverMs) > 2000)
+        {
+            lastCanRecoverMs = now;
+            recoverCanBus("tx_fail");
+        }
+    }
+    else
+    {
+        canTxFailCount = 0;
     }
 }
 
 
 // =====================================================
-// ENCODER REQUEST / PARSE (MKS 31h)
+// ENCODER REQUEST / PARSE (MKS V1.0.9 31h / 8Ch)
 // =====================================================
 
-// 35h = raw accumulated multi-turn (magnetic). Prefer over 31h: some
-// firmware freezes 31h after F3 disable; 35h tracks shaft motion either way.
+// 31h = cumulative multi-turn (manual 5.1.2) - coordinate source for F4/F5.
+// 35h = raw accumulated (5.1.5) - accepted if a drive answers it instead.
+const uint8_t CMD_READ_ENCODER_CARRY = 0x30; // carry(int32) + value(uint16)
+const uint8_t CMD_READ_ENCODER_ADD = 0x31;
 const uint8_t CMD_READ_ENCODER_RAW = 0x35;
+const uint8_t CMD_SET_RESPONSE = 0x8C;
 
-void requestEncoder(uint16_t id)
+bool canDump = false;
+uint32_t canRxCount = 0;
+uint32_t canEncOk = 0;
+
+void requestEncoderCmd(uint16_t id, uint8_t code)
 {
     uint8_t data[2];
 
-    data[0] = CMD_READ_ENCODER_RAW;
+    data[0] = code;
     data[1] = checksum(id, data, 1);
 
     sendMKS(id, data, 2);
+}
+
+void requestEncoder(uint16_t id)
+{
+    // Manual 5.1.2: 31h cumulative is the coordinate encoder. One request per tick.
+    requestEncoderCmd(id, CMD_READ_ENCODER_ADD);
+}
+
+int64_t decodeEncoderCarry(const uint8_t *args)
+{
+    // Manual 5.1.1: carry int32 big-endian + value uint16 (0..0x3FFF).
+    int32_t carry = (int32_t)(
+        ((uint32_t)args[0] << 24) |
+        ((uint32_t)args[1] << 16) |
+        ((uint32_t)args[2] << 8) |
+        (uint32_t)args[3]
+    );
+    uint16_t value = (uint16_t)(((uint16_t)args[4] << 8) | args[5]);
+    return ((int64_t)carry * 0x4000LL) + (int64_t)value;
+}
+
+void setMotorResponse(uint16_t id, bool respond, bool active)
+{
+    // Manual 5.2.12 / menu CanRSP: XX=respond, YY=active. Force on so 31h replies.
+    uint8_t data[4];
+    data[0] = CMD_SET_RESPONSE;
+    data[1] = respond ? 0x01 : 0x00;
+    data[2] = active ? 0x01 : 0x00;
+    data[3] = checksum(id, data, 3);
+    sendMKS(id, data, 4);
+}
+
+void setMotorWorkMode(uint16_t id, uint8_t mode)
+{
+    // Manual 5.2.2: 05h = SR_vFOC (bus FOC). Needed for reliable bus control.
+    uint8_t data[3];
+    data[0] = 0x82;
+    data[1] = mode;
+    data[2] = checksum(id, data, 2);
+    sendMKS(id, data, 3);
+}
+
+void enableMotorResponses()
+{
+    const uint16_t ids[4] = { J1, J3, J4, J5 };
+    for (uint8_t i = 0; i < 4; i++)
+    {
+        setMotorResponse(ids[i], true, true);
+        delay(2);
+        setMotorWorkMode(ids[i], 0x05);
+        delay(2);
+        readCAN();
+    }
 }
 
 
@@ -226,22 +370,23 @@ int64_t decodeEncoder48(const uint8_t *args)
 
 void storeEncoder(uint32_t id, int64_t value)
 {
-    if (id == J1)
+    uint16_t sid = (uint16_t)(id & 0x7FF);
+    if (sid == J1)
     {
         encJ1 = value;
         haveEncJ1 = true;
     }
-    else if (id == J3)
+    else if (sid == J3)
     {
         encJ3 = value;
         haveEncJ3 = true;
     }
-    else if (id == J4)
+    else if (sid == J4)
     {
         encJ4 = value;
         haveEncJ4 = true;
     }
-    else if (id == J5)
+    else if (sid == J5)
     {
         encJ5 = value;
         haveEncJ5 = true;
@@ -278,22 +423,62 @@ void printI64(int64_t value)
 }
 
 
+uint8_t encRoundRobin = 0;
+
 void printEncoderLine()
 {
-    // Wait until every active SERVO42D has answered 35h at least once.
-    if (!(haveEncJ1 && haveEncJ3 && haveEncJ4 && haveEncJ5))
+    static unsigned long encStartMs = 0;
+    if (encStartMs == 0)
     {
+        encStartMs = millis();
+    }
+
+    bool any = haveEncJ1 || haveEncJ3 || haveEncJ4 || haveEncJ5;
+    bool all = haveEncJ1 && haveEncJ3 && haveEncJ4 && haveEncJ5;
+    if (!any)
+    {
+        static unsigned long lastWait;
+        unsigned long now = millis();
+        if (now - lastWait > 2000)
+        {
+            lastWait = now;
+            Serial.print("ENC_WAIT ");
+            Serial.print(haveEncJ1 ? "J1" : "-");
+            Serial.print(haveEncJ3 ? "J3" : "-");
+            Serial.print(haveEncJ4 ? "J4" : "-");
+            Serial.print(haveEncJ5 ? "J5" : "-");
+            Serial.print(" rx=");
+            Serial.print(canRxCount);
+            Serial.print(" encok=");
+            Serial.println(canEncOk);
+        }
+        // Do not publish ENC 0 0 0 0 - host would false-lock and RViz freezes.
         return;
     }
 
+    if (!all)
+    {
+        static unsigned long lastPartial;
+        unsigned long now = millis();
+        if (now - encStartMs < 1500 && (now - lastPartial) > 500)
+        {
+            lastPartial = now;
+            Serial.print("ENC_PARTIAL ");
+            Serial.print(haveEncJ1 ? "J1" : "-");
+            Serial.print(haveEncJ3 ? "J3" : "-");
+            Serial.print(haveEncJ4 ? "J4" : "-");
+            Serial.println(haveEncJ5 ? "J5" : "-");
+        }
+    }
+
     Serial.print("ENC ");
-    printI64(encJ1);
+    printI64(haveEncJ1 ? encJ1 : 0);
     Serial.print(' ');
-    printI64(encJ3);
+    printI64(haveEncJ3 ? encJ3 : 0);
     Serial.print(' ');
-    printI64(encJ4);
+    printI64(haveEncJ4 ? encJ4 : 0);
     Serial.print(' ');
-    printI64(encJ5);
+    printI64(haveEncJ5 ? encJ5 : 0);
     Serial.println();
 }
 
@@ -307,17 +492,21 @@ void serviceEncoders()
         return;
     }
 
-    if (now - lastEncRequest >= ENC_PERIOD_MS)
+    // Do not keep hammering TX while bus-off - TEC never recovers.
+    bool busDead = canTxFailCount > 20;
+
+    // MCP2515 only has 2 RX buffers. One drive per tick + drain after TX.
+    if (!busDead && now - lastEncRequest >= (ENC_PERIOD_MS / 4))
     {
         lastEncRequest = now;
 
-        requestEncoder(J1);
-        delay(2);
-        requestEncoder(J3);
-        delay(2);
-        requestEncoder(J4);
-        delay(2);
-        requestEncoder(J5);
+        const uint16_t ids[4] = { J1, J3, J4, J5 };
+        uint16_t id = ids[encRoundRobin & 3];
+        encRoundRobin++;
+
+        requestEncoder(id);
+        delay(3);
+        readCAN();
     }
 
     if (now - lastEncPrint >= ENC_PERIOD_MS)
@@ -343,17 +532,48 @@ void readCAN()
     {
         const uint8_t dlc = rx.getDlc();
         const uint8_t *data = rx.getData();
+        const uint16_t sid = (uint16_t)(rx.getId() & 0x7FF);
+        canRxCount++;
 
-        // 35h (raw) or 31h (addition) reply: code + 6-byte int48 (+ optional CRC)
+        if (canDump)
+        {
+            Serial.print("CANRX id=");
+            Serial.print(sid);
+            Serial.print(" dlc=");
+            Serial.print(dlc);
+            Serial.print(" ");
+            for (uint8_t i = 0; i < dlc && i < 8; i++)
+            {
+                if (data[i] < 16)
+                {
+                    Serial.print('0');
+                }
+                Serial.print(data[i], HEX);
+                Serial.print(' ');
+            }
+            Serial.println();
+        }
+
+        // Manual uplink: code + payload + CHECKSUM8. Some FW omit CRC (DLC 7).
+        bool crcOk = true;
+        if (dlc == 8)
+        {
+            crcOk = (data[7] == checksum(sid, data, 7));
+        }
+
         if (
             dlc >= 7 &&
-            (data[0] == CMD_READ_ENCODER_RAW || data[0] == 0x31)
+            crcOk &&
+            (data[0] == CMD_READ_ENCODER_ADD || data[0] == CMD_READ_ENCODER_RAW)
         )
         {
-            storeEncoder(
-                rx.getId(),
-                decodeEncoder48(&data[1])
-            );
+            storeEncoder(sid, decodeEncoder48(&data[1]));
+            canEncOk++;
+        }
+        else if (dlc >= 7 && crcOk && data[0] == CMD_READ_ENCODER_CARRY)
+        {
+            storeEncoder(sid, decodeEncoderCarry(&data[1]));
+            canEncOk++;
         }
     }
 }
@@ -365,8 +585,8 @@ void readCAN()
 
 // Working current for SERVO42D (mA). Restored on ENABLE after coast.
 uint16_t workCurrentMa = 1600;
-// Soft freewheel current. Ma=0 often FREEZES 42D encoder updates so hand-turn
-// never reaches RViz. Small Ma keeps magnetic ENC alive while shaft is free.
+// Soft coast / hand-follow current while DISABLE (F3 on so ENC lives).
+// Ma=0 freezes ENC on these 42Ds. Default 250 per user (hand-easy).
 uint16_t coastCurrentMa = 250;
 
 void enableMotor(uint16_t id)
@@ -527,6 +747,9 @@ void restoreCurrentAndEnable(uint16_t id)
 
 void enableAll()
 {
+    // Ensure drives answer 31h reads (8Ch may have been cleared on some boards).
+    enableMotorResponses();
+
     // Re-arm coils + restore Ma after coast (DISABLE).
     restoreCurrentAndEnable(J1);
     delay(5);
@@ -545,8 +768,8 @@ void enableAll()
 
 void disableAll()
 {
-    // Coast (current=0, stay enabled) so hand-moved joints still update ENC.
-    // Use POWEROFF for true F3 coil shutdown (encoder may freeze).
+    // Soft hold: F3 on + coastCurrentMa so ENC tracks hand moves and
+    // joints resist gravity. POWEROFF = true F3=0 (ENC may freeze).
     coastMotor(J1);
     delay(5);
 
@@ -642,7 +865,15 @@ void updateAngles()
         DEG_PER_SEC *
         dt;
 
-    // Software travel limits DISABLED for bring-up (no auto-stop / clamp).
+    // Pitch soft ROM (+/-75). j4Angle tracks DIFF_W/S pitch estimate.
+    if (j4Angle > J4_MAX)
+    {
+        j4Angle = J4_MAX;
+    }
+    if (j4Angle < J4_MIN)
+    {
+        j4Angle = J4_MIN;
+    }
 }
 
 
@@ -708,15 +939,26 @@ void moveJ5CCW()
 
 void differentialW()
 {
+    // Pitch+: stop at +75 deg soft ROM.
+    if (j4Angle >= J4_MAX)
+    {
+        stopDifferential();
+        return;
+    }
     moveJ4CW();
     delay(3);
     moveJ5CW();
-    // Quiet on repeat pulses - USB CDC hangs if we println every 150-400ms.
 }
 
 
 void differentialS()
 {
+    // Pitch-: stop at -75 deg soft ROM.
+    if (j4Angle <= J4_MIN)
+    {
+        stopDifferential();
+        return;
+    }
     moveJ4CCW();
     delay(3);
     moveJ5CCW();
@@ -1027,15 +1269,14 @@ void processCommand(String cmd)
 
     else if (cmd == "ENC")
     {
-        requestEncoder(J1);
-        delay(2);
-        requestEncoder(J3);
-        delay(2);
-        requestEncoder(J4);
-        delay(2);
-        requestEncoder(J5);
-        delay(5);
-        readCAN();
+        // One ID at a time + drain (MCP only has 2 RX buffers).
+        const uint16_t ids[4] = { J1, J3, J4, J5 };
+        for (uint8_t i = 0; i < 4; i++)
+        {
+            requestEncoder(ids[i]);
+            delay(3);
+            readCAN();
+        }
         printEncoderLine();
     }
 
@@ -1051,6 +1292,52 @@ void processCommand(String cmd)
         Serial.println("ENC_STREAM=0");
     }
 
+    else if (cmd == "CANDUMP")
+    {
+        canDump = true;
+        Serial.println("CANDUMP=1");
+    }
+
+    else if (cmd == "CANDUMPOFF")
+    {
+        canDump = false;
+        Serial.println("CANDUMP=0");
+    }
+
+    else if (cmd == "CANSTAT")
+    {
+        Serial.print("CANSTAT rx=");
+        Serial.print(canRxCount);
+        Serial.print(" encok=");
+        Serial.print(canEncOk);
+        Serial.print(" txfail=");
+        Serial.print(canTxFailCount);
+        Serial.print(" xtal=");
+        Serial.print(CAN_XTAL_MHZ);
+        Serial.print("M have=");
+        Serial.print(haveEncJ1 ? "J1" : "-");
+        Serial.print(haveEncJ3 ? "J3" : "-");
+        Serial.print(haveEncJ4 ? "J4" : "-");
+        Serial.println(haveEncJ5 ? "J5" : "-");
+        CAN.getErrors().print(Serial);
+    }
+
+    else if (cmd == "CANRECOVER")
+    {
+        recoverCanBus("cmd");
+        enableMotorResponses();
+    }
+
+    else if (cmd.startsWith("COASTMA "))
+    {
+        int value = cmd.substring(8).toInt();
+        if (value >= 0 && value <= 3000)
+        {
+            coastCurrentMa = (uint16_t)value;
+            Serial.print("COAST_MA=");
+            Serial.println(coastCurrentMa);
+        }
+    }
 
     // Arm speed
     else if (cmd.startsWith("ARMSPEED "))
@@ -1169,7 +1456,10 @@ void setup()
 
     Serial.println();
     Serial.println("WAYBIONIC CONTROLLER");
-    Serial.println("HAND-TRACK RESTORE J1+J3+J4+J5");
+    Serial.println("HAND-TRACK J1+J3+J4+J5");
+    Serial.print("MCP XTAL CONFIG=");
+    Serial.print(CAN_XTAL_MHZ);
+    Serial.println("MHz @ 500kbps");
     Serial.println("CAN INIT...");
 
     uint8_t canTries = 0;
@@ -1193,7 +1483,20 @@ void setup()
 
     if (canTries < 10)
     {
+        // MCP2515 reset leaves RX masks/filters on; default IDs drop motor replies.
+        // Accept-all so 31h uplink frames (IDs 1/3/4/5) reach the host.
+        if (!CAN.setFilters(false))
+        {
+            Serial.println("CAN FILTERS FAIL");
+        }
+        else
+        {
+            Serial.println("CAN FILTERS OFF (accept all)");
+        }
         Serial.println("CAN INIT OK");
+
+        enableMotorResponses();
+        Serial.println("MKS 8Ch RESPOND ON");
     }
 
     lastAngleUpdate = millis();

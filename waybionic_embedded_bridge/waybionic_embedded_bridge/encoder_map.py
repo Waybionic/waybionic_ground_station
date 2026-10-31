@@ -8,7 +8,6 @@ Matches waybionic_teleop arm_drives.yaml for the active joints:
   J2 (57D) unused
 
 ENC line: ENC <c1> <c3> <c4> <c5>
-Works with motors disabled — magnetic encoders still report via CAN 31h.
 """
 
 from __future__ import annotations
@@ -17,9 +16,13 @@ import math
 import time
 from dataclasses import dataclass, field
 
-COUNTS_PER_REV = 0x4000  # MKS multi-turn encoder
+COUNTS_PER_REV = 0x4000
 ARM_GEAR = 26.0
-WRIST_GEAR = 3.0
+# Mechanical wrist reduction is 3:1. Tuned vs bench (gear 6 base).
+# User: 90 deg sim ~= 115 deg IRL -> scale pitch up by 115/90.
+WRIST_GEAR = 6.0
+PITCH_SCALE = 115.0 / 90.0
+PITCH_ROM_RAD = math.radians(75.0)
 
 
 @dataclass
@@ -63,8 +66,6 @@ class EncoderState:
         joints = counts_to_joints(c1, c3, c4, c5, self.zero)
         dt = now - self._last_t if self._last_t > 0 else 0.0
         if dt > 1e-4 and self._last_pos:
-            # Finite-difference joint velocity for smoother RViz motion.
-            # Clamp dt so a USB hitch doesn't spike velocity.
             dt_c = min(dt, 0.2)
             self.velocities = {
                 name: (joints[name] - self._last_pos.get(name, joints[name])) / dt_c
@@ -89,37 +90,47 @@ def counts_to_joints(
     c5: int,
     zero: EncoderZero | None = None,
 ) -> dict[str, float]:
-    """Return joint_1..joint_5 radians from absolute encoder counts."""
     if zero and zero.set:
         c1 -= zero.c1
         c3 -= zero.c3
         c4 -= zero.c4
         c5 -= zero.c5
 
-    # Output shaft angles after gearbox (rad).
     out1 = _shaft_rad(c1, ARM_GEAR)
     out3 = _shaft_rad(c3, ARM_GEAR)
-    out_left = _shaft_rad(c4, WRIST_GEAR)   # wrist_left:  j4 - j5
-    out_right = _shaft_rad(c5, WRIST_GEAR)  # wrist_right: j4 + j5
+    out_left = _shaft_rad(c4, WRIST_GEAR)
+    out_right = _shaft_rad(c5, WRIST_GEAR)
 
-    # Invert [[1,-1],[1,1]] / 2
+    # Pitch = average of left/right; roll = differential.
     j4 = 0.5 * (out_left + out_right)
     j5 = 0.5 * (-out_left + out_right)
 
+    # Negate J1 / roll so closed-loop RViz matches IRL (2026-10-31).
+    # Pitch scale: 90 sim was ~115 IRL -> multiply so sim matches IRL.
+    pitch = j4 * PITCH_SCALE
+    if pitch > PITCH_ROM_RAD:
+        pitch = PITCH_ROM_RAD
+    if pitch < -PITCH_ROM_RAD:
+        pitch = -PITCH_ROM_RAD
     return {
-        "joint_1": out1,
+        "joint_1": -out1,
         "joint_2": 0.0,
         "joint_3": out3,
-        "joint_4": j4,
-        "joint_5": j5,
+        "joint_4": pitch,
+        "joint_5": -j5,
     }
 
 
 def parse_enc_line(line: str) -> tuple[int, int, int, int] | None:
     parts = line.strip().split()
-    if len(parts) != 5 or parts[0].upper() != "ENC":
+    # Exact token "ENC" only (not ENC_WAIT / ENC_STREAM).
+    if len(parts) < 3 or parts[0].upper() != "ENC":
         return None
     try:
-        return int(parts[1]), int(parts[2]), int(parts[3]), int(parts[4])
+        c1 = int(parts[1])
+        c3 = int(parts[2])
+        c4 = int(parts[3]) if len(parts) > 3 else 0
+        c5 = int(parts[4]) if len(parts) > 4 else 0
+        return c1, c3, c4, c5
     except ValueError:
         return None
