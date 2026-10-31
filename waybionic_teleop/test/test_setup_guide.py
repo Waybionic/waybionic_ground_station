@@ -207,3 +207,32 @@ def test_a_step_that_changes_is_logged_once(guide, monkeypatch):
     guide.publish_steps()
     guide.publish_steps()
     assert len(messages) == 1 and 'Ready' in messages[0] and 'Start' in messages[0]
+
+
+def test_a_problem_is_only_reported_once_it_has_lasted(guide, monkeypatch):
+    # The drives and the carrier take a few seconds to answer after a start; saying 'no answer'
+    # at once would blame wiring that is fine.
+    clock = [100.0]
+    monkeypatch.setattr(setup_guide.time, 'monotonic', lambda: clock[0])
+    published = []
+    monkeypatch.setattr(guide.publisher, 'publish', published.append)
+
+    def drives(*changes):
+        # The other nodes report every half second, so the rows stay fresh.
+        guide.on_diagnostics(DiagnosticArray(status=list(ready_rows(**dict(changes)).values())))
+        guide.publish_steps()
+        found = next(item for item in published[-1].status if item.name == 'setup.drives')
+        return {item.key: item.value for item in found.values}['state'], found.message
+
+    silent = ('drive.elbow', drive('elbow', 3, 'no reply', ERROR))
+    state, message = drives(silent)
+    assert state == WORKING and 'elbow' not in message
+    clock[0] += setup_guide.BLOCK_GRACE_S - 0.5
+    assert drives(silent)[0] == WORKING
+    clock[0] += 1.0
+    state, message = drives(silent)
+    assert state == BLOCKED and 'elbow' in message
+    # Once it clears, the next problem starts the wait again.
+    assert drives()[0] == OK
+    clock[0] += 0.5
+    assert drives(silent)[0] == WORKING
