@@ -4,12 +4,13 @@ import os
 import shutil
 import socket
 import subprocess
+import threading
 import time
 
 import pytest
 import serial
 
-from waybionic_teleop import carrier, mks_can, slcan_bus
+from waybionic_teleop import carrier, carrier_relay, mks_can, slcan_bus
 from waybionic_teleop.slcan_bus import SlcanBus
 
 # The carrier's answer to V, which comes before the answers to C, Sn and O.
@@ -268,6 +269,27 @@ def slcan_sim():
     return path if path and os.access(path, os.X_OK) else None
 
 
+def check_the_simulated_carrier_answers(bus):
+    frames = []
+
+    def wait_for(done, seconds=2.0):
+        deadline = time.monotonic() + seconds
+        while not done() and time.monotonic() < deadline:
+            bus.step(0.0)
+            frame = bus.receive()
+            if frame is None:
+                time.sleep(0.002)
+            else:
+                frames.append(frame)
+        return done()
+
+    assert wait_for(lambda: any(can_id == carrier.STATUS_ID for can_id, _ in frames))
+    bus.send(1, mks_can.read_encoder(1))
+    assert wait_for(lambda: (1, bytes.fromhex('3100000000000032')) in frames)
+    assert bus.errors == 0
+    bus.shutdown()
+
+
 @pytest.mark.skipif(slcan_sim() is None, reason='waybionic_can slcan_sim is not built')
 def test_the_simulated_carrier_answers_through_the_real_bridge_code():
     sim = subprocess.Popen([slcan_sim(), '--ids', '1', '--move-ms', '100'],
@@ -275,26 +297,38 @@ def test_the_simulated_carrier_answers_through_the_real_bridge_code():
     try:
         port = sim.stdout.readline().strip()
         # A pty ignores the baud rate, and macOS refuses a custom rate such as 1000000 on one.
-        bus = SlcanBus(port, 500000, baudrate=115200)
-        frames = []
-
-        def wait_for(done, seconds=2.0):
-            deadline = time.monotonic() + seconds
-            while not done() and time.monotonic() < deadline:
-                bus.step(0.0)
-                frame = bus.receive()
-                if frame is None:
-                    time.sleep(0.002)
-                else:
-                    frames.append(frame)
-            return done()
-
-        assert wait_for(lambda: any(can_id == carrier.STATUS_ID for can_id, _ in frames))
-        bus.send(1, mks_can.read_encoder(1))
-        assert wait_for(lambda: (1, bytes.fromhex('3100000000000032')) in frames)
-        assert bus.errors == 0
-        bus.shutdown()
+        check_the_simulated_carrier_answers(SlcanBus(port, 500000, baudrate=115200))
     finally:
+        sim.terminate()
+        sim.wait()
+
+
+@pytest.mark.skipif(slcan_sim() is None, reason='waybionic_can slcan_sim is not built')
+def test_the_simulated_carrier_answers_through_a_carrier_relay():
+    # The Windows path: the relay carries the carrier's port over TCP to the drive node.
+    sim = subprocess.Popen([slcan_sim(), '--ids', '1', '--move-ms', '100'],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    stop = threading.Event()
+    try:
+        port = sim.stdout.readline().strip()
+        with socket.create_server(('127.0.0.1', 0)) as probe:
+            tcp_port = probe.getsockname()[1]
+        relay = threading.Thread(target=carrier_relay.serve, daemon=True, args=(
+            lambda: serial.Serial(port, 115200, timeout=carrier_relay.POLL_S),
+            '127.0.0.1', tcp_port, stop, lambda message: None))
+        relay.start()
+        deadline = time.monotonic() + 3.0
+        while True:
+            try:
+                bus = SlcanBus(f'socket://127.0.0.1:{tcp_port}', 500000, baudrate=115200)
+                break
+            except serial.SerialException:
+                assert time.monotonic() < deadline, 'the relay never listened'
+                time.sleep(0.02)
+        check_the_simulated_carrier_answers(bus)
+    finally:
+        stop.set()
+        relay.join(3.0)
         sim.terminate()
         sim.wait()
 
