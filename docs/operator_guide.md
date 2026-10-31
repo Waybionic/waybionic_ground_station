@@ -300,12 +300,12 @@ bridge needs `python3-opencv`.
 
 The controller plugs into the computer, not the Arduino. The computer runs teleop,
 the Cartesian moves, the joint limits and collision checks, the RViz twin and the
-monitor, then sends MKS frames through the carrier board: a UNO R4 WiFi with a
-TJA1051T transceiver running `waybionic_can/arduino/carrier_bridge`. The carrier
-only passes frames between USB and the CAN bus, and reports its own status.
+monitor, then sends MKS frames through the carrier board: a UNO R4 with an MCP2515 CAN
+module running `waybionic_can/arduino/carrier_bridge_mcp2515`. The carrier only passes
+frames between USB and the CAN bus, and reports its own status.
 
 ```text
-controller -> computer (ROS 2) -> USB, 1 Mbaud -> carrier -> CAN, 1 Mbit/s -> 5 MKS drives
+controller -> computer (ROS 2) -> USB -> carrier -> CAN, 500 kbit/s -> 5 MKS drives
 ```
 
 `waybionic_teleop/config/arm_drives.yaml` maps the joints to the drives: CAN IDs 1
@@ -323,8 +323,9 @@ unloaded, and keep the E-stop within reach.
 
 The computer running ROS needs the carrier or a USB CAN adapter. Docker Desktop on
 Windows and macOS can't reach USB devices, so use native ROS on macOS
-([RoboStack](../BuildInstructions.md#macos-native-ros-with-robostack)) or Linux, or
-Docker on Linux with `--network host` for a SocketCAN adapter.
+([RoboStack](../BuildInstructions.md#macos-native-ros-with-robostack)), the
+[carrier relay on Windows](#on-windows) or Linux, or Docker on Linux with
+`--network host` for a SocketCAN adapter.
 
 ### On a Mac
 
@@ -344,14 +345,12 @@ then run these from the repository root.
    ```
 
 2. **Set up each drive once,** alone on the bus: give it its CAN ID (they all ship
-   as 1), then switch it to 1 Mbit/s. The carrier keeps its first bit rate until it
-   resets, so replug it, connect every drive, and check they all answer.
+   as 1). Leave them at the factory 500 kbit/s, the most the arm's MCP2515 carrier
+   runs. Then connect every drive and check they all answer.
 
    ```bash
    ./scripts/macos.sh drives set-id 1 3            # for example the elbow
-   ./scripts/macos.sh drives set-bitrate 3 1000000
-   # after every drive is switched: replug the carrier
-   ./scripts/macos.sh drives --bitrate 1000000 scan
+   ./scripts/macos.sh drives scan --ids 1 2 3 4 5
    ```
 
 3. **Start the ground station.** With `tool` removed from `drives` in
@@ -427,6 +426,66 @@ On the Mac, listen on the network:
 
 The receiver takes controller packets from any computer that can reach its port, so
 do this only on a private network.
+
+### On Windows
+
+Docker Desktop can't open COM ports, so a small program on Windows, `carrier_relay`,
+passes the carrier's port through `127.0.0.1:47320`, and the drive node in the container
+connects to it as `socket://host.docker.internal:47320`. Besides
+[Docker Desktop with WSLg](../BuildInstructions.md#windows-wslg), as for the other Windows
+demos, it needs Python 3 on Windows and pyserial:
+
+```powershell
+python -m pip install pyserial
+```
+
+Flash the carrier first, as in step 1 of [On a Mac](#on-a-mac) (from a Mac, or with the
+Arduino IDE).
+
+**In one step:** plug in only the carrier, connect an Xbox controller and double-click
+`scripts\windows-arm.cmd`. It starts Docker Desktop, the carrier bridge and the controller
+bridge, then the ground station with `waybionic_teleop/config/arm_profile_bench.yaml`
+(J1 to J5 driven, no tool). The first start builds the image, which takes a while. The Arm
+setup panel in RViz then walks through what is left: put the arm in its zero pose, press
+**Zero the arm**, then press Start on the controller. The zero is not kept between runs on
+Windows, so do this every time. Closing RViz, or Ctrl+C in the script's window, stops the
+ground station first, so each drive gets its stop, then the bridges.
+
+**Step by step,** from the repository root. The bridge serves one connection at a time, so
+let each command finish before the next. If `docker` is not recognized, see
+[its troubleshooting](../BuildInstructions.md#docker-is-not-recognized-on-windows).
+
+1. Start the bridge in its own PowerShell window and leave it running. It finds the
+   carrier as the only Arduino COM port; otherwise pass `--port COM5`. Wait for
+   `Carrier open; waiting for the ground station`: the drive node stops at start-up if
+   nothing is listening.
+
+   ```powershell
+   cd waybionic_teleop
+   python -m waybionic_teleop.carrier_relay
+   ```
+
+2. Scan the drives from a second window:
+
+   ```powershell
+   docker compose run --rm --build wslg-arm ros2 run waybionic_teleop mks_setup --channel socket://host.docker.internal:47320 scan --ids 1 2 3 4 5
+   ```
+
+3. Start the controller bridge in a third window, then the ground station:
+
+   ```powershell
+   cd waybionic_teleop
+   python -m waybionic_teleop.xinput_bridge
+   ```
+
+   ```powershell
+   docker compose run --rm --build --service-ports wslg-arm
+   ```
+
+Stopping the bridge or unplugging the carrier closes the connection, so the drive node
+loses the carrier as it does when the USB cable is pulled on a Mac: every drive stops and
+the arm must be zeroed again. The bridge listens only on `127.0.0.1`; keep it local,
+because anything that connects to it can drive the arm.
 
 ### On Linux
 
@@ -560,18 +619,21 @@ back on needs its drive answering and zeroed before the arm can be enabled again
 fitting or repairing a drive, put the arm in the zero pose and zero it.
 
 The state is not saved: after a restart every fitted joint is on. A joint that has no drive
-at all, such as the shoulder (J2) and the tool on the bench arm, is shown as *no drive* and
-cannot be switched here. It comes from the arm profile (`~/.waybionic/arm_profile.yaml`):
+at all, such as the tool on the bench arm, is shown as *no drive* and cannot be switched
+here. It comes from the arm profile (`~/.waybionic/arm_profile.yaml` on a Mac,
+`waybionic_teleop/config/arm_profile_bench.yaml` for the Windows launcher):
 
 ```yaml
-# Bench arm: the shoulder is fixed upright and has no drive, and there is no tool.
-fitted_drives: [base_yaw, elbow, wrist_left, wrist_right]
-locked_joints: {joint_2: 0.0, tool_grip: 0.0}
+# Bench arm: J1 to J5 have a drive (CAN IDs 1 to 5), and there is no tool.
+fitted_drives: [base_yaw, shoulder, elbow, wrist_left, wrist_right]
+locked_joints: {tool_grip: 0.0}
 ```
 
-To fit the shoulder drive later, give it CAN ID 2 (`./scripts/macos.sh drives set-id 1 2`
-with only that drive on the bus), add `shoulder` to `fitted_drives`, delete `joint_2` from
-`locked_joints`, restart the station and zero. J2 then has a checkbox like the others.
+To fit another drive later, give it its CAN ID (`./scripts/macos.sh drives set-id 1 6` with
+only that drive on the bus), add it to `fitted_drives`, delete its joint from
+`locked_joints`, restart the station and zero. Its joint then has a checkbox like the
+others. A drive that isn't wired is left out of `fitted_drives` and its joints are locked, as
+the shoulder's were before it was wired: `locked_joints: {joint_2: 0.0, tool_grip: 0.0}`.
 
 Without the panel, from a terminal:
 

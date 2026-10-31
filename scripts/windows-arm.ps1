@@ -89,6 +89,8 @@ try {
     Push-Location $root
     try {
         Write-Host 'Starting the ground station; press Ctrl+C here to stop.'
+        Write-Host ('When RViz opens, follow its Arm setup panel: put the arm in its zero pose, ' +
+            'press Zero the arm, then press Start (Menu) on the controller. Close RViz to stop.')
         & $docker compose run --rm --build --service-ports wslg-arm
     } finally {
         Pop-Location
