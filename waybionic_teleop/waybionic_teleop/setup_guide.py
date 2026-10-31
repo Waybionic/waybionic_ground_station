@@ -30,6 +30,9 @@ LEVELS = {OK: DiagnosticStatus.OK, WORKING: DiagnosticStatus.OK, TODO: Diagnosti
 # The drive node reports twice a second; a row this old means whoever sent it has gone.
 ROW_TIMEOUT_S = 3.0
 PUBLISH_PERIOD_S = 0.5
+# The carrier and the drives need a few seconds to answer after a start, so a problem is only
+# reported once it has lasted this long; until then the step is still being checked.
+BLOCK_GRACE_S = 5.0
 TITLES = {'carrier': 'Carrier', 'drives': 'Drives', 'controller': 'Controller',
           'zero': 'Zero', 'ready': 'Ready'}
 WAITS = 'Waits for the steps above'
@@ -171,6 +174,7 @@ class SetupGuide(Node):
         topic = (self.get_parameter('diagnostics_topic').value
                  if self.has_parameter('diagnostics_topic') else '/diagnostics')
         self.rows = {}
+        self.blocked_since = {}
         self.announced = None
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.publisher = self.create_publisher(DiagnosticArray, TOPIC, latched)
@@ -191,7 +195,13 @@ class SetupGuide(Node):
         self.get_logger().info(text)
 
     def publish_steps(self):
+        now = time.monotonic()
         steps = evaluate(self.fresh_rows())
+        for step in steps:
+            if step.state != BLOCKED:
+                self.blocked_since.pop(step.name, None)
+            elif now - self.blocked_since.setdefault(step.name, now) < BLOCK_GRACE_S:
+                step.state, step.message = WORKING, f'Checking the {step.title.lower()}...'
         first = current(steps)
         statuses = []
         for step in steps:
