@@ -2,10 +2,12 @@
 
 import os
 import shutil
+import socket
 import subprocess
 import time
 
 import pytest
+import serial
 
 from waybionic_teleop import carrier, mks_can, slcan_bus
 from waybionic_teleop.slcan_bus import SlcanBus
@@ -295,3 +297,53 @@ def test_the_simulated_carrier_answers_through_the_real_bridge_code():
     finally:
         sim.terminate()
         sim.wait()
+
+
+@pytest.fixture
+def relay_end():
+    """The far end of a socket:// port, as a carrier relay presents the carrier: (server, url)."""
+    server = socket.create_server(('127.0.0.1', 0))
+    server.settimeout(2.0)
+    yield server, f'socket://127.0.0.1:{server.getsockname()[1]}'
+    server.close()
+
+
+def test_a_burst_of_frames_through_a_relay_is_read_in_one_pass(relay_end):
+    # pyserial's socket port reports at most one byte waiting, so a read of what is waiting
+    # would take a control tick for every byte and leave the replies far behind.
+    server, url = relay_end
+    bus = SlcanBus(url, 500000, baudrate=115200)
+    peer, _ = server.accept()
+    try:
+        peer.sendall(VERSION + b'\r\r\r')
+        for _ in range(200):
+            bus.receive()
+            if not bus.syncing:
+                break
+            time.sleep(0.001)
+        assert not bus.syncing
+        peer.sendall(b't0013F501F7\r' * 100)
+        time.sleep(0.05)
+        frames = []
+        while (frame := bus.receive()) is not None:
+            frames.append(frame)
+        assert frames == [(1, bytes.fromhex('F501F7'))] * 100
+        assert bus.errors == 0
+    finally:
+        peer.close()
+        bus.shutdown()
+
+
+def test_a_relay_that_stops_reading_fails_the_write_instead_of_stalling_the_loop(relay_end):
+    server, url = relay_end
+    link = slcan_bus.open_link(url, 115200)
+    peer, _ = server.accept()
+    started = time.monotonic()
+    try:
+        with pytest.raises(serial.SerialException):
+            while time.monotonic() - started < 10.0:
+                link.write(b'x' * 65536)
+        assert time.monotonic() - started < 2.0
+    finally:
+        peer.close()
+        link.close()
