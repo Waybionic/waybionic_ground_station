@@ -6,12 +6,50 @@
 
 #include <QApplication>
 #include <QDebug>
+#include <QDockWidget>
+#include <QList>
+#include <QMainWindow>
+#include <QString>
 
 #include "rclcpp/rclcpp.hpp"
 #include "rviz_common/logging.hpp"
 #include "rviz_common/ros_integration/ros_client_abstraction.hpp"
 #include "rviz_common/visualization_frame.hpp"
 #include "rviz_common/visualizer_app.hpp"
+
+namespace
+{
+
+// The station's own panels, from the top of the right-hand dock down, with the share of its
+// height each gets. RViz puts a panel its saved window state does not know in the left dock, so
+// they are stacked here whatever the layout file says. Panels that are not loaded are skipped.
+void stackRightDock(QMainWindow * frame)
+{
+  struct Entry
+  {
+    const char * name;
+    int weight;
+  };
+  const Entry order[] = {{"SetupPanel", 2}, {"JointControlPanel", 2}, {"DiagnosticsPanel", 5}};
+  QList<QDockWidget *> docks;
+  QList<int> weights;
+  for (const auto & entry : order) {
+    if (auto * dock = frame->findChild<QDockWidget *>(QString::fromLatin1(entry.name))) {
+      docks.append(dock);
+      weights.append(entry.weight);
+    }
+  }
+  if (docks.isEmpty()) {
+    return;
+  }
+  frame->addDockWidget(Qt::RightDockWidgetArea, docks.first());
+  for (int index = 1; index < docks.size(); ++index) {
+    frame->splitDockWidget(docks[index - 1], docks[index], Qt::Vertical);
+  }
+  frame->resizeDocks(docks, weights, Qt::Vertical);
+}
+
+}  // namespace
 
 int main(int argc, char ** argv)
 {
@@ -52,6 +90,7 @@ int main(int argc, char ** argv)
   }
   for (auto * widget : QApplication::topLevelWidgets()) {
     if (auto * frame = qobject_cast<rviz_common::VisualizationFrame *>(widget)) {
+      stackRightDock(frame);
       frame->showMaximized();
       return application.exec();
     }
