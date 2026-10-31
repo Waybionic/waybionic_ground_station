@@ -28,6 +28,10 @@ Panels:
     Name: Time
     SyncMode: 0
     SyncSource: ""
+  - Class: waybionic_rviz_plugins/SetupPanel
+    Name: SetupPanel
+  - Class: waybionic_rviz_plugins/JointControlPanel
+    Name: JointControlPanel
   - Class: waybionic_rviz_plugins/DiagnosticsPanel
     Diagnostics Topic: /diagnostics
     Name: DiagnosticsPanel
@@ -207,6 +211,10 @@ Visualization Manager:
     Saved: ~
 Window Geometry:
   DiagnosticsPanel:
+    collapsed: false
+  JointControlPanel:
+    collapsed: false
+  SetupPanel:
     collapsed: false
   Displays:
     collapsed: false
