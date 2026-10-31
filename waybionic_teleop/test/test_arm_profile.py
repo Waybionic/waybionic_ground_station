@@ -60,6 +60,8 @@ def test_an_empty_profile_file_fits_every_drive(tmp_path):
     # Nothing would report where the shoulder is.
     (ArmProfile(('base_yaw', 'elbow', 'wrist_left', 'wrist_right', 'tool')), r"\['joint_2'\]"),
     (ArmProfile(('base_yaw', 'elbow', 'gripper')), 'lacks'),
+    # A mistyped joint would only show later, as every teleop command being refused.
+    (ArmProfile(None, {'joint_9': 0.0}), r"locks joints \['joint_9'\] that the arm map lacks"),
     # A fitted drive would move a joint the model holds still.
     (ArmProfile(None, {'joint_1': 0.0}), 'moved by fitted drives'),
     # One wrist motor moves both wrist joints, so neither can be locked while it is fitted.

@@ -29,6 +29,11 @@ def open_bus(interface, channel, bitrate, tty_baudrate):
     return CanBus(interface, channel, bitrate)
 
 
+def reserved_ids(bus):
+    """Return the CAN IDs the interface itself uses, which no drive can answer from."""
+    return getattr(bus, 'reserved_ids', frozenset())
+
+
 def request(bus, can_id, data, code, answer_ids=None, timeout=0.2):
     """Send a frame; return the arguments of the reply with this code, or None."""
     answer_ids = answer_ids or {can_id}
@@ -47,7 +52,7 @@ def request(bus, can_id, data, code, answer_ids=None, timeout=0.2):
             time.sleep(0.002)
             continue
         reply_id, reply = frame
-        if reply_id == carrier.STATUS_ID:
+        if reply_id in reserved_ids(bus):
             continue
         try:
             reply_code, arguments = mks_can.parse(reply_id, reply)
@@ -86,6 +91,10 @@ def set_id(bus, old, new):
     """Give the drive at old the CAN ID new; return a message, or raise SystemExit."""
     if old == new:
         raise SystemExit(f'the drive already has CAN ID {new}')
+    reserved = sorted({old, new} & reserved_ids(bus))
+    if reserved:
+        raise SystemExit(f"CAN ID {reserved[0]} is reserved for the carrier's status; "
+                         'no drive can answer from it through the carrier')
     if scan(bus, [new]):
         raise SystemExit(f'CAN ID {new} is taken; connect only the drive to change')
     if not scan(bus, [old]):
@@ -170,8 +179,10 @@ def main(argv=None):
                         "the drives' --bitrate")
     args = parser.parse_args(argv)
     if args.command == 'read-error' and (
-            not 1 <= args.can_id <= 0x7FF or args.can_id == carrier.STATUS_ID):
-        parser.error('read-error needs a drive CAN ID from 1 to 2047, excluding carrier ID 2032')
+            not 1 <= args.can_id <= 0x7FF
+            or args.interface == 'slcan' and args.can_id == carrier.STATUS_ID):
+        parser.error('read-error needs a drive CAN ID from 1 to 2047, excluding carrier ID 2032 '
+                     'on the carrier')
 
     bus = open_bus(args.interface, args.channel, args.bitrate, args.tty_baudrate)
     try:

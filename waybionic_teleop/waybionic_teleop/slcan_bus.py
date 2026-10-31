@@ -27,7 +27,7 @@ import time
 
 import serial
 
-from waybionic_teleop import mks_can
+from waybionic_teleop import carrier, mks_can
 
 BITRATE_CODES = {125000: b'4', 250000: b'5', 500000: b'6', 1000000: b'8'}
 DEFAULT_BAUDRATE = 1000000
@@ -66,6 +66,9 @@ def parse_line(line):
 
 class SlcanBus:
     """Send and receive standard 11-bit frames through the carrier, without blocking."""
+
+    # The carrier's status arrives from this ID, so no drive can use it through the carrier.
+    reserved_ids = frozenset({carrier.STATUS_ID})
 
     def __init__(self, port, bitrate, baudrate=DEFAULT_BAUDRATE, open_port=None):
         if bitrate not in BITRATE_CODES:
@@ -245,8 +248,9 @@ class SlcanBus:
         if self.pending and self.pending.popleft() == b'O':
             # An R4's own CAN controller keeps the rate it first opened at until it resets.
             self.problem = (f'the carrier would not open CAN at {self.bitrate} bit/s: an 8 MHz '
-                            'MCP2515 runs 500000 at most, and one that opened at another rate '
-                            'needs a replug')
+                            'MCP2515 runs 500000 at most, one that opened at another rate '
+                            'needs a replug, and an MCP2515 that is missing or fails its link '
+                            'self-test (check its SPI wiring and power) is refused too')
         self.errors += 1
 
     def _answered(self):

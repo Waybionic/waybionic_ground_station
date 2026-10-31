@@ -50,33 +50,48 @@ def only_board(device=None):
     return found[0]
 
 
-def hand_back(device):
-    """Ask the carrier firmware at device to give the USB port back to the bridge."""
+def bridges():
+    return [port for port in boards() if port.pid == WIFI_BRIDGE_PID]
+
+
+def handed_back_bridge(carrier, already_bridged):
+    """Return the device of the bridge that took over the carrier's USB port, once it has."""
+    if carrier.location:
+        found = [port for port in bridges() if port.location == carrier.location]
+    else:
+        found = [port for port in bridges() if port.device not in already_bridged]
+    return found[0].device if len(found) == 1 else None
+
+
+def hand_back(carrier):
+    """Ask the carrier firmware on this port to give the USB port back to the bridge."""
+    # Another UNO R4 WiFi may already be in bridge mode: it is not the one handed back.
+    already_bridged = {port.device for port in bridges()}
     link = Serial()
-    link.port = device
+    link.port = carrier.device
     link.baudrate = HAND_BACK_BAUD
     link.dtr = True
     link.open()
     try:
         deadline = time.monotonic() + HAND_BACK_TIMEOUT_S
         while time.monotonic() < deadline:
-            bridges = [port for port in boards() if port.pid == WIFI_BRIDGE_PID]
-            if bridges:
-                return bridges[0].device
+            bridge = handed_back_bridge(carrier, already_bridged)
+            if bridge:
+                return bridge
             time.sleep(0.05)
     finally:
         try:
             link.close()
         except OSError:
             pass
-    sys.exit(f'error: the carrier at {device} did not hand USB back to its bridge within '
+    sys.exit(f'error: the carrier at {carrier.device} did not hand USB back to its bridge within '
              f'{HAND_BACK_TIMEOUT_S:.0f} s; unplug it, plug it back in and try again')
 
 
 def upload_port(device=None):
     board = only_board(device)
     if board.pid == WIFI_NATIVE_PID:
-        return hand_back(board.device)
+        return hand_back(board)
     return board.device
 
 
