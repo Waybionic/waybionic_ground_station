@@ -194,9 +194,19 @@ services:
 
   # The real arm from Windows. The carrier relay (waybionic_teleop.carrier_relay) runs on
   # Windows and the drive node connects out to it, so the carrier needs no published port.
+  # arm_profile_bench.yaml says the arm has no tool drive; closing RViz ends the station.
+  # Launching the arm shouldn't depend on the unit tests passing on this machine, which are
+  # timing-sensitive, so this image stops at the build stage; CI has run the tests.
   wslg-arm:
     <<: *wslg
     profiles: [wslg-arm]
+    image: waybionic_ground_station:arm
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: build
+      cache_from:
+        - ghcr.io/waybionic/waybionic_ground_station:jazzy
     ports:
       - 127.0.0.1:47300:47300/udp
     command:
@@ -209,3 +219,5 @@ services:
       - joy_udp_bind:=0.0.0.0
       - drive_interface:=slcan
       - drive_channel:=socket://host.docker.internal:47320
+      - arm_profile:=/waybionic_ws/install/waybionic_teleop/share/waybionic_teleop/config/arm_profile_bench.yaml
+      - exit_with_rviz:=true
