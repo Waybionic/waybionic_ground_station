@@ -88,6 +88,9 @@ def fit_drive_parameters(params, profile):
         except KeyError as missing:
             raise ValueError(f'missing drive parameter {missing}') from None
     driven = joints(fitted)
+    unknown_locked = sorted(set(profile.locked_joints) - joints(drives))
+    if unknown_locked:
+        raise ValueError(f'the arm profile locks joints {unknown_locked} that the arm map lacks')
     moved = sorted(driven & set(profile.locked_joints))
     if moved:
         raise ValueError(f'locked joints {moved} are moved by fitted drives')

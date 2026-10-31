@@ -4,7 +4,7 @@ from collections import deque
 
 import pytest
 
-from waybionic_teleop import mks_can, mks_setup
+from waybionic_teleop import carrier, mks_can, mks_setup
 from waybionic_teleop.sim_drives import SimulatedBus, SimulatedServo
 from waybionic_teleop.slcan_bus import SlcanBus
 
@@ -169,3 +169,28 @@ def test_read_error_rejects_invalid_or_reserved_ids_before_opening_usb(monkeypat
     monkeypatch.setattr(mks_setup, 'open_bus', unexpected_open)
     with pytest.raises(SystemExit):
         mks_setup.main(['--channel', 'fake', 'read-error', can_id])
+
+
+def test_a_drive_may_use_the_carriers_status_id_off_the_carrier():
+    # Only the carrier's own link reserves that ID; on SocketCAN it is an ordinary CAN ID.
+    bus = SimulatedBus([SimulatedServo(1)], 500000)
+    assert 'now answers on 2032' in mks_setup.set_id(bus, 1, carrier.STATUS_ID)
+    assert mks_setup.scan(bus, [carrier.STATUS_ID]) == {carrier.STATUS_ID: 0}
+
+
+@pytest.mark.parametrize('old, new', [(1, carrier.STATUS_ID), (carrier.STATUS_ID, 1)])
+def test_the_carriers_status_id_is_refused_before_a_drive_is_changed(usb_carrier, old, new):
+    port = usb_carrier()
+    bus = SlcanBus('/dev/fake', 500000, open_port=lambda: port)
+    with pytest.raises(SystemExit, match='reserved for the carrier'):
+        mks_setup.set_id(bus, old, new)
+    assert not any(line.startswith(b't') for line in b''.join(port.writes).split(b'\r'))
+
+
+def test_read_error_accepts_the_carriers_status_id_off_the_carrier(monkeypatch, capsys):
+    reply = mks_can.frame(carrier.STATUS_ID, mks_can.READ_POSITION_ERROR, bytes([0, 0, 0, 100]))
+    bus = ErrorReadBus([(carrier.STATUS_ID, reply)])
+    monkeypatch.setattr(mks_setup, 'open_bus', lambda *args: bus)
+    mks_setup.main(['--interface', 'socketcan', '--channel', 'can0', 'read-error',
+                    str(carrier.STATUS_ID)])
+    assert 'position error +0.703125 motor deg (+100 error counts)' in capsys.readouterr().out
