@@ -176,7 +176,8 @@ class SimArmDrives(Node):
             self.bus = CanBus(self.interface, channel, self.bitrate)
             self.bus_label = f'{self.interface} {channel}'
         if frame_log := params.get('frame_log', ''):
-            self.bus = RecordingBus(self.bus, os.path.expanduser(frame_log))
+            self.bus = RecordingBus(self.bus, os.path.expanduser(frame_log),
+                                    self.get_logger().error)
             self.get_logger().info(f'Recording every drive frame to {frame_log}')
         self.test_fault = None
         if self.interface == 'sim':

@@ -18,10 +18,15 @@ class RecordingBus:
     ``1793438841.369542 tx 001#F5008200FFE3A09A``. Kinds: tx (queued to the bus), unsent (the
     bus was unplugged), rx (a frame the bus received) and refused (a frame the carrier or the
     bus refused after send() returned True).
+
+    The recording never gets in the way of the drives: if the file cannot be written or closed,
+    such as on a full disk, report() is called once with the reason and recording stops.
     """
 
-    def __init__(self, bus, path):
+    def __init__(self, bus, path, report=None):
         self.bus = bus
+        self.path = path
+        self.report = report or (lambda message: None)
         self.file = open(path, 'a', encoding='ascii', buffering=1 << 16)
 
     def __getattr__(self, name):
@@ -48,7 +53,24 @@ class RecordingBus:
         try:
             self.bus.shutdown()
         finally:
-            self.file.close()
+            self._stop_recording()
 
     def _write(self, kind, can_id, data):
-        self.file.write(f'{time.time():.6f} {kind} {can_id:03X}#{bytes(data).hex().upper()}\n')
+        if self.file is None:
+            return
+        try:
+            self.file.write(
+                f'{time.time():.6f} {kind} {can_id:03X}#{bytes(data).hex().upper()}\n')
+        except OSError as error:
+            self._stop_recording(error)
+
+    def _stop_recording(self, error=None):
+        file, self.file = self.file, None
+        if file is None:
+            return
+        try:
+            file.close()
+        except OSError as close_error:
+            error = error or close_error
+        if error is not None:
+            self.report(f'Stopped recording drive frames to {self.path}: {error}')
