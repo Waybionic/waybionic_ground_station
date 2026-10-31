@@ -16,6 +16,8 @@ INSERTED = 1e-9
 INCISION_LOST = ('The tool is off the incision point; press Y, withdraw it in another group, '
                  'then choose the incision group again')
 INCISION_HELD = 'The tool is inserted; withdraw it to the incision point before pressing Y'
+INCISION_JOINT_OFF = ('A joint is switched off with the tool through the incision point; switch '
+                      'it back on in Joint control to withdraw the tool')
 
 
 def clamp(value, low, high):
@@ -196,14 +198,23 @@ class ArmTeleop:
         """Return whether the sticks can move this joint: it is neither locked nor disabled."""
         return joint not in self.locked and joint not in self.disabled
 
-    def usable_groups(self):
-        """Return the groups with something to move: a Cartesian solve needs every joint."""
-        def usable(group):
-            if group.mode in MOVES:
-                return all(self.movable(joint) for joint in group.joints)
-            return any(self.movable(joint) for joint in group.joints)
-        return [group for group in self.configured_groups if usable(group)] or [
-            self.configured_groups[0]]
+    def group_usable(self, group):
+        """Return whether a group has something to move: a Cartesian solve needs every joint."""
+        if group.mode in MOVES:
+            return all(self.movable(joint) for joint in group.joints)
+        return any(self.movable(joint) for joint in group.joints)
+
+    def usable_groups(self, keep=None):
+        """Return the groups with something to move, and keep, which is not left for one."""
+        return [group for group in self.configured_groups
+                if group is keep or self.group_usable(group)] or [self.configured_groups[0]]
+
+    def inserted(self):
+        """Return whether the tool is through the incision point, which groups may not leave."""
+        if self.active_group.mode != 'incision' or self.incision is None or not self.targets:
+            return False
+        miss, depth = self.incision_offset(self.targets)
+        return miss <= INCISION_TOLERANCE and depth > INSERTED
 
     def set_disabled(self, joints, measured):
         """
@@ -219,13 +230,22 @@ class ArmTeleop:
         if self.enabled:
             self.disable(measured, 'Joint enable changed; press Start (Xbox Menu button) to '
                          'enable')
+        previous = self.active_group
+        # The other groups, and going home, could drag the tool sideways in the incision, which
+        # Y and A are refused for, so a tool that is through it stays in its group, unable to move
+        # until the joint is switched back on.
+        keep = previous if self.inserted() else None
         self.disabled = joints
         self.disabled_angles = {joint: angle for joint, angle in self.disabled_angles.items()
                                 if joint in joints}
-        name = self.active_group.name
-        self.groups = self.usable_groups()
+        self.groups = self.usable_groups(keep)
         self.group = next((index for index, group in enumerate(self.groups)
-                           if group.name == name), 0)
+                           if group.name == previous.name), 0)
+        if self.active_group is not previous and previous.mode == 'incision' and (
+                self.incision is not None):
+            self.withdrawn = self.incision_offset(self.targets)[1] <= INSERTED
+        if keep is not None and not self.group_usable(keep):
+            self.note, self.warning = INCISION_JOINT_OFF, True
         return True
 
     @property
@@ -268,12 +288,11 @@ class ArmTeleop:
     def change_group(self):
         """Select the next group, unless the tool is inserted through the incision point."""
         if self.active_group.mode == 'incision' and self.incision is not None:
-            miss, depth = self.incision_offset(self.targets)
-            if miss <= INCISION_TOLERANCE and depth > INSERTED:
+            if self.inserted():
                 # The other groups, and going home, could drag the tool sideways in the incision.
                 self.note, self.warning = INCISION_HELD, True
                 return
-            self.withdrawn = depth <= INSERTED
+            self.withdrawn = self.incision_offset(self.targets)[1] <= INSERTED
         self.group = (self.group + 1) % len(self.groups)
         self.stop_cartesian()
         self.velocities = dict.fromkeys(self.limits, 0.0)
@@ -304,6 +323,9 @@ class ArmTeleop:
         if not any(self.movable(joint) for joint in self.limits):
             self.note = 'No joint is enabled; switch one on in the Joint control panel'
             self.warning = True
+            return
+        if not self.group_usable(self.active_group):
+            self.note, self.warning = INCISION_JOINT_OFF, True
             return
         if self.motion_input_held(axes):
             # A stuck or held input must never start moving the arm the moment it is enabled.
