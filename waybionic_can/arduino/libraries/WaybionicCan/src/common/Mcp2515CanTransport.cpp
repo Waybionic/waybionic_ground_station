@@ -370,7 +370,6 @@ Mcp2515CanTransport::ReadResult Mcp2515CanTransport::readReceived(Frame & frame)
   // frame when both are full. Once RXB0 is emptied ahead of a waiting RXB1, the next frame to
   // reach RXB0 is newer than RXB1's.
   const bool first = (flags & kRx0If) != 0 && !(rxb1_older_ && (flags & kRx1If) != 0);
-  rxb1_older_ = first && (flags & kRx1If) != 0;
   const uint8_t base = first ? kRxb0Sidh : kRxb1Sidh;
   const uint8_t sidh = readRegister(base);
   const uint8_t sidl = readRegister(static_cast<uint8_t>(base + 1));
@@ -391,6 +390,10 @@ Mcp2515CanTransport::ReadResult Mcp2515CanTransport::readReceived(Frame & frame)
   // RXnIF locks this buffer until cleared (DS20001801J, section 4.1.3), including between
   // the separate SPI register reads above.
   bitModify(kCanIntF, first ? kRx0If : kRx1If, 0x00);
+  // RXB1 only fills while RXB0 is full, which includes the reads above, so a frame waiting in
+  // RXB1 once RXB0 is released is older than whatever RXB0 takes next. Two frames cannot
+  // arrive within this one SPI read, so RXB1's is not a newer overflow from after the release.
+  rxb1_older_ = first && (readRegister(kCanIntF) & kRx1If) != 0;
   return result;
 }
 

@@ -434,6 +434,36 @@ TEST(Mcp2515Transport, KeepsArrivalOrderWhenAFrameLandsAfterFlagClear)
   EXPECT_TRUE(chip.arriving.empty());
 }
 
+TEST(Mcp2515Transport, KeepsArrivalOrderWhenAFrameRollsOverWhileTheOtherBufferIsRead)
+{
+  FakeMcp2515 chip;
+  Mcp2515CanTransport can(chip, 8000000);
+  ASSERT_TRUE(can.begin(500000));
+  const Frame a = makeFrame(1, {0x31, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00});
+  const Frame b = makeFrame(3, {0x31, 0x03});
+  const Frame c = makeFrame(4, {0x31, 0x04});
+  ASSERT_TRUE(chip.deliver(a));
+  bool injected = false;
+  chip.on_read = [&](const uint8_t address) {
+      if (!injected && address == kRxb0Sidh + 5) {
+        injected = true;
+        // RXB1 was empty when the read of A began; A still locks RXB0, so B rolls into RXB1
+        // and C takes RXB0 the moment A is released.
+        EXPECT_TRUE(chip.deliver(b));
+        chip.arriving = {c};
+      }
+    };
+  for (const Frame & expected : {a, b, c}) {
+    Frame got;
+    ASSERT_TRUE(can.receive(got, 0));
+    expectSame(expected, got);
+  }
+  EXPECT_TRUE(injected);
+  Frame got;
+  EXPECT_FALSE(can.receive(got, 0));
+  EXPECT_TRUE(chip.arriving.empty());
+}
+
 TEST(Mcp2515Transport, PendingBuffersStayLockedDuringRegisterReads)
 {
   FakeMcp2515 chip;
