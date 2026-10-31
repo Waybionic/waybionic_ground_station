@@ -232,6 +232,7 @@ install_app() {
   rm -rf "$destination"
   cp -R "$source" "$destination"
   # The copy can live anywhere, so it is told where this folder is.
+  mkdir -p "$destination/Contents/Resources"
   printf '%s\n' "$ROOT" > "$destination/Contents/Resources/repo_root"
   echo "Installed $destination"
   echo "Double-click it, or drag it to the Dock."

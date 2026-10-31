@@ -1,0 +1,183 @@
+#!/bin/bash
+# Double-click launcher for the WayBionic ground station on a Mac.
+#
+# It checks that the station is set up and that the carrier is plugged in, then starts the
+# station for the real arm (scripts/macos.sh arm). Whatever it cannot fix itself becomes a
+# dialog that says what to do. The station's output goes to ~/Library/Logs/WayBionic. See the
+# operator guide, "Starting the station by double-click".
+#
+# Without a screen: WAYBIONIC_APP_DRY_RUN=1 prints the command instead of running it, and
+# WAYBIONIC_APP_ANSWER is the answer every dialog gets.
+
+set -u
+
+TITLE="WayBionic Ground Station"
+APP="$(cd "$(dirname "$0")/../.." && pwd)"
+LOG_DIR="$HOME/Library/Logs/WayBionic"
+KEEP_LOGS=10
+
+# Finder starts apps with a bare PATH, without Homebrew or Miniforge.
+export PATH="/opt/homebrew/bin:/opt/homebrew/Caskroom/miniforge/base/bin:/usr/local/bin:$PATH"
+
+# ask TEXT BUTTON...: show a dialog, print the button that was pressed (nothing if it was closed).
+ask() {
+  if [[ -n "${WAYBIONIC_APP_ANSWER:-}" ]]; then
+    printf '%s\n' "$WAYBIONIC_APP_ANSWER"
+    return
+  fi
+  osascript - "$TITLE" "$@" <<'APPLESCRIPT' 2>/dev/null
+on run argv
+  set theTitle to item 1 of argv
+  set theText to item 2 of argv
+  set theButtons to items 3 thru -1 of argv
+  try
+    set answer to display dialog theText with title theTitle buttons theButtons default button (last item of theButtons) with icon note
+    return button returned of answer
+  on error
+    return ""
+  end try
+end run
+APPLESCRIPT
+}
+
+# pick TEXT ITEM...: show a list, print the item that was chosen (nothing if it was closed).
+pick() {
+  if [[ -n "${WAYBIONIC_APP_ANSWER:-}" ]]; then
+    printf '%s\n' "$WAYBIONIC_APP_ANSWER"
+    return
+  fi
+  osascript - "$TITLE" "$@" <<'APPLESCRIPT' 2>/dev/null
+on run argv
+  set theTitle to item 1 of argv
+  set theText to item 2 of argv
+  set theItems to items 3 thru -1 of argv
+  set chosen to choose from list theItems with title theTitle with prompt theText
+  if chosen is false then return ""
+  return item 1 of chosen
+end run
+APPLESCRIPT
+}
+
+find_root() {
+  local saved="$APP/Contents/Resources/repo_root"
+  if [[ -r "$saved" ]]; then
+    tr -d '\n' <"$saved"
+  else
+    # Opened from packaging/macos inside the repository.
+    (cd "$APP/../../.." 2>/dev/null && pwd)
+  fi
+}
+
+in_terminal() {
+  osascript -e 'on run argv
+    tell application "Terminal"
+      activate
+      do script (item 1 of argv)
+    end tell
+  end run' "$1" >/dev/null 2>&1
+}
+
+# descendants PID: print the process IDs below a process.
+# shellcheck disable=SC2329  # called by stop_station, which is called from a trap
+descendants() {
+  local child
+  for child in $(pgrep -P "$1" 2>/dev/null); do
+    echo "$child"
+    descendants "$child"
+  done
+}
+
+# Ask the station to shut down as Ctrl+C in Terminal would: the drives are stopped first.
+# shellcheck disable=SC2329  # called from a trap
+stop_station() {
+  local pid sent=""
+  for pid in $(descendants "$child"); do
+    if ps -o command= -p "$pid" 2>/dev/null | grep -q 'ros2 launch'; then
+      kill -INT "$pid" 2>/dev/null
+      sent=1
+    fi
+  done
+  [[ -n "$sent" ]] || kill -INT "$child" 2>/dev/null
+}
+
+carrier_ports() {
+  compgen -G "${WAYBIONIC_APP_PORT_GLOB:-/dev/cu.usbmodem*}" || true
+}
+
+ROOT="$(find_root)"
+if [[ -z "$ROOT" || ! -x "$ROOT/scripts/macos.sh" ]]; then
+  ask "I can't find the WayBionic folder. Run ./scripts/macos.sh app from inside it to set this app up again." "Quit" >/dev/null
+  exit 1
+fi
+
+if [[ ! -f "$ROOT/install/setup.bash" ]]; then
+  answer="$(ask "WayBionic has not been set up on this Mac yet. Setting up downloads a few GB and takes 30 to 60 minutes. Terminal shows its progress; open this app again when it finishes." "Not now" "Set up")"
+  if [[ "$answer" == "Set up" ]]; then
+    if [[ -n "${WAYBIONIC_APP_DRY_RUN:-}" ]]; then
+      echo "would run in a Terminal: cd $ROOT && ./scripts/macos.sh setup"
+    else
+      in_terminal "cd $(printf '%q' "$ROOT") && ./scripts/macos.sh setup"
+    fi
+  fi
+  exit 0
+fi
+
+command=("$ROOT/scripts/macos.sh" arm)
+while [[ -z "${WAYBIONIC_CARRIER:-}" ]]; do
+  ports=()
+  while IFS= read -r port; do
+    [[ -n "$port" ]] && ports+=("$port")
+  done < <(carrier_ports)
+  case "${#ports[@]}" in
+    1)
+      export WAYBIONIC_CARRIER="${ports[0]}"
+      ;;
+    0)
+      answer="$(ask "The carrier is not plugged in. Connect the Arduino's USB-C cable to this Mac, then choose Try again." "Quit" "Without the arm" "Try again")"
+      case "$answer" in
+        "Try again") ;;
+        "Without the arm")
+          command=("$ROOT/scripts/macos.sh" launch teleop:=true)
+          break
+          ;;
+        *) exit 0 ;;
+      esac
+      ;;
+    *)
+      choice="$(pick "Several USB serial devices are connected. Which one is the carrier?" "${ports[@]}")"
+      [[ -n "$choice" ]] || exit 0
+      export WAYBIONIC_CARRIER="$choice"
+      ;;
+  esac
+done
+
+if [[ -n "${WAYBIONIC_APP_DRY_RUN:-}" ]]; then
+  echo "would run in $ROOT: ${command[*]} (carrier: ${WAYBIONIC_CARRIER:-none})"
+  exit 0
+fi
+
+mkdir -p "$LOG_DIR"
+log="$LOG_DIR/station-$(date +%Y-%m-%d-%H%M%S).log"
+# shellcheck disable=SC2012
+for old in $(ls -1t "$LOG_DIR"/station-*.log 2>/dev/null | tail -n +"$((KEEP_LOGS + 1))"); do
+  rm -f "$old"
+done
+
+cd "$ROOT" || exit 1
+"${command[@]}" exit_with_rviz:=true >"$log" 2>&1 &
+child=$!
+stopping=""
+trap 'stopping=1; stop_station' TERM INT HUP
+status=0
+while kill -0 "$child" 2>/dev/null; do
+  wait "$child"
+  status=$?
+done
+trap - TERM INT HUP
+
+# Closing the window or Ctrl+C ends with 0 or 130; anything else is worth a look.
+if [[ -z "$stopping" ]] && ((status != 0 && status != 130)); then
+  answer="$(ask "The ground station stopped (code $status). The log says why." "Close" "Show the log")"
+  [[ "$answer" == "Show the log" ]] && open "$log"
+fi
+exit 0
