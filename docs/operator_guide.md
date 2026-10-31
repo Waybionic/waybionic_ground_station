@@ -533,6 +533,18 @@ operating current, and its configuration readback is not measured load current.
 Reducing current or changing drive PID gains is not a validated hand-guiding shortcut,
 particularly for joints supporting the arm's weight.
 
+Gravity compensation like Seeed's reBot-DevArm (a torque feed-forward from the arm's
+model, so the arm floats under the hand) needs torque-controlled actuators. The MKS
+drives accept only position and speed commands and report no current or torque, so
+it is not possible on this arm without different motors or a force/torque sensor.
+
+Bench test of a sensorless workaround, base yaw (CAN ID 1, no gravity load), firmware
+V1.0.9, factory vFOC gains Kp=220, Ki=100, Kd=270, Kv=320 on every drive: writing Ki=0
+or Ki=1 with `96h` returns "set success", but `00 96 00` still reads Ki=100, also after
+disabling and re-enabling the drive. Held pushes decayed back to near-zero `39h` error
+within 1-3 seconds with and without the write, so the position error cannot stand in
+for a torque sensor. The drives were restored to Ki=100 and read back.
+
 ### Engineering monitor
 
 With `teleop:=true`, the diagnostics panel shows live rows:
