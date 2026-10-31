@@ -380,6 +380,35 @@ then run these from the repository root.
    each joint a known angle, such as 10 degrees in RViz, and measure it on the arm; a
    different angle means its `gear_ratio` is wrong.
 
+### Starting by double-click (Mac)
+
+After the [macOS setup](../BuildInstructions.md#macos-native-ros-with-robostack), install
+the app once from the repository root:
+
+```bash
+./scripts/macos.sh app
+```
+
+This puts **WayBionic Ground Station** in `~/Applications`; drag it to the Dock. The
+copy in `packaging/macos/` also opens in place. Then, to start the arm:
+
+1. Plug in the carrier, the controller (USB or Bluetooth) and power the drives.
+2. Double-click the app. The first time, it offers to run the setup in Terminal, which
+   takes 30 to 60 minutes; open the app again when that finishes.
+3. If the carrier is not plugged in, a dialog says so: plug it in and choose *Try again*,
+   or choose *Without the arm* to run the simulation. With several USB serial devices
+   connected, it asks which one is the carrier.
+4. It then starts the station exactly as `./scripts/macos.sh arm` does (the arm profile
+   and the saved zero included), with RViz filling the screen. The Arm setup panel there
+   walks through what is left: the controller, the zero pose, Start.
+
+Closing the RViz window, or quitting the app from the Dock, stops the station the way
+Ctrl+C does, so each drive gets its stop first. The station's output goes to
+`~/Library/Logs/WayBionic/` (the last 10 sessions are kept), and if it stops unexpectedly
+the app offers to open the log. The app is not signed: if you download the repository as
+a zip instead of cloning it, macOS asks you to confirm opening it once (right-click, then
+Open).
+
 ### Remote operator
 
 The controller can stay with an operator on another computer. On the operator's
@@ -431,7 +460,8 @@ and zero as below. CI runs `waybionic_teleop/test/test_can_drives.py` over `vcan
 
 The encoders count from where the drives were powered on, so the host publishes no
 joint states and moves nothing until the arm is zeroed. Put the arm in the zero pose
-(the pose RViz shows before anything moves), leave teleop disabled, and run:
+(the pose RViz shows before anything moves), leave teleop disabled, and press **Zero the
+arm** in the Arm setup panel (see [Start-up guide](#start-up-guide)), or run:
 
 ```bash
 ros2 service call /sim_arm_drives/zero std_srvs/srv/Trigger
@@ -489,6 +519,66 @@ move, stop or setup frame again on the next tick, and a refused zero while the z
 service waits. A refused stop frame is sent again on every tick, and Start is
 refused until it has gone out. After any stop, disable teleop and press Start
 again.
+
+### Start-up guide
+
+The **Arm setup** panel (top of RViz's right-hand dock) lists what is left to do before the
+arm can be operated, one thing at a time. The `setup_guide` node builds the list from the
+same diagnostics the station already publishes, and also says each change in the terminal.
+
+| Step | Done when | If it isn't |
+| --- | --- | --- |
+| Carrier | the carrier reports on USB and its E-stop is not pressed | plug in its USB-C cable; if it is plugged in but silent, replug it or flash it |
+| Drives | every drive that is switched on answers | the panel names the drive and its CAN ID: check its power and wiring, or switch its joint off (below) |
+| Controller | `/joy` input is arriving | connect an Xbox controller (USB or Bluetooth) and press a button |
+| Zero | every drive that is switched on is zeroed or kept its saved zero | put the arm in its zero pose and press **Zero the arm** (it asks you to confirm) |
+| Ready | teleop is enabled | press Start (the Menu button) on the controller |
+
+The controller needs no other step: the guide shows it as connected once input arrives. When
+every step is done the panel shrinks to one line. If the guide itself is not running, the panel
+says it is waiting for it. Nothing in the panel moves the arm.
+
+### Switching joints off
+
+The **Joint control** panel, below Arm setup, has a checkbox for each joint (J1 to J5 and the
+tool). Unchecking one switches that joint off:
+
+- The drive stays powered and holds where it is. It is not released, so the joint does not
+  fall or move by itself.
+- The sticks and triggers that were mapped to it do nothing, so the controller no longer
+  vibrates when you push a stick that needs a joint you don't want. The Cartesian and
+  incision groups need every joint, so they are left out of the group cycle while any joint
+  is off or unfitted.
+- A drive whose joints are all off may be faulty or missing: it no longer stops the arm,
+  keeps the zero service from succeeding or keeps the arm from being enabled. The two wrist
+  drives move both wrist joints together, so switching off only J4 or only J5 still needs both
+  drives, which then hold that joint; switch off both to ignore a wrist drive.
+
+A change is only taken while teleop is stopped and no joint command has arrived for a second,
+as for zeroing. Otherwise the panel shows why, and the box stays as it was. Turning a joint
+back on needs its drive answering and zeroed before the arm can be enabled again, so after
+fitting or repairing a drive, put the arm in the zero pose and zero it.
+
+The state is not saved: after a restart every fitted joint is on. A joint that has no drive
+at all, such as the shoulder (J2) and the tool on the bench arm, is shown as *no drive* and
+cannot be switched here. It comes from the arm profile (`~/.waybionic/arm_profile.yaml`):
+
+```yaml
+# Bench arm: the shoulder is fixed upright and has no drive, and there is no tool.
+fitted_drives: [base_yaw, elbow, wrist_left, wrist_right]
+locked_joints: {joint_2: 0.0, tool_grip: 0.0}
+```
+
+To fit the shoulder drive later, give it CAN ID 2 (`./scripts/macos.sh drives set-id 1 2`
+with only that drive on the bus), add `shoulder` to `fitted_drives`, delete `joint_2` from
+`locked_joints`, restart the station and zero. J2 then has a checkbox like the others.
+
+Without the panel, from a terminal:
+
+```bash
+ros2 service call /arm/joint_3/set_enabled std_srvs/srv/SetBool "{data: false}"
+ros2 topic echo /arm/joint_control
+```
 
 ### Powered hand-guiding
 
