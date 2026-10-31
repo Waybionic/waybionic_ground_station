@@ -38,14 +38,17 @@ powershell -ExecutionPolicy Bypass -File .\waybionic_embedded_bridge\scripts\sta
 
 Requires host `pip install pyserial`.
 
-Keys: `E` enable, hold arrows (J1/J3) / WASD (wrist), release to stop, `Q` coast,
-`Esc` ESTOP, `Z` zero twin origin.
+Keys / Xbox: `E`/`A` enable, hold arrows+WASD or sticks, release to stop, `Q`/`B` coast,
+`M`/`Start` SIM-ALIGN (twin only), `H`/`Y` HOME, `Z`/`X` ZERO, `Esc`/`Back` ESTOP.
+Pitch soft ROM ±75° stops **motors** (firmware gates `DIFF_A`/`DIFF_D`), not just the sim.
 
 ## What works today
 
-- Hold-to-move teleop with release debounce and paced serial TX (avoids UNO R4 CDC hangs)
+- Hold-to-move teleop with Xbox XInput, release debounce, paced serial TX
+- SIM-ALIGN mode to jog the RViz twin until it matches IRL (then bias is kept)
+- HOME / SETHOME return to the captured startup encoder pose (F5 absolute)
 - Gear-aware default speed/accel (26:1 arm vs 3:1 wrist)
-- Closed-loop RViz twin from MKS `35h` raw encoder counts over `ENC` serial lines
+- Closed-loop RViz twin from MKS encoder counts over `ENC` serial lines
 - UDP joint states into the Docker ground-station container (`udp_joint_state_receiver`)
 
 ## Known issues / open testing
