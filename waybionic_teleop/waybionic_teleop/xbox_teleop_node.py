@@ -11,7 +11,6 @@ import time
 
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 import rclpy
-from rclpy._rclpy_pybind11 import RCLError
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
@@ -22,6 +21,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 from waybionic_teleop.collision import ArmCollision
 from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
+from waybionic_teleop.ros_shutdown import is_shutdown_error
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
 JAW_SIZE = (0.006, 0.014, 0.03)
@@ -341,14 +341,8 @@ def main():
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
-    except RCLError as error:
-        # SIGINT can shut down the context before spin recreates its wait set.
-        if rclpy.ok() or 'the given context is not valid' not in str(error):
-            raise
     except RuntimeError as error:
-        # Jazzy may surface this binding error when SIGINT invalidates a subscription.
-        if (rclpy.ok() or not str(error).startswith(
-                "Unable to convert call argument '0' to Python object")):
+        if not is_shutdown_error(error):
             raise
     finally:
         node.destroy_node()
