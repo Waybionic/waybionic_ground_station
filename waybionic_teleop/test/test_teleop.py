@@ -78,14 +78,91 @@ def test_a_locked_joint_stays_exactly_at_its_angle(params, arm):
     # Even a measured value a rounding error away is sent back exactly.
     press(teleop, 'start', {**HOME, 'joint_2': 0.25 + 1e-12})
     assert teleop.enabled and teleop.command_targets['joint_2'] == 0.25
-    for axes, joint in (({'left_x': -1.0, 'left_y': 1.0}, 'joint_2'),
-                        ({'right_trigger': -1.0}, 'tool_grip')):
+    for axes in ({'left_x': -1.0, 'left_y': 1.0}, {'right_trigger': -1.0}):
         teleop.update(*sample(**axes), HOME, DT)
-        assert joint in teleop.blocked
+        # A joint that cannot move is not a limit the operator hit, so it is never reported:
+        # the controller would rumble at every push of a stick that cannot do anything.
+        assert teleop.blocked == []
         assert teleop.command_targets['joint_2'] == 0.25
         assert teleop.command_targets['tool_grip'] == 0.0
         assert teleop.velocities['joint_2'] == teleop.velocities['tool_grip'] == 0.0
     assert teleop.targets['joint_1'] > 0.0
+
+
+def test_the_cartesian_and_incision_groups_need_every_joint_of_the_arm(params, arm):
+    free = ArmTeleop(config_from_parameters(params), LIMITS, arm)
+    assert [group.name for group in free.groups] == ['base', 'upper', 'cartesian', 'incision']
+    # They solve all five joints together, so one that cannot move leaves them nowhere to go.
+    fixed = ArmTeleop(config_from_parameters(params), LIMITS, arm, locked={'joint_2': 0.0})
+    assert [group.name for group in fixed.groups] == ['base', 'upper']
+    press(fixed, 'start')
+    press(fixed, 'y')
+    press(fixed, 'y')
+    assert fixed.active_group.name == 'base'
+
+
+def test_a_disabled_joint_holds_the_angle_it_had_at_enable(teleop):
+    assert teleop.set_disabled({'joint_3'}, HOME)
+    assert not teleop.set_disabled({'joint_3'}, HOME)
+    pose = {**HOME, 'joint_3': 0.3}
+    press(teleop, 'start', pose)
+    run(teleop, 1.0, left_x=-1.0, right_y=-1.0)
+    assert teleop.targets['joint_1'] > 0.3
+    assert teleop.targets['joint_3'] == teleop.command_targets['joint_3'] == 0.3
+    assert teleop.velocities['joint_3'] == 0.0 and teleop.blocked == []
+
+
+def test_a_disabled_joint_is_not_homed_or_driven_by_the_tool_trigger(teleop):
+    teleop.set_disabled({'joint_3', 'tool_grip'}, HOME)
+    pose = {**HOME, 'joint_1': 0.4, 'joint_3': 0.3, 'tool_grip': 0.5}
+    press(teleop, 'start', pose)
+    run(teleop, 3.0, 'a', right_trigger=1.0)
+    assert abs(teleop.targets['joint_1']) < 0.01
+    assert teleop.targets['joint_3'] == 0.3 and teleop.targets['tool_grip'] == 0.5
+    assert teleop.blocked == []
+
+
+def test_changing_the_disabled_joints_while_enabled_stops_teleop(teleop):
+    press(teleop, 'start')
+    assert not teleop.set_disabled(set(), HOME)
+    assert teleop.enabled
+    pose = {**HOME, 'joint_1': 0.2}
+    assert teleop.set_disabled({'joint_1'}, pose)
+    assert not teleop.enabled and teleop.targets['joint_1'] == 0.2
+    assert 'Joint enable changed' in teleop.note and not teleop.warning
+    # The next Start holds the joint where it is, and the sticks leave it alone.
+    press(teleop, 'start', pose)
+    run(teleop, 1.0, left_x=1.0)
+    assert teleop.enabled and teleop.targets['joint_1'] == 0.2
+
+
+def test_groups_follow_the_disabled_joints_and_keep_the_active_group(params, arm):
+    teleop = ArmTeleop(config_from_parameters(params), LIMITS, arm)
+    press(teleop, 'start', DOWN)
+    press(teleop, 'y', DOWN)
+    assert teleop.active_group.name == 'upper'
+    teleop.set_disabled({'joint_4'}, DOWN)
+    assert [group.name for group in teleop.groups] == ['base', 'upper']
+    assert teleop.active_group.name == 'upper'
+    teleop.set_disabled(set(), DOWN)
+    assert [group.name for group in teleop.groups] == ['base', 'upper', 'cartesian', 'incision']
+    assert teleop.active_group.name == 'upper'
+    # A group with nothing left to move is dropped, and the first one left takes over.
+    teleop.set_disabled({'joint_2', 'joint_3', 'joint_4', 'joint_5'}, DOWN)
+    assert [group.name for group in teleop.groups] == ['base']
+    assert teleop.active_group.name == 'base'
+
+
+def test_teleop_will_not_enable_with_no_joint_able_to_move(teleop):
+    teleop.set_disabled(set(LIMITS) | {'tool_grip'}, HOME)
+    press(teleop, 'start')
+    assert not teleop.enabled and teleop.warning and 'No joint is enabled' in teleop.note
+
+
+def test_only_joints_of_this_arm_can_be_disabled_and_locked_ones_stay_locked(params):
+    teleop = ArmTeleop(config_from_parameters(params), LIMITS, locked={'joint_2': 0.0})
+    assert not teleop.set_disabled({'joint_2', 'not_a_joint'}, HOME)
+    assert teleop.disabled == set()
 
 
 @pytest.mark.parametrize('axes', [{'left_x': 0.8}, {'right_y': -0.5}, {'right_trigger': -0.6}])
