@@ -8,7 +8,11 @@ is unplugged or the bridge stops, the connection closes, so the drive node loses
 exactly as it does when the USB cable is pulled on a Mac or Linux. Needs pyserial. Run from
 the waybionic_teleop directory:
 
-    python -m waybionic_teleop.carrier_relay --port COM5
+    python -m waybionic_teleop.carrier_relay
+
+It looks for the Arduino's COM port each time it opens the carrier, so a carrier plugged in
+after it starts, or replugged under another COM number, is found. With several Arduinos plugged
+in, name the carrier's: --port COM5.
 """
 
 import argparse
@@ -27,10 +31,33 @@ POLL_S = 0.05
 CHUNK = 4096
 
 
-def find_carrier():
-    """Return the only Arduino COM port, or None if there are none or several."""
-    ports = [info.device for info in list_ports.comports() if info.vid == ARDUINO_VID]
-    return ports[0] if len(ports) == 1 else None
+def carrier_opener(port, baudrate, open_serial=serial.Serial, list_com_ports=list_ports.comports,
+                   log=print):
+    """
+    Return the open_port that serve() calls whenever it needs the carrier.
+
+    With no port it looks for the only Arduino COM port every time, because the carrier may be
+    plugged in after the relay starts, still be enumerating, or come back under another COM
+    number. It never guesses between several Arduinos.
+    """
+    def open_carrier():
+        name = port
+        if name is None:
+            infos = list_com_ports()
+            arduinos = sorted(info.device for info in infos if info.vid == ARDUINO_VID)
+            if not arduinos:
+                listed = ', '.join(sorted(info.device for info in infos)) or 'none'
+                raise serial.SerialException(
+                    f'no Arduino COM port found (COM ports: {listed}); plug in the carrier')
+            if len(arduinos) > 1:
+                raise serial.SerialException(
+                    f'several Arduino COM ports ({", ".join(arduinos)}); plug in only the '
+                    'carrier, or pass --port')
+            name = arduinos[0]
+        link = open_serial(name, baudrate, timeout=POLL_S)
+        log(f'Carrier on {name}')
+        return link
+    return open_carrier
 
 
 def relay(link, client, stop):
@@ -172,22 +199,18 @@ def serve(open_port, bind, tcp_port, stop, log=print):
 def main():
     parser = argparse.ArgumentParser(description='Relay the carrier COM port to the arm.')
     parser.add_argument('--port',
-                        help='carrier COM port, such as COM5 (default: the only Arduino)')
+                        help='carrier COM port, such as COM5 (default: the only Arduino, '
+                             'looked for again whenever the carrier is opened)')
     parser.add_argument('--baudrate', type=int, default=DEFAULT_BAUDRATE)
     parser.add_argument('--bind', default='127.0.0.1',
                         help='listen address; keep it local, this drives the arm')
     parser.add_argument('--tcp-port', type=int, default=DEFAULT_TCP_PORT)
     args = parser.parse_args()
-    port = args.port or find_carrier()
-    if port is None:
-        found = ', '.join(info.device for info in list_ports.comports()) or 'none'
-        raise SystemExit(f'Plug in only the carrier, or pass --port. COM ports found: {found}')
-    print(f'Relaying {port} to {args.bind}:{args.tcp_port} (Ctrl+C to stop)')
+    print(f'Relaying the carrier to {args.bind}:{args.tcp_port} (Ctrl+C to stop)')
     print(f'Ground station: drive_channel:=socket://host.docker.internal:{args.tcp_port}')
     stop = threading.Event()
     try:
-        serve(lambda: serial.Serial(port, args.baudrate, timeout=POLL_S),
-              args.bind, args.tcp_port, stop)
+        serve(carrier_opener(args.port, args.baudrate), args.bind, args.tcp_port, stop)
     except KeyboardInterrupt:
         pass
     finally:

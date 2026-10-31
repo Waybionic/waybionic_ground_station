@@ -70,8 +70,9 @@ try {
     $carrier = Start-Process -FilePath $python.Source -PassThru -WorkingDirectory $teleop `
         -ArgumentList ($pythonArguments + @('-m', 'waybionic_teleop.carrier_relay'))
 
-    Write-Host 'Waiting for the carrier...'
-    $deadline = (Get-Date).AddSeconds(15)
+    Write-Host ('Waiting for the carrier (up to a minute): plug it in if you have not; the ' +
+        'bridge window says what it sees...')
+    $deadline = (Get-Date).AddSeconds(60)
     do {
         Start-Sleep -Milliseconds 500
         $listening = Get-NetTCPConnection -LocalPort $carrierPort -State Listen `

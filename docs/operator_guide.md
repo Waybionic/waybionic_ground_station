@@ -455,10 +455,11 @@ ground station first, so each drive gets its stop, then the bridges.
 let each command finish before the next. If `docker` is not recognized, see
 [its troubleshooting](../BuildInstructions.md#docker-is-not-recognized-on-windows).
 
-1. Start the bridge in its own PowerShell window and leave it running. It finds the
-   carrier as the only Arduino COM port; otherwise pass `--port COM5`. Wait for
-   `Carrier open; waiting for the ground station`: the drive node stops at start-up if
-   nothing is listening.
+1. Start the bridge in its own PowerShell window and leave it running. It looks for the
+   Arduino's COM port each time it opens the carrier, so plugging the carrier in after it
+   starts, or replugging it under another COM number, is fine; with several Arduinos plugged
+   in, pass `--port COM5`. Wait for `Carrier open; waiting for the ground station`: the
+   drive node stops at start-up if nothing is listening.
 
    ```powershell
    cd waybionic_teleop
