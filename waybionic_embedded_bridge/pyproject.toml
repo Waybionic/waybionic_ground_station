@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "waybionic-embedded-bridge"
+version = "0.1.0"
+description = "Host/ROS bridge for Waybionic UNO R4 ASCII serial arm control"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["pyserial>=3.5"]
+
+[project.optional-dependencies]
+ros = []
+
+[project.scripts]
+waybionic-probe-serial = "waybionic_embedded_bridge.probe_serial:main"
+waybionic-keyboard-teleop = "waybionic_embedded_bridge.keyboard_teleop:main"
+waybionic-ros-serial-bridge = "waybionic_embedded_bridge.ros_serial_bridge_node:main"
+
+[tool.setuptools.packages.find]
+include = ["waybionic_embedded_bridge*"]
