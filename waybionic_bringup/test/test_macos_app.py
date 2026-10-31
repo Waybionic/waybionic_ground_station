@@ -119,17 +119,22 @@ def test_run_from_inside_the_repository_it_finds_the_repository_without_help(tmp
 
 
 def test_the_app_command_installs_a_copy_that_knows_the_repository(tmp_path):
-    script = APP.parents[2] / 'scripts' / 'macos.sh'
+    # A fresh clone has no empty Resources folder, as git does not keep one.
+    repo = tmp_path / 'checkout'
+    (repo / 'scripts').mkdir(parents=True)
+    shutil.copy(APP.parents[2] / 'scripts' / 'macos.sh', repo / 'scripts' / 'macos.sh')
+    shutil.copytree(APP, repo / 'packaging' / 'macos' / APP.name,
+                    ignore=shutil.ignore_patterns('Resources'))
     destination = tmp_path / 'Applications'
     for _ in range(2):
         result = subprocess.run(
-            ['bash', str(script), 'app', str(destination)], env={
+            ['bash', str(repo / 'scripts' / 'macos.sh'), 'app', str(destination)], env={
                 'HOME': str(tmp_path), 'PATH': '/usr/bin:/bin'},
             capture_output=True, text=True, timeout=30, check=False)
         assert result.returncode == 0, result.stderr
     installed = destination / APP.name
     assert (installed / 'Contents' / 'Resources' / 'repo_root').read_text(
-        encoding='utf-8') == f'{APP.parents[2]}\n'
+        encoding='utf-8') == f'{repo}\n'
     launcher = installed / 'Contents' / 'MacOS' / LAUNCHER.name
     assert os.access(launcher, os.X_OK)
     assert str(installed) in result.stdout
