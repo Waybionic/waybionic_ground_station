@@ -7,6 +7,9 @@ ENV_FILE="$ROOT/robostack.yaml"
 MANAGER=""
 ENV_EXISTS=false
 
+# Finder, cron and other bare environments have no Homebrew or Miniforge on the PATH.
+export PATH="$PATH:/opt/homebrew/bin:/opt/homebrew/Caskroom/miniforge/base/bin:/usr/local/bin"
+
 fail() {
   echo "error: $*" >&2
   exit 1
@@ -25,6 +28,8 @@ Commands:
            (the R4's own CAN with a TJA1051T transceiver)
   drives   Set up the MKS drives through the carrier, e.g. drives scan (see mks_setup)
   arm      Drive the real arm: controller on this Mac, carrier on USB
+  app      Install "WayBionic Ground Station.app" in ~/Applications (or the folder given), to
+           start the station by double-click
   run      Run any command inside the ROS workspace
 
 The carrier is found as the only /dev/cu.usbmodem* port; set WAYBIONIC_CARRIER to choose.
@@ -218,6 +223,20 @@ flash_carrier() {
   echo "Flashed $name"
 }
 
+install_app() {
+  local source="$ROOT/packaging/macos/WayBionic Ground Station.app"
+  local destination="${1:-$HOME/Applications}/WayBionic Ground Station.app"
+
+  [[ -d "$source" ]] || fail "the app bundle is missing: $source"
+  mkdir -p "$(dirname "$destination")"
+  rm -rf "$destination"
+  cp -R "$source" "$destination"
+  # The copy can live anywhere, so it is told where this folder is.
+  printf '%s\n' "$ROOT" > "$destination/Contents/Resources/repo_root"
+  echo "Installed $destination"
+  echo "Double-click it, or drag it to the Dock."
+}
+
 command_name="${1:-help}"
 if [[ $# -gt 0 ]]; then
   shift
@@ -270,6 +289,9 @@ case "$command_name" in
       ros2 launch waybionic_bringup ground_station.launch.py teleop:=true \
       joy_source:=device drive_interface:=slcan drive_channel:="$CARRIER" \
       arm_profile:="$profile" drive_zero_state:="$zero_state" "$@"
+    ;;
+  app)
+    install_app "$@"
     ;;
   run)
     [[ $# -gt 0 ]] || fail "run requires a command"

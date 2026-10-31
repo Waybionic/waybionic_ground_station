@@ -5,9 +5,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from launch import LaunchContext
-from launch.actions import DeclareLaunchArgument, RegisterEventHandler
+from launch.actions import DeclareLaunchArgument, EmitEvent, RegisterEventHandler
 from launch.conditions import IfCondition
+from launch.event_handlers import OnProcessExit
 from launch.events import Shutdown
+from launch.events.process import ProcessExited
 from launch_ros.actions import Node
 import pytest
 import yaml
@@ -114,6 +116,20 @@ def test_rviz_keeps_live_diagnostics_selection(context, mock, mode):
     parameters = constructor.call_args.kwargs['parameters']
     use_mock = parameters[1]['use_mock_diagnostics']
     assert IfCondition(use_mock).evaluate(context) == (mock == 'true' and mode is None)
+
+
+def test_rviz_exit_ends_the_launch_only_when_asked(context):
+    assert declarations()['exit_with_rviz'].default_value[0].text == 'false'
+    context.launch_configurations['exit_with_rviz'] = 'false'
+    assert [type(action) for action in MODULE._launch_rviz(context)] == [Node]
+    context.launch_configurations['exit_with_rviz'] = 'true'
+    rviz, handler = MODULE._launch_rviz(context)
+    assert isinstance(handler, RegisterEventHandler)
+    assert isinstance(handler.event_handler, OnProcessExit)
+    closed = ProcessExited(action=rviz, name='rviz2', cmd=['rviz2'], cwd=None, env=None,
+                           pid=1, returncode=0)
+    assert any(isinstance(action, EmitEvent)
+               for action in handler.event_handler.handle(closed, context))
 
 
 def test_default_window_geometry():
