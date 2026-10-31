@@ -3,8 +3,12 @@
 import os
 from pathlib import Path
 import plistlib
+import shlex
 import shutil
+import signal
 import subprocess
+import sys
+import time
 
 import pytest
 
@@ -145,3 +149,99 @@ def test_the_app_command_is_in_the_usage():
     result = subprocess.run(['bash', str(script), 'help'], capture_output=True, text=True,
                             timeout=30, check=False)
     assert ' app ' in result.stdout
+
+
+def written(path, timeout=10):
+    """Wait for a made-up macos.sh to finish writing a line into path; return the line."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        text = path.read_text(encoding='utf-8') if path.exists() else ''
+        if text.endswith('\n'):
+            return text.strip()
+        time.sleep(0.02)
+    raise AssertionError(f'{path.name} was never written')
+
+
+def gone(pid, timeout=10):
+    """Return whether the process has ended (a zombie nobody reaped yet counts as ended)."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        state = subprocess.run(['ps', '-o', 'stat=', '-p', str(pid)], capture_output=True,
+                               text=True, check=False).stdout.strip()
+        if not state or state.startswith('Z'):
+            return True
+        time.sleep(0.05)
+    return False
+
+
+@pytest.fixture
+def running(station, tmp_path):
+    """
+    Start the launcher for real over a made-up macos.sh.
+
+    Return (start, pids): start(script) runs the launcher and returns its process, and the
+    made-up macos.sh reports the processes it starts by writing "$PIDS/<name>".
+    """
+    _, root, _ = station
+    pids = tmp_path / 'pids'
+    pids.mkdir()
+    started = []
+
+    def start(script):
+        (root / 'scripts' / 'macos.sh').write_text(f'#!/bin/bash\n{script}', encoding='utf-8')
+        (root / 'install').mkdir(exist_ok=True)
+        (root / 'install' / 'setup.bash').touch()
+        app = next((tmp_path / 'Applications').iterdir())
+        process = subprocess.Popen(
+            [str(app / 'Contents' / 'MacOS' / LAUNCHER.name)], env={
+                'HOME': str(tmp_path), 'PATH': '/usr/bin:/bin', 'PIDS': str(pids),
+                'WAYBIONIC_CARRIER': '/dev/cu.x', 'WAYBIONIC_APP_ANSWER': 'Close'},
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        started.append(process)
+        return process
+    yield start, pids
+    for report in pids.glob('*'):
+        try:
+            os.kill(int(report.read_text(encoding='utf-8')), signal.SIGKILL)
+        except (OSError, ValueError):
+            pass
+    for process in started:
+        if process.poll() is None:
+            process.kill()
+        process.wait()
+
+
+def test_quitting_before_the_launch_exists_stops_the_station_that_is_starting(running):
+    start, pids = running
+    # A background job of a script ignores SIGINT, so only TERM ends a station that has no
+    # launch process yet. The script dies with TERM and would leave its child behind.
+    process = start('echo $$ >"$PIDS/script"\nsleep 60 &\necho $! >"$PIDS/sleep"\nwait\n')
+    script, sleeper = int(written(pids / 'script')), int(written(pids / 'sleep'))
+    process.send_signal(signal.SIGTERM)
+    assert process.wait(timeout=10) == 0
+    assert gone(script)
+    assert gone(sleeper)
+
+
+def test_quitting_asks_the_running_launch_to_shut_down_as_ctrl_c_does(running, tmp_path):
+    start, pids = running
+    marker, ready = tmp_path / 'got_sigint', tmp_path / 'ready'
+    # Like the real launch process, it sets up its own SIGINT handler, and its command line
+    # holds "ros2 launch".
+    code = (
+        'import signal, sys, time\n'
+        'def stop(*_):\n'
+        f'    open({str(marker)!r}, "w").write("SIGINT\\n")\n'
+        '    sys.exit(0)\n'
+        'signal.signal(signal.SIGINT, stop)\n'
+        f'open({str(ready)!r}, "w").write("ready\\n")\n'
+        'time.sleep(60)\n')
+    process = start(
+        'echo $$ >"$PIDS/script"\n'
+        f'{shlex.quote(sys.executable)} -c {shlex.quote(code)} ros2 launch fake &\n'
+        'echo $! >"$PIDS/launch"\nwait\n')
+    written(ready)
+    process.send_signal(signal.SIGTERM)
+    assert process.wait(timeout=10) == 0
+    assert marker.exists(), 'the launch process was not asked to shut down with SIGINT'
+    assert gone(int(written(pids / 'launch')))

@@ -97,7 +97,13 @@ stop_station() {
       sent=1
     fi
   done
-  [[ -n "$sent" ]] || kill -INT "$child" 2>/dev/null
+  if [[ -z "$sent" ]]; then
+    # Still setting itself up: nothing to shut down gracefully yet, and a background job of
+    # this script ignores SIGINT, so end it with TERM.
+    for pid in $(descendants "$child") "$child"; do
+      kill -TERM "$pid" 2>/dev/null
+    done
+  fi
 }
 
 carrier_ports() {
@@ -164,10 +170,14 @@ for old in $(ls -1t "$LOG_DIR"/station-*.log 2>/dev/null | tail -n +"$((KEEP_LOG
 done
 
 cd "$ROOT" || exit 1
+# The trap comes first so that a quit during start-up is not lost; one that arrives before the
+# station has a process ID is carried out right after it is started.
+child=""
+stopping=""
+trap 'stopping=1; [[ -n "$child" ]] && stop_station' TERM INT HUP
 "${command[@]}" exit_with_rviz:=true >"$log" 2>&1 &
 child=$!
-stopping=""
-trap 'stopping=1; stop_station' TERM INT HUP
+[[ -z "$stopping" ]] || stop_station
 status=0
 while kill -0 "$child" 2>/dev/null; do
   wait "$child"
