@@ -71,6 +71,23 @@ def test_enable_waits_for_joint_states(teleop):
     assert not teleop.enabled and teleop.warning and 'joint_2' in teleop.note
 
 
+def test_a_locked_joint_stays_exactly_at_its_angle(params, arm):
+    teleop = ArmTeleop(config_from_parameters(params), LIMITS, arm,
+                       locked={'joint_2': 0.25, 'tool_grip': 0.0, 'not_a_joint': 1.0})
+    assert teleop.limits['joint_2'] == (0.25, 0.25) and 'not_a_joint' not in teleop.limits
+    # Even a measured value a rounding error away is sent back exactly.
+    press(teleop, 'start', {**HOME, 'joint_2': 0.25 + 1e-12})
+    assert teleop.enabled and teleop.command_targets['joint_2'] == 0.25
+    for axes, joint in (({'left_x': -1.0, 'left_y': 1.0}, 'joint_2'),
+                        ({'right_trigger': -1.0}, 'tool_grip')):
+        teleop.update(*sample(**axes), HOME, DT)
+        assert joint in teleop.blocked
+        assert teleop.command_targets['joint_2'] == 0.25
+        assert teleop.command_targets['tool_grip'] == 0.0
+        assert teleop.velocities['joint_2'] == teleop.velocities['tool_grip'] == 0.0
+    assert teleop.targets['joint_1'] > 0.0
+
+
 @pytest.mark.parametrize('axes', [{'left_x': 0.8}, {'right_y': -0.5}, {'right_trigger': -0.6}])
 def test_enable_refuses_held_or_stuck_inputs(teleop, axes):
     teleop.update(*sample('start', **axes), HOME, DT)
@@ -88,9 +105,10 @@ def test_enable_refuses_held_tilt_and_home_buttons(params, arm, button):
 
 def test_base_group_moves_yaw_shoulder_and_elbow(teleop):
     press(teleop, 'start')
-    run(teleop, 1.0, left_x=1.0, left_y=-1.0, right_y=0.5)
+    run(teleop, 1.0, left_x=-1.0, left_y=-1.0, right_y=0.5)
     targets = teleop.targets
-    assert targets['joint_1'] > 0.3 and targets['joint_2'] < -0.3 and targets['joint_3'] > 0.1
+    # Stick right turns the base the positive way; right stick up lifts the elbow (negative).
+    assert targets['joint_1'] > 0.3 and targets['joint_2'] < -0.3 and targets['joint_3'] < -0.1
     assert targets['joint_4'] == targets['joint_5'] == 0.0
 
 
@@ -101,7 +119,9 @@ def test_y_switches_to_the_upper_joints_and_leaves_the_base_alone(teleop):
     targets = teleop.targets
     assert teleop.active_group.name == 'upper'
     assert targets['joint_1'] == 0.0 and targets['joint_2'] > 0.3
-    assert targets['joint_3'] > 0.3 and targets['joint_4'] > 0.3 and targets['joint_5'] < -0.3
+    # Left stick up lifts the elbow (negative), as in the base group. Right stick up tips the
+    # wrist up, and right turns the roll positive (counter-clockwise).
+    assert targets['joint_3'] < -0.3 and targets['joint_4'] < -0.3 and targets['joint_5'] > 0.3
 
 
 def test_small_stick_drift_is_ignored(teleop):
@@ -132,7 +152,7 @@ def test_b_stop_needs_a_fresh_start_with_centered_sticks_to_rearm(teleop):
     teleop.update(*sample(), pose, DT)
     press(teleop, 'start', pose)
     assert teleop.enabled and teleop.targets == pose
-    run(teleop, 0.4, left_x=-1.0)
+    run(teleop, 0.4, left_x=1.0)
     assert teleop.targets['joint_1'] < pose['joint_1']
 
 

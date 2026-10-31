@@ -1,5 +1,7 @@
 """Bench set-up of the MKS drives: finding them, new CAN IDs and bit rates."""
 
+from collections import deque
+
 import pytest
 
 from waybionic_teleop import mks_can, mks_setup
@@ -103,3 +105,67 @@ def test_a_refused_request_goes_out_again(bus):
     bus.send, bus.take_refused = busy_once, take_refused
     bus.drives[3].axis = 0x4000
     assert mks_setup.scan(bus, [3]) == {3: 0x4000}
+
+
+class ErrorReadBus:
+    """Supply recorded error replies without a simulation of motor torque."""
+
+    def __init__(self, replies):
+        self.replies = deque(replies)
+        self.sent = []
+        self.closed = False
+
+    def send(self, can_id, data):
+        self.sent.append((can_id, data))
+        return True
+
+    def step(self, dt):
+        pass
+
+    def receive(self):
+        return self.replies.popleft() if self.replies else None
+
+    def shutdown(self):
+        self.closed = True
+
+
+def test_read_error_is_signed_and_sends_only_a_read(monkeypatch, capsys):
+    # CAN ID 3 + 39h + FFFF3800 has checksum 72h; -51200 is -360 motor degrees.
+    bus = ErrorReadBus([
+        (0x7F0, bytes(8)),
+        (3, bytes.fromhex('39FFFF380072')),
+    ])
+    monkeypatch.setattr(mks_setup, 'open_bus', lambda *args: bus)
+    mks_setup.main(['--interface', 'virtual', '--channel', 'fake', 'read-error', '3'])
+    assert bus.sent == [(3, bytes.fromhex('393C'))]
+    assert bus.closed
+    assert '-360.000000 motor deg (-51200 error counts)' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('reply, reason', [
+    (bytes.fromhex('39003C'), 'four bytes'),
+    (bytes.fromhex('39000000003D'), 'bad frame'),
+])
+def test_read_error_reports_bad_replies_and_releases_the_bus(monkeypatch, reply, reason):
+    bus = ErrorReadBus([(3, reply)])
+    monkeypatch.setattr(mks_setup, 'open_bus', lambda *args: bus)
+    with pytest.raises(SystemExit, match=reason):
+        mks_setup.main(['--interface', 'virtual', '--channel', 'fake', 'read-error', '3'])
+    assert bus.closed
+    assert bus.sent == [(3, bytes.fromhex('393C'))]
+
+
+def test_read_error_reports_an_unanswered_request():
+    bus = ErrorReadBus([])
+    with pytest.raises(SystemExit, match='did not report its position error'):
+        mks_setup.read_error(bus, 3)
+    assert bus.sent == [(3, bytes.fromhex('393C'))]
+
+
+@pytest.mark.parametrize('can_id', ['0', '-1', '2032', '2048'])
+def test_read_error_rejects_invalid_or_reserved_ids_before_opening_usb(monkeypatch, can_id):
+    def unexpected_open(*args):
+        pytest.fail('invalid input opened USB')
+    monkeypatch.setattr(mks_setup, 'open_bus', unexpected_open)
+    with pytest.raises(SystemExit):
+        mks_setup.main(['--channel', 'fake', 'read-error', can_id])

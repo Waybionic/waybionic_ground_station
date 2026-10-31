@@ -2,6 +2,11 @@
 
 RViz2-native diagnostics and monitoring UI for WayBionic. This package is diagnostics-only: it provides the engineer monitoring panel, mock/live diagnostics switching, and a temporary `/diagnostics` publisher for local validation.
 
+It also provides `ground_station_rviz`, the ground station's RViz entry point.
+It uses RViz's normal application initialization and then maximizes the window
+with Qt, rather than entering RViz's panel-hiding fullscreen mode. It accepts
+the normal RViz and ROS arguments and does not send motor commands.
+
 Monitoring-only scope:
 
 - No motor commands from this package.

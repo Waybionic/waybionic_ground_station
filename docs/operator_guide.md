@@ -90,10 +90,10 @@ before starting the SDL bridge.
 | Start (Xbox Menu button, three lines) | Enable or disable; the arm starts disabled |
 | B | Stop and hold the current pose |
 | Y | Switch group: base (joints 1-3), upper (joints 2-5), Cartesian (tool tip) or incision |
-| Base group: left stick | Base yaw (left/right) and shoulder (up/down) |
-| Base group: right stick up/down | Elbow |
-| Upper group: left stick | Shoulder (left/right) and elbow (up/down) |
-| Upper group: right stick | Wrist roll (left/right) and wrist pitch (up/down) |
+| Base group: left stick | Base yaw (left/right; right turns joint 1 positive, counter-clockwise from above) and shoulder (up/down) |
+| Base group: right stick up/down | Elbow (up lifts the elbow, joint 3 negative) |
+| Upper group: left stick | Shoulder (left/right) and elbow (up/down; up lifts the elbow, joint 3 negative, as in the base group) |
+| Upper group: right stick | Wrist roll (left/right; right turns joint 5 positive, counter-clockwise from above at the zero pose) and wrist pitch (up/down; up turns joint 4 negative) |
 | Cartesian group: left stick | Tool tip left/right and forward/back, in straight lines |
 | Cartesian group: right stick | Tool roll (left/right) and tool tip up/down |
 | Cartesian group: LB (hold) | Move along one axis only: the stick direction pushed furthest |
@@ -333,7 +333,10 @@ then run these from the repository root.
 
 1. **Flash the carrier** once, and again after carrier firmware changes. Plug in only
    the carrier, so its port is the only `/dev/cu.usbmodem*`, or set
-   `WAYBIONIC_CARRIER=/dev/cu.usbmodem...`.
+   `WAYBIONIC_CARRIER=/dev/cu.usbmodem...`. This uploads `carrier_bridge_mcp2515`,
+   for the arm's MCP2515 module; `./scripts/macos.sh flash carrier_bridge` is only for
+   a carrier using the R4's own CAN with a TJA1051T. The wrong sketch leaves every
+   drive silent.
 
    ```bash
    brew install arduino-cli
@@ -366,6 +369,11 @@ then run these from the repository root.
    ```bash
    ./scripts/macos.sh run ros2 service call /sim_arm_drives/zero std_srvs/srv/Trigger
    ```
+
+   `arm` saves the zero in `~/.waybionic/drive_zero.yaml`. While the drives stay
+   powered, the next `arm` keeps it, so the arm needs no zero pose and no service
+   call: wait for `Every drive kept its zero`, then press Start. After the drives lose
+   power, zero again. See [Zeroing and stops](#zeroing-and-stops).
 
 5. **Check each joint** at the slowest speed in the `upper` group. If a drive turns
    the wrong way, negate its `factors` in `arm_drives.yaml` and rebuild. Then move
@@ -433,13 +441,43 @@ Then press Start. Real drives take commands through the same gate as the simulat
 ones. Every drive stops, and the arm must be zeroed again, when:
 
 - a drive stops answering, for example because the E-stop cut its power or the
-  carrier was unplugged;
+  carrier was unplugged (unless the zero is saved and the drive kept it, as below);
 - a drive's encoder count jumps further than `max_rpm` allows between two readings,
   as after a brief power loss;
 - a drive reports a failed move (as when its stall protection releases the motor)
   or an end-limit stop;
 - a drive stays more than `following_error_counts` from its target for
   `following_error_ticks` ticks. Both are provisional values in `arm_drives.yaml`.
+
+**A saved zero.** With `drive_zero_state:=<file>` (`./scripts/macos.sh arm` uses
+`~/.waybionic/drive_zero.yaml`), each zero is saved to the file once every drive has
+reported it. A restart of the station, or a drive that answers again after it went
+quiet, keeps the zero of each drive that shows it didn't lose power since. MKS firmware
+V1.0.9 reports that in two reads, checked on the bench on all four drives:
+
+- The zero status (3Bh) says whether the drive was zeroed since power-on. Power-on
+  clears it, and the host's setup frames don't.
+- The raw encoder (35h) counts from power-on, and a zero leaves it alone. So it minus
+  the zeroed count (31h) stays the same from one zero until the drive loses power. A
+  zero made elsewhere, such as by `mks_setup`, changes it.
+
+A drive whose status shows no zero, or whose offset is more than 16 counts from the
+saved one, isn't zeroed, and the log says why. A new zero, a failed move and a
+following error delete the file.
+
+A drive that turns more than `following_error_counts` after its stop, for
+`following_error_ticks` ticks, also stops every drive, with teleop enabled or not. That
+drive gets another stop. The arm keeps its zero, since that drive's encoder still counts
+true.
+
+When the stick reverses a joint, its drive stops and settles (typically 17 ms, at most
+about 40 ms on the bench) before it turns back. MKS firmware V1.0.9 keeps a target sent
+while the drive is reversing, and now and then one sent mid-stroke, and runs back to it, up
+to 12°, at the next stop. So right behind every stop of a running move, including a
+Start or B press, the drive also gets a 60 rpm move to where it's to stay. That's the end
+of its last move, at most two ticks of travel ahead. The move is sent again every tick
+for 0.25 s. On the bench this kept every stop within 0.1° of base travel. See
+[F5h on firmware V1.0.9](../waybionic_can/arduino/README.md#f5h-on-firmware-v109).
 
 Once the carrier's E-stop sense is wired, pressing the E-stop also stops every drive
 at once, and Start is refused until it's released. If the joint commands stop for
@@ -451,6 +489,49 @@ move, stop or setup frame again on the next tick, and a refused zero while the z
 service waits. A refused stop frame is sent again on every tick, and Start is
 refused until it has gone out. After any stop, disable teleop and press Start
 again.
+
+### Powered hand-guiding
+
+Powered hand-guiding is not enabled yet. A stopped drive holds position; disabling
+teleop does not release it or turn a push into a movement command.
+
+The intended workflow is an explicitly selected Hand Guide mode: a deliberate push
+starts bounded assistance, then release and stillness for a provisional two seconds
+capture the new holding position. This changes the holding target, not the calibrated
+zero. Stop must leave the mode disarmed rather than let another push restart it.
+
+The existing-hardware approach is being evaluated with passive encoder recordings
+before adding assistance. Encoder displacement and position error are not force
+measurements: gravity, friction, settling and externally applied pressure can all
+affect them. Initial base-pressure recordings showed a small, direction-dependent
+response that did not consistently separate from untouched encoder jitter.
+
+The drive's `0.00err` display is motor-shaft angular error, not by itself a fault code.
+CAN command `39h` reads signed 32-bit position error: 51200 units per motor turn
+(not the encoder's 16384 counts per turn). To read it without changing motor settings,
+first stop the ground station so only one process owns the carrier, then run:
+
+```bash
+./scripts/macos.sh drives read-error 3
+```
+
+This reads the elbow (CAN ID 3). It reports motor degrees, not joint degrees or force;
+the display and CAN readback should be compared before using the signal for hand-guiding.
+Motor-generated tracking error must not be mistaken for continued hand pressure.
+
+An elbow press-hold-release recording received all 1424 requested `39h` replies.
+Using the manual's scale, it captured brief excursions of +1.73 and -4.25 motor
+degrees, with near-zero error between them and after release. The operator also
+observed `Err` returning toward zero while still pressing. Thus zero error does not
+prove pressure was released, and an opposite-sign transient must not automatically
+trigger assistance in the opposite direction. These observations do not validate an
+active hand-guiding controller.
+
+For the configured MKS `SR_vFOC` mode, the V1.0.9 manual describes `Ma` as the maximum
+operating current, and its configuration readback is not measured load current.
+`Hold Ma` does not apply in vFOC mode (manual sections 3.2-3.4 and 5.1.10).
+Reducing current or changing drive PID gains is not a validated hand-guiding shortcut,
+particularly for joints supporting the arm's weight.
 
 ### Engineering monitor
 
@@ -464,7 +545,7 @@ With `teleop:=true`, the diagnostics panel shows live rows:
 | `can.carrier` | The carrier's USB link (reopened every second if unplugged), E-stop and supply (once wired), CAN controller errors, and frames the carrier refused |
 | `can.bus` | Frames per second and bus load |
 | `drive.*` | Each drive's reply state and encoder, and its health: `OK`, `FOLLOWING_ERROR`, `STALLED`, `NOT_RESPONDING` or `DISABLED`, with its following error and reply age |
-| `arm.*` | Each joint against its target, and whether the arm is zeroed |
+| `arm.*` | Each joint against its target, and whether the arm is zeroed or its saved zero is being checked |
 
 To try each drive fault in simulation, see
 [recording drive health sessions](../waybionic_rviz_plugins/README.md#task-7-record-simulated-arm-drive-health-sessions)

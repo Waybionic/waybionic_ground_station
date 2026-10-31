@@ -20,12 +20,18 @@ Commands:
   setup    Create/update the RoboStack environment and build the workspace
   build    Build the workspace
   launch   Launch the ground station visualization
-  flash    Compile and upload carrier_bridge to the UNO R4 WiFi (needs arduino-cli)
+  flash    Compile and upload the carrier firmware to the UNO R4 WiFi (needs arduino-cli):
+           carrier_bridge_mcp2515 (default, the arm's MCP2515 module) or carrier_bridge
+           (the R4's own CAN with a TJA1051T transceiver)
   drives   Set up the MKS drives through the carrier, e.g. drives scan (see mks_setup)
   arm      Drive the real arm: controller on this Mac, carrier on USB
   run      Run any command inside the ROS workspace
 
 The carrier is found as the only /dev/cu.usbmodem* port; set WAYBIONIC_CARRIER to choose.
+arm uses the arm profile at ~/.waybionic/arm_profile.yaml when it exists (its fitted drives
+and locked joints); set WAYBIONIC_ARM_PROFILE to use another file. arm saves each zero in
+~/.waybionic/drive_zero.yaml and keeps it on the next start while the drives stay powered;
+set WAYBIONIC_DRIVE_ZERO to use another file.
 EOF
 }
 
@@ -72,10 +78,43 @@ select_manager() {
 prepare() {
   check_host
   select_manager
+  SYSROOT_FROM_USER=true
   if [[ -z "${CONDA_BUILD_SYSROOT:-}" ]]; then
     CONDA_BUILD_SYSROOT="$(xcrun --show-sdk-path)"
+    SYSROOT_FROM_USER=false
     export CONDA_BUILD_SYSROOT
   fi
+}
+
+sdk_links() {
+  # shellcheck disable=SC2016
+  run_environment bash -c 'out="$(mktemp)"
+    printf "int main(void) { return 0; }\n" \
+      | CONDA_BUILD_SYSROOT="$1" "${CC:-clang}" -x c - -isysroot "$1" -o "$out" \
+        >/dev/null 2>&1
+    status=$?
+    rm -f "$out"
+    exit "$status"' _ "$1" </dev/null
+}
+
+select_sysroot() {
+  local sdk
+  if [[ "$SYSROOT_FROM_USER" == true ]] || sdk_links "$CONDA_BUILD_SYSROOT"; then
+    return
+  fi
+  # Xcode can ship an SDK newer than the environment's linker reads: macOS 27's
+  # libSystem.tbd lists an arm64e.x1 target that RoboStack's ld64 rejects.
+  while IFS= read -r sdk; do
+    if sdk_links "$sdk"; then
+      echo "The environment's linker can't read $CONDA_BUILD_SYSROOT; using $sdk" >&2
+      CONDA_BUILD_SYSROOT="$sdk"
+      export CONDA_BUILD_SYSROOT
+      return
+    fi
+  done < <(find /Library/Developer/CommandLineTools/SDKs -maxdepth 1 -name 'MacOSX*.sdk' \
+    2>/dev/null | sort -rV)
+  echo "warning: no macOS SDK links with the environment's compiler; set" \
+    "CONDA_BUILD_SYSROOT to one that does" >&2
 }
 
 setup_environment() {
@@ -109,6 +148,7 @@ run_environment() {
 
 build_workspace() {
   ensure_environment
+  select_sysroot
   echo "Building workspace..."
   (
     cd "$ROOT"
@@ -157,20 +197,25 @@ find_carrier() {
 }
 
 flash_carrier() {
+  local name="${1:-carrier_bridge_mcp2515}"
   local fqbn="arduino:renesas_uno:unor4wifi"
-  local sketch="$ROOT/waybionic_can/arduino/carrier_bridge"
+  local sketch="$ROOT/waybionic_can/arduino/$name"
   local library="$ROOT/waybionic_can/arduino/libraries/WaybionicCan"
+  local port
 
-  [[ -f "$sketch/carrier_bridge.ino" ]] \
-    || fail "carrier_bridge is not in this checkout yet: it comes with PR #40 (waybionic_can)"
+  [[ "$name" == carrier_bridge* && -f "$sketch/$name.ino" ]] \
+    || fail "unknown carrier sketch $name: use carrier_bridge or carrier_bridge_mcp2515"
   command -v arduino-cli >/dev/null 2>&1 \
     || fail "install arduino-cli first: brew install arduino-cli"
-  find_carrier
+  ensure_environment
   arduino-cli core update-index
   arduino-cli core install arduino:renesas_uno
   arduino-cli compile --fqbn "$fqbn" --library "$library" "$sketch"
-  arduino-cli upload --fqbn "$fqbn" --port "$CARRIER" "$sketch"
-  echo "Flashed carrier_bridge to $CARRIER"
+  # Running carrier firmware has the board's own USB port; uploads go through the WiFi bridge.
+  port="$(run_environment python "$ROOT/scripts/carrier_usb.py" upload-port \
+    ${WAYBIONIC_CARRIER:+--port "$WAYBIONIC_CARRIER"})"
+  arduino-cli upload --fqbn "$fqbn" --port "$port" "$sketch"
+  echo "Flashed $name"
 }
 
 command_name="${1:-help}"
@@ -199,8 +244,8 @@ case "$command_name" in
       ros2 launch waybionic_bringup ground_station.launch.py "$@"
     ;;
   flash)
-    check_host
-    flash_carrier
+    prepare
+    flash_carrier "$@"
     ;;
   drives)
     [[ $# -gt 0 ]] || fail "drives needs an mks_setup command, such as scan"
@@ -212,9 +257,19 @@ case "$command_name" in
     prepare
     find_carrier
     echo "Carrier: $CARRIER"
+    profile="${WAYBIONIC_ARM_PROFILE:-$HOME/.waybionic/arm_profile.yaml}"
+    if [[ -f "$profile" ]]; then
+      echo "Arm profile: $profile"
+    elif [[ -n "${WAYBIONIC_ARM_PROFILE:-}" ]]; then
+      fail "arm profile not found: $profile"
+    else
+      profile=""
+    fi
+    zero_state="${WAYBIONIC_DRIVE_ZERO:-$HOME/.waybionic/drive_zero.yaml}"
     run_workspace env RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}" \
       ros2 launch waybionic_bringup ground_station.launch.py teleop:=true \
-      joy_source:=device drive_interface:=slcan drive_channel:="$CARRIER" "$@"
+      joy_source:=device drive_interface:=slcan drive_channel:="$CARRIER" \
+      arm_profile:="$profile" drive_zero_state:="$zero_state" "$@"
     ;;
   run)
     [[ $# -gt 0 ]] || fail "run requires a command"

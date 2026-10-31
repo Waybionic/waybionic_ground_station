@@ -88,11 +88,11 @@ def test_teleop_backs_out_of_a_collision_but_never_goes_deeper(parameters, check
         teleop.update(*sample(button), start, DT)
         teleop.update(*sample(), start, DT)
     for _ in range(round(0.5 / DT)):
-        teleop.update(*sample(left_y=1.0), dict(teleop.targets), DT)
+        teleop.update(*sample(left_y=-1.0), dict(teleop.targets), DT)
     assert teleop.targets['joint_3'] == pytest.approx(start['joint_3'])
     assert 'forearm_link: table' in teleop.blocked
     for _ in range(round(0.5 / DT)):
-        teleop.update(*sample(left_y=-1.0), dict(teleop.targets), DT)
+        teleop.update(*sample(left_y=1.0), dict(teleop.targets), DT)
     assert teleop.targets['joint_3'] < start['joint_3'] - 0.1
 
 
@@ -106,8 +106,8 @@ def test_teleop_stops_before_the_forearm_reaches_the_table(parameters, check):
     assert teleop.active_group.name == 'upper'
     stopped = False
     for _ in range(round(4.0 / DT)):
-        # Left stick up bends the elbow down towards the table.
-        teleop.update(*sample(left_y=1.0), dict(teleop.targets), DT)
+        # Left stick down bends the elbow down towards the table.
+        teleop.update(*sample(left_y=-1.0), dict(teleop.targets), DT)
         if any(hit.endswith(': table') for hit in teleop.blocked):
             stopped = True
             # The published one-period lookahead stops with the refused step.
@@ -117,7 +117,7 @@ def test_teleop_stops_before_the_forearm_reaches_the_table(parameters, check):
     assert stopped and teleop.targets['joint_3'] < LIMITS['joint_3'][1] - 0.05
     elbow = teleop.targets['joint_3']
     for _ in range(round(0.5 / DT)):
-        teleop.update(*sample(left_y=-1.0), dict(teleop.targets), DT)
+        teleop.update(*sample(left_y=1.0), dict(teleop.targets), DT)
     assert teleop.targets['joint_3'] < elbow - 0.05
 
 
@@ -157,7 +157,7 @@ def test_teleop_refuses_a_step_that_presses_one_contact_deeper(parameters, check
         teleop.update(*sample(button), start, DT)
         teleop.update(*sample(), start, DT)
     for _ in range(round(0.5 / DT)):
-        teleop.update(*sample(left_y=-1.0), dict(teleop.targets), DT)
+        teleop.update(*sample(left_y=1.0), dict(teleop.targets), DT)
     assert teleop.targets['joint_3'] == start['joint_3']
     assert teleop.blocked == ['forearm_link: table']
 
@@ -189,7 +189,7 @@ def test_teleop_refuses_to_slide_the_forearm_further_into_the_side_of_the_base(
     teleop.update(*sample('start'), start, DT)
     teleop.update(*sample(), start, DT)
     for _ in range(round(0.5 / DT)):
-        teleop.update(*sample(left_x=-1.0), dict(teleop.targets), DT)
+        teleop.update(*sample(left_x=1.0), dict(teleop.targets), DT)
     assert teleop.targets['joint_1'] == start['joint_1']
     assert teleop.blocked == ['forearm_link: base_link']
     # Raising the shoulder backs it out.
