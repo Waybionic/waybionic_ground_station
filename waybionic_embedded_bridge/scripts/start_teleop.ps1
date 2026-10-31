@@ -23,7 +23,9 @@ Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
 Start-Sleep -Milliseconds 400
 
 Write-Host "Close Serial Monitor / Tk GUI using $Port."
-Write-Host "Click THIS window. E=ENABLE, hold arrows/WASD, release=stop. Ctrl+C releases $Port."
+Write-Host "E=ENABLE  Q=DISABLE  M=SIM-ALIGN  H=HOME  Z=ZERO  Esc=ESTOP"
+Write-Host "Xbox: A=ENABLE B=DISABLE Y=HOME X=ZERO Start=SIM-ALIGN Back=ESTOP"
+Write-Host "Hold arrows/WASD or sticks; release=stop. Ctrl+C releases $Port."
 if (-not $NoViz) {
     Write-Host "RViz twin ON (UDP $VizPort) - start_rviz.ps1 must be running in another window."
 }

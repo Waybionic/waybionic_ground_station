@@ -74,6 +74,15 @@ class JointEstimator:
             self.positions[k] = 0.0
             self.velocities[k] = 0.0
 
+    def pitch_blocked(self, key: str) -> bool:
+        """True when a pitch key would drive joint_4 past +/-75 soft ROM."""
+        if key not in ("w", "s"):
+            return False
+        joint, sign = KEY_RATES[key]
+        lo, hi = LIMITS[joint]
+        pos = self.positions.get(joint, 0.0)
+        return (sign > 0 and pos >= hi - 1e-4) or (sign < 0 and pos <= lo + 1e-4)
+
     def step(self) -> tuple[list[str], list[float], list[float]]:
         now = time.monotonic()
         dt = max(0.0, min(now - self._last, 0.05))
@@ -84,6 +93,8 @@ class JointEstimator:
 
         for key in self._held:
             if key not in KEY_RATES:
+                continue
+            if self.pitch_blocked(key):
                 continue
             joint, sign = KEY_RATES[key]
             rate = self.wrist_rate if joint in ("joint_4", "joint_5") else self.arm_rate

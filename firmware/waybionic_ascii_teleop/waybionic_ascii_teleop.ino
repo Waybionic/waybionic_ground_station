@@ -1,6 +1,10 @@
 // =====================================================
 // CHANGELOG (newest first) - update this on every edit
 // =====================================================
+// 2026-10-31 05:10 MDT
+//   - Pitch ROM gate ALL DIFF_* via motor pitch estimate (host maps pitch to
+//     DIFF_A/D so old DIFF_W/S-only limits let motors run past +/-75)
+//   - HOME / SETHOME: F5 absolute return to captured startup encoder pose
 // 2026-10-31 04:45 MDT
 //   - 16MHz tables also TXBO/rx=0 on this bench -> revert Config_8MHz_500kbps
 //   - Pause ENC TX while bus dead (stop digging TEC hole); CANRECOVER cmd
@@ -146,15 +150,27 @@ uint8_t wristAccel  = 45;
 //
 // =====================================================
 
+// Soft wrist estimates (deg). Host maps pitch keys to DIFF_A/D and roll to DIFF_W/S.
 float j4Angle = 0.0;
 float j5Angle = 0.0;
+float pitchAngle = 0.0;
+float rollAngle = 0.0;
+int pitchDir = 0; // +1 DIFF_A, -1 DIFF_D, 0 none
+int rollDir = 0;  // +1 DIFF_W, -1 DIFF_S, 0 none
 
-// Pitch soft ROM: +/-75 deg each side of ZERO.
-const float J4_MIN = -75.0;
-const float J4_MAX =  75.0;
+// Pitch soft ROM: +/-75 deg each side of ZERO (enforced on DIFF_A/D).
+const float PITCH_MIN = -75.0;
+const float PITCH_MAX =  75.0;
 
 const float J5_MIN = -270.0;
 const float J5_MAX =  270.0;
+
+// Startup / SETHOME encoder pose for HOME (F5 absolute).
+bool haveHomePose = false;
+int64_t homeEncJ1 = 0;
+int64_t homeEncJ3 = 0;
+int64_t homeEncJ4 = 0;
+int64_t homeEncJ5 = 0;
 
 
 // =====================================================
@@ -390,6 +406,20 @@ void storeEncoder(uint32_t id, int64_t value)
     {
         encJ5 = value;
         haveEncJ5 = true;
+    }
+
+    // First full ENC sample becomes startup home if none set yet.
+    if (
+        !haveHomePose &&
+        haveEncJ1 && haveEncJ3 && haveEncJ4 && haveEncJ5
+    )
+    {
+        homeEncJ1 = encJ1;
+        homeEncJ3 = encJ3;
+        homeEncJ4 = encJ4;
+        homeEncJ5 = encJ5;
+        haveHomePose = true;
+        Serial.println("SETHOME AUTO");
     }
 }
 
@@ -855,24 +885,28 @@ void updateAngles()
         dt = 0.25;
     }
 
-    j4Angle +=
-        j4Direction *
-        DEG_PER_SEC *
-        dt;
+    j4Angle += j4Direction * DEG_PER_SEC * dt;
+    j5Angle += j5Direction * DEG_PER_SEC * dt;
+    pitchAngle += pitchDir * DEG_PER_SEC * dt;
+    rollAngle += rollDir * DEG_PER_SEC * dt;
 
-    j5Angle +=
-        j5Direction *
-        DEG_PER_SEC *
-        dt;
-
-    // Pitch soft ROM (+/-75). j4Angle tracks DIFF_W/S pitch estimate.
-    if (j4Angle > J4_MAX)
+    if (pitchAngle > PITCH_MAX)
     {
-        j4Angle = J4_MAX;
+        pitchAngle = PITCH_MAX;
+        if (pitchDir > 0)
+        {
+            stopDifferential();
+            Serial.println("PITCH_LIMIT +75");
+        }
     }
-    if (j4Angle < J4_MIN)
+    else if (pitchAngle < PITCH_MIN)
     {
-        j4Angle = J4_MIN;
+        pitchAngle = PITCH_MIN;
+        if (pitchDir < 0)
+        {
+            stopDifferential();
+            Serial.println("PITCH_LIMIT -75");
+        }
     }
 }
 
@@ -939,12 +973,9 @@ void moveJ5CCW()
 
 void differentialW()
 {
-    // Pitch+: stop at +75 deg soft ROM.
-    if (j4Angle >= J4_MAX)
-    {
-        stopDifferential();
-        return;
-    }
+    // Host maps roll keys here (a/d). No pitch ROM gate.
+    pitchDir = 0;
+    rollDir = +1;
     moveJ4CW();
     delay(3);
     moveJ5CW();
@@ -953,12 +984,8 @@ void differentialW()
 
 void differentialS()
 {
-    // Pitch-: stop at -75 deg soft ROM.
-    if (j4Angle <= J4_MIN)
-    {
-        stopDifferential();
-        return;
-    }
+    pitchDir = 0;
+    rollDir = -1;
     moveJ4CCW();
     delay(3);
     moveJ5CCW();
@@ -967,6 +994,15 @@ void differentialS()
 
 void differentialA()
 {
+    // Host maps pitch+ (W) -> DIFF_A. Enforce +/-75 here so motors stop.
+    if (pitchAngle >= PITCH_MAX)
+    {
+        stopDifferential();
+        Serial.println("PITCH_LIMIT +75");
+        return;
+    }
+    pitchDir = +1;
+    rollDir = 0;
     moveJ4CCW();
     delay(3);
     moveJ5CW();
@@ -975,6 +1011,15 @@ void differentialA()
 
 void differentialD()
 {
+    // Host maps pitch- (S) -> DIFF_D.
+    if (pitchAngle <= PITCH_MIN)
+    {
+        stopDifferential();
+        Serial.println("PITCH_LIMIT -75");
+        return;
+    }
+    pitchDir = -1;
+    rollDir = 0;
     moveJ4CW();
     delay(3);
     moveJ5CCW();
@@ -983,9 +1028,106 @@ void differentialD()
 
 void stopDifferential()
 {
+    pitchDir = 0;
+    rollDir = 0;
     stopMotor(J4);
     delay(3);
     stopMotor(J5);
+}
+
+
+// =====================================================
+// ABSOLUTE MOVE (F5) + HOME
+// =====================================================
+
+int32_t clampInt24(int64_t value)
+{
+    if (value > 8388607LL)
+    {
+        return 8388607L;
+    }
+    if (value < -8388607LL)
+    {
+        return -8388607L;
+    }
+    return (int32_t)value;
+}
+
+
+void moveAbsoluteAxis(uint16_t id, int64_t axisCounts, uint16_t speed, uint8_t acc)
+{
+    // Manual 11.x F5h: speed uint16, acc uint8, axis int24, CRC.
+    int32_t axis = clampInt24(axisCounts);
+    if (speed > 3000)
+    {
+        speed = 3000;
+    }
+
+    uint8_t data[8];
+    data[0] = 0xF5;
+    data[1] = (uint8_t)(speed >> 8);
+    data[2] = (uint8_t)(speed & 0xFF);
+    data[3] = acc;
+    data[4] = (uint8_t)((axis >> 16) & 0xFF);
+    data[5] = (uint8_t)((axis >> 8) & 0xFF);
+    data[6] = (uint8_t)(axis & 0xFF);
+    data[7] = checksum(id, data, 7);
+    sendMKS(id, data, 8);
+}
+
+
+void captureHomePose()
+{
+    if (!(haveEncJ1 && haveEncJ3 && haveEncJ4 && haveEncJ5))
+    {
+        Serial.println("SETHOME FAIL need ENC");
+        return;
+    }
+    homeEncJ1 = encJ1;
+    homeEncJ3 = encJ3;
+    homeEncJ4 = encJ4;
+    homeEncJ5 = encJ5;
+    haveHomePose = true;
+    j4Angle = 0.0;
+    j5Angle = 0.0;
+    pitchAngle = 0.0;
+    rollAngle = 0.0;
+    Serial.println("SETHOME OK");
+}
+
+
+void goHomePose()
+{
+    if (!haveHomePose)
+    {
+        // Fall back to whatever ENC we first locked, else fail.
+        if (haveEncJ1 && haveEncJ3 && haveEncJ4 && haveEncJ5)
+        {
+            captureHomePose();
+        }
+        else
+        {
+            Serial.println("HOME FAIL no pose");
+            return;
+        }
+    }
+
+    stopAll();
+    delay(20);
+    // Moderate return speed.
+    moveAbsoluteAxis(J1, homeEncJ1, armSpeed, armAccel);
+    delay(5);
+    moveAbsoluteAxis(J3, homeEncJ3, armSpeed, armAccel);
+    delay(5);
+    moveAbsoluteAxis(J4, homeEncJ4, wristSpeed, wristAccel);
+    delay(5);
+    moveAbsoluteAxis(J5, homeEncJ5, wristSpeed, wristAccel);
+
+    j4Angle = 0.0;
+    j5Angle = 0.0;
+    pitchAngle = 0.0;
+    rollAngle = 0.0;
+    Serial.println("HOME");
 }
 
 
@@ -999,6 +1141,8 @@ void zeroDifferential()
 
     j4Angle = 0.0;
     j5Angle = 0.0;
+    pitchAngle = 0.0;
+    rollAngle = 0.0;
 
     Serial.println("WRIST CENTER SET TO 0 DEG");
 }
@@ -1012,6 +1156,14 @@ void printAngles()
 
     Serial.print("    J5 = ");
     Serial.print(j5Angle, 1);
+    Serial.print(" deg");
+
+    Serial.print("    pitch = ");
+    Serial.print(pitchAngle, 1);
+    Serial.print(" deg");
+
+    Serial.print("    roll = ");
+    Serial.print(rollAngle, 1);
     Serial.println(" deg");
 }
 
@@ -1260,6 +1412,16 @@ void processCommand(String cmd)
     else if (cmd == "ZERO")
     {
         zeroDifferential();
+    }
+
+    else if (cmd == "SETHOME")
+    {
+        captureHomePose();
+    }
+
+    else if (cmd == "HOME")
+    {
+        goHomePose();
     }
 
     else if (cmd == "POS")

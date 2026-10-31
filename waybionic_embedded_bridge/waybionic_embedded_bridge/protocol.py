@@ -18,6 +18,8 @@ ESTOP = "ESTOP"
 AUTO = "AUTO"
 ZERO = "ZERO"
 POS = "POS"
+HOME = "HOME"
+SETHOME = "SETHOME"
 
 JOINT_CMDS = {
     "j1": {"cw": "J1_CW", "ccw": "J1_CCW", "stop": "J1_STOP"},
