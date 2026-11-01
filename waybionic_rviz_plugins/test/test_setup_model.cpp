@@ -2,6 +2,7 @@
 // messages, so no setup_guide node or ROS graph is needed.
 
 #include <chrono>
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <vector>
@@ -243,6 +244,143 @@ TEST(SetupModel, TheGuideIsQuietFromThreeSecondsWithoutAMessage)
   EXPECT_FALSE(setupGuideQuiet(now - 2900ms, now));
   EXPECT_TRUE(setupGuideQuiet(now - 3000ms, now));
   EXPECT_FALSE(setupGuideQuiet(now + 1s, now));
+}
+
+namespace
+{
+
+// The array with one step replaced, as when the controller drops out of a ready arm.
+DiagnosticArray withStep(
+  DiagnosticArray array, const std::size_t index, const DiagnosticStatus & step)
+{
+  array.status[index] = step;
+  return array;
+}
+
+// Seconds after an arbitrary start, on the clock the panel uses.
+std::chrono::steady_clock::time_point at(const int seconds)
+{
+  return std::chrono::steady_clock::time_point{} + std::chrono::hours(1) +
+         std::chrono::seconds(seconds);
+}
+
+}  // namespace
+
+TEST(SetupModel, ASetupStepBeforeReadyThatIsNotDoneNeedsTheOperator)
+{
+  EXPECT_TRUE(parseSetup(zeroingArray()).needsAttention());
+  EXPECT_FALSE(parseSetup(readyArray()).needsAttention());
+  EXPECT_FALSE(parseSetup(DiagnosticArray()).needsAttention());
+
+  const auto no_controller = withStep(
+    readyArray(), 2,
+    makeStep("setup.controller", "Controller", "todo", "Connect an Xbox controller"));
+  EXPECT_TRUE(parseSetup(no_controller).needsAttention());
+
+  const auto no_answer = withStep(
+    readyArray(), 1, makeStep("setup.drives", "Drives", "blocked", "No answer from elbow"));
+  EXPECT_TRUE(parseSetup(no_answer).needsAttention());
+}
+
+TEST(SetupModel, AStepBeingCheckedDoesNotNeedTheOperatorYet)
+{
+  const auto checking = withStep(
+    readyArray(), 1, makeStep("setup.drives", "Drives", "working", "Checking the drives..."));
+  EXPECT_FALSE(parseSetup(checking).needsAttention());
+}
+
+TEST(SetupModel, TeleopThatIsOnlyStoppedLeavesThePanelAlone)
+{
+  const auto paused = withStep(
+    readyArray(), 4,
+    makeStep("setup.ready", "Ready", "todo", "Press Start (the Menu button) on the controller"));
+  EXPECT_FALSE(parseSetup(paused).needsAttention());
+  EXPECT_FALSE(parseSetup(paused).ready());
+
+  const auto stopped_by_a_fault = withStep(
+    readyArray(), 4,
+    makeStep("setup.ready", "Ready", "blocked", "DRIVES-STOPPED: following error"));
+  EXPECT_TRUE(parseSetup(stopped_by_a_fault).needsAttention());
+}
+
+TEST(SetupDock, ShowsOnceWhenSomethingNeedsTheOperator)
+{
+  SetupDockPolicy policy(4s);
+  EXPECT_EQ(DockAction::None, policy.update(SetupDockInput::Waiting, at(0)));
+  EXPECT_EQ(DockAction::Show, policy.update(SetupDockInput::NeedsAttention, at(1)));
+  EXPECT_EQ(DockAction::None, policy.update(SetupDockInput::NeedsAttention, at(2)));
+  EXPECT_EQ(DockAction::None, policy.update(SetupDockInput::NeedsAttention, at(60)));
+}
+
+TEST(SetupDock, HidesOnceAfterTheArmHasBeenReadyForTheDelay)
+{
+  SetupDockPolicy policy(4s);
+  EXPECT_EQ(DockAction::None, policy.update(SetupDockInput::Ready, at(0)));
+  EXPECT_EQ(DockAction::None, policy.update(SetupDockInput::Ready, at(3)));
+  EXPECT_EQ(DockAction::Hide, policy.update(SetupDockInput::Ready, at(4)));
+  // Opened again by hand while ready, it stays open.
+  EXPECT_EQ(DockAction::None, policy.update(SetupDockInput::Ready, at(5)));
+  EXPECT_EQ(DockAction::None, policy.update(SetupDockInput::Ready, at(600)));
+}
+
+TEST(SetupDock, ANewProblemShowsItAgainAndReadyHidesItAgain)
+{
+  SetupDockPolicy policy(4s);
+  policy.update(SetupDockInput::Ready, at(0));
+  ASSERT_EQ(DockAction::Hide, policy.update(SetupDockInput::Ready, at(4)));
+  // The controller drops out and comes back, straight from ready to a problem and back.
+  EXPECT_EQ(DockAction::Show, policy.update(SetupDockInput::NeedsAttention, at(10)));
+  EXPECT_EQ(DockAction::None, policy.update(SetupDockInput::Ready, at(12)));
+  EXPECT_EQ(DockAction::None, policy.update(SetupDockInput::Ready, at(15)));
+  EXPECT_EQ(DockAction::Hide, policy.update(SetupDockInput::Ready, at(16)));
+}
+
+TEST(SetupDock, AStepBeingCheckedRestartsTheCountdown)
+{
+  SetupDockPolicy policy(4s);
+  policy.update(SetupDockInput::Ready, at(0));
+  EXPECT_EQ(DockAction::None, policy.update(SetupDockInput::Ready, at(3)));
+  EXPECT_EQ(DockAction::None, policy.update(SetupDockInput::Waiting, at(3)));
+  EXPECT_EQ(DockAction::None, policy.update(SetupDockInput::Ready, at(4)));
+  EXPECT_EQ(DockAction::None, policy.update(SetupDockInput::Ready, at(7)));
+  EXPECT_EQ(DockAction::Hide, policy.update(SetupDockInput::Ready, at(8)));
+}
+
+TEST(SetupDock, PausingTeleopNeitherShowsNorHidesThePanel)
+{
+  SetupDockPolicy policy(4s);
+  policy.update(SetupDockInput::Ready, at(0));
+  ASSERT_EQ(DockAction::Hide, policy.update(SetupDockInput::Ready, at(4)));
+  // B stops teleop: only Start is left to press.
+  EXPECT_EQ(DockAction::None, policy.update(SetupDockInput::Waiting, at(10)));
+  EXPECT_EQ(DockAction::None, policy.update(SetupDockInput::Waiting, at(100)));
+  // Start again: a new ready period, so it is hidden again after the delay.
+  EXPECT_EQ(DockAction::None, policy.update(SetupDockInput::Ready, at(101)));
+  EXPECT_EQ(DockAction::Hide, policy.update(SetupDockInput::Ready, at(105)));
+}
+
+TEST(SetupDock, TheDefaultDelayIsFourSeconds)
+{
+  EXPECT_EQ(std::chrono::milliseconds(4000), kSetupHideAfter);
+  SetupDockPolicy policy;
+  policy.update(SetupDockInput::Ready, at(0));
+  EXPECT_EQ(DockAction::None, policy.update(SetupDockInput::Ready, at(3)));
+  EXPECT_EQ(DockAction::Hide, policy.update(SetupDockInput::Ready, at(4)));
+}
+
+TEST(SetupModel, SaysWhyThereIsNoSetupGuide)
+{
+  // A station started without the arm, such as the plain viewer, never runs the guide.
+  const auto never = setupWaitingMessage(false, true);
+  EXPECT_NE(std::string::npos, never.find("teleop:=true"));
+  EXPECT_NE(std::string::npos, never.find("windows-arm"));
+  EXPECT_NE(std::string::npos, never.find("macos.sh arm"));
+  // One that was running and has gone is a fault, not a missing launch option.
+  const auto gone = setupWaitingMessage(true, true);
+  EXPECT_NE(std::string::npos, gone.find("stopped"));
+  EXPECT_EQ(std::string::npos, gone.find("teleop:=true"));
+  // Reports that arrive but are all malformed.
+  EXPECT_NE(std::string::npos, setupWaitingMessage(false, false).find("valid setup report"));
 }
 
 TEST(SetupModel, TheZeroServiceIsTheDriveNodes)

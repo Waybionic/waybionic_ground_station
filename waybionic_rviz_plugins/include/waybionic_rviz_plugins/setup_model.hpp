@@ -20,6 +20,9 @@ constexpr const char * kZeroServiceName = "/sim_arm_drives/zero";
 /// setup_guide publishes every 0.5 s, so this long without a message means it is gone.
 constexpr std::chrono::milliseconds kSetupGuideQuietAfter{3000};
 
+/// How long the arm has to stay ready before the setup panel puts itself away.
+constexpr std::chrono::milliseconds kSetupHideAfter{4000};
+
 enum class StepState
 {
   Ok,
@@ -55,6 +58,10 @@ struct SetupSnapshot
 
   /// True when there is at least one step and every one is done.
   bool ready() const;
+  /// True when the operator has something to do or fix: a step is blocked, or a step before
+  /// Ready is still to do. A step that is only being checked does not count, and neither does
+  /// Ready being to do, which is teleop stopped with only Start left to press.
+  bool needsAttention() const;
   /// The step marked current, or nullptr once everything is done.
   const SetupStep * currentStep() const;
 };
@@ -71,6 +78,49 @@ const char * stepStateWord(StepState state);
 bool setupGuideQuiet(
   const std::optional<std::chrono::steady_clock::time_point> & last_message,
   std::chrono::steady_clock::time_point now);
+
+/// What the panel says while it has no report to show. `seen_guide` is whether a valid report
+/// has ever arrived, and `guide_quiet` is setupGuideQuiet().
+std::string setupWaitingMessage(bool seen_guide, bool guide_quiet);
+
+/// What the setup panel's dock is to do about its own visibility.
+enum class DockAction
+{
+  None,
+  Show,
+  Hide
+};
+
+/// How the latest setup report bears on the dock.
+enum class SetupDockInput
+{
+  /// Nothing to act on: no report yet, a step being checked, or only Start left to press.
+  Waiting,
+  /// The operator has something to do or fix; see SetupSnapshot::needsAttention.
+  NeedsAttention,
+  /// Every step is done.
+  Ready
+};
+
+/// Puts the setup panel away once the arm has stayed ready for a while, and brings it back when
+/// something needs the operator, so it takes room only while it is useful. It acts on changes
+/// only: it shows the panel once when a problem appears, so that closing the panel by hand sticks
+/// until the next one, and hides it once per ready period, so that a panel opened by hand while
+/// ready stays open. A report that is neither (a step being checked, or only Start left) changes
+/// nothing, except that it ends the ready period.
+class SetupDockPolicy
+{
+public:
+  explicit SetupDockPolicy(std::chrono::steady_clock::duration hide_after = kSetupHideAfter);
+
+  DockAction update(SetupDockInput input, std::chrono::steady_clock::time_point now);
+
+private:
+  std::chrono::steady_clock::duration hide_after_;
+  SetupDockInput last_{SetupDockInput::Waiting};
+  std::chrono::steady_clock::time_point ready_since_;
+  bool hidden_{false};
+};
 
 }  // namespace waybionic_rviz_plugins
 

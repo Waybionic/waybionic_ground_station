@@ -19,9 +19,11 @@
 
 #include "waybionic_rviz_plugins/setup_model.hpp"
 
+class QDockWidget;
 class QLabel;
 class QGridLayout;
 class QPushButton;
+class QResizeEvent;
 class QTimer;
 class QWidget;
 
@@ -36,6 +38,10 @@ struct SetupMailbox;
 /// on /arm/setup. The panel shows them, and offers one button, Zero, when the guide asks for
 /// it: that calls the drive node's own zero service after the operator confirms the arm is in
 /// its zero pose. It never publishes anything, and never moves the arm.
+///
+/// Once the arm has stayed ready for a few seconds the panel closes its dock, so the other
+/// panels get the room, and it opens again when something needs the operator, such as the
+/// controller dropping out or a drive losing its zero. The Panels menu opens it by hand.
 ///
 /// Threading: ROS callbacks only write into a mutex-guarded mailbox, and a Qt timer drains it,
 /// so all widget and bookkeeping state is touched by the Qt thread alone and no service call
@@ -53,6 +59,9 @@ public:
   /// Subscribes to the setup steps and prepares the zero client on `node`. onInitialize()
   /// calls this with RViz's node. Calling it again replaces the connection.
   void connectToNode(rclcpp::Node::SharedPtr node);
+
+protected:
+  void resizeEvent(QResizeEvent * event) override;
 
 private:
   using Trigger = std_srvs::srv::Trigger;
@@ -84,6 +93,10 @@ private:
   void requestZero();
   void showStatus(const QString & text, bool success);
   void render();
+  void fitHeight();
+  QDockWidget * dock() const;
+  SetupDockInput dockInput(bool quiet) const;
+  void applyDockAction(DockAction action);
 
   bool zeroOffered() const;
 
@@ -95,7 +108,11 @@ private:
   // The last valid message, kept only while the guide keeps talking.
   SetupSnapshot snapshot_;
   bool has_snapshot_{false};
+  // True once a valid report has arrived, so that a guide that has gone quiet is told from one
+  // that has not started yet.
+  bool seen_guide_{false};
   std::optional<std::chrono::steady_clock::time_point> last_message_;
+  SetupDockPolicy dock_policy_;
 
   std::optional<PendingZero> pending_zero_;
   std::uint64_t next_token_{0};
