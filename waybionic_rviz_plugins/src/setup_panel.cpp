@@ -6,10 +6,12 @@
 #include <utility>
 #include <vector>
 
+#include <QDockWidget>
 #include <QGridLayout>
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QStyle>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -24,6 +26,8 @@ namespace
 {
 
 constexpr int kPollIntervalMs = 100;
+// The most height the panel asks of its dock for its text; a dock that is shorter scrolls it.
+constexpr int kMaxFittedHeight = 420;
 // The drive node waits up to half a second for the drives' replies before it answers.
 constexpr std::chrono::seconds kZeroTimeout{10};
 constexpr std::chrono::seconds kStatusLifetime{10};
@@ -158,8 +162,10 @@ void SetupPanel::disconnectFromNode()
   zero_client_.reset();
   node_.reset();
   has_snapshot_ = false;
+  seen_guide_ = false;
   snapshot_ = SetupSnapshot{};
   last_message_.reset();
+  dock_policy_ = SetupDockPolicy();
 }
 
 void SetupPanel::buildUi()
@@ -275,6 +281,7 @@ void SetupPanel::applySnapshot(SetupSnapshot snapshot)
   }
   snapshot_ = std::move(snapshot);
   has_snapshot_ = true;
+  seen_guide_ = true;
 }
 
 void SetupPanel::expirePendingZero(const std::chrono::steady_clock::time_point now)
@@ -337,17 +344,82 @@ void SetupPanel::showStatus(const QString & text, const bool success)
   status_expires_ = std::chrono::steady_clock::now() + kStatusLifetime;
 }
 
+SetupDockInput SetupPanel::dockInput(const bool quiet) const
+{
+  if (quiet) {
+    // A guide that was there and has gone is a fault; one that has not started yet is not.
+    return seen_guide_ ? SetupDockInput::NeedsAttention : SetupDockInput::Waiting;
+  }
+  if (!has_snapshot_) {
+    return SetupDockInput::Waiting;
+  }
+  if (snapshot_.needsAttention()) {
+    return SetupDockInput::NeedsAttention;
+  }
+  return snapshot_.ready() ? SetupDockInput::Ready : SetupDockInput::Waiting;
+}
+
+QDockWidget * SetupPanel::dock() const
+{
+  // The dock may hold the panel through a scroll area.
+  for (QWidget * widget = parentWidget(); widget != nullptr; widget = widget->parentWidget()) {
+    if (auto * found = qobject_cast<QDockWidget *>(widget)) {
+      return found;
+    }
+  }
+  return nullptr;
+}
+
+void SetupPanel::applyDockAction(const DockAction action)
+{
+  // RViz keeps every panel in a dock of its own. Hiding it is what the dock's close button does,
+  // and the Panels menu shows it again.
+  auto * panel_dock = dock();
+  if (panel_dock == nullptr || action == DockAction::None) {
+    return;
+  }
+  if (action == DockAction::Hide) {
+    panel_dock->hide();
+  } else {
+    panel_dock->show();
+    panel_dock->raise();
+  }
+}
+
+void SetupPanel::resizeEvent(QResizeEvent * event)
+{
+  rviz_common::Panel::resizeEvent(event);
+  fitHeight();
+}
+
+// A word-wrapped label reports a one-line minimum height, and a dock gives its panel no height
+// for its width, so a long message was squeezed over the row below it. Asking for the height the
+// layout needs at this width keeps the text readable: a dock or scroll area that is shorter
+// scrolls the panel instead.
+void SetupPanel::fitHeight()
+{
+  // Before the dock has laid the panel out it is far narrower than it will be, so the height it
+  // would need there is meaningless, and as a minimum it would stop the window from maximizing.
+  if (layout() == nullptr || width() < minimumWidth()) {
+    return;
+  }
+  const int needed = std::min(layout()->totalHeightForWidth(width()), kMaxFittedHeight);
+  if (needed > 0 && needed != minimumHeight()) {
+    setMinimumHeight(needed);
+  }
+}
+
 void SetupPanel::render()
 {
   const auto now = std::chrono::steady_clock::now();
   const bool quiet = setupGuideQuiet(last_message_, now);
   const bool shown = has_snapshot_ && !quiet;
   const bool ready = shown && snapshot_.ready();
+  applyDockAction(dock_policy_.update(dockInput(quiet), now));
 
   if (!shown) {
     summary_label_->setObjectName("Muted");
-    summary_label_->setText(
-      quiet ? "Waiting for the setup guide (setup_guide)..." : "Waiting for a valid setup report...");
+    summary_label_->setText(QString::fromStdString(setupWaitingMessage(seen_guide_, quiet)));
   } else if (ready) {
     summary_label_->setObjectName("Ready");
     summary_label_->setText(QString::fromUtf8("\xE2\x9C\x93 Ready: the arm can be operated"));
@@ -388,6 +460,8 @@ void SetupPanel::render()
   zero_button_->setVisible(offered);
   zero_button_->setEnabled(offered && !pending_zero_.has_value());
   zero_button_->setText(pending_zero_.has_value() ? "Zeroing..." : "Zero the arm");
+
+  fitHeight();
 
   if (now < status_expires_) {
     status_label_->setStyleSheet(

@@ -15,6 +15,8 @@ namespace
 
 constexpr const char * kPrefix = "setup.";
 constexpr const char * kKnownSteps[] = {"carrier", "drives", "controller", "zero", "ready"};
+// The last step: it is to do while teleop is stopped, which is not a fault.
+constexpr const char * kReadyStep = "ready";
 
 std::size_t displayOrder(const std::string & name)
 {
@@ -152,6 +154,17 @@ const SetupStep * SetupSnapshot::currentStep() const
   return found == steps.end() ? nullptr : &*found;
 }
 
+bool SetupSnapshot::needsAttention() const
+{
+  return valid && std::any_of(
+    steps.begin(), steps.end(), [](const SetupStep & step) {
+      if (step.state == StepState::Blocked) {
+        return true;
+      }
+      return step.state == StepState::Todo && step.name != kReadyStep;
+    });
+}
+
 SetupSnapshot parseSetup(const diagnostic_msgs::msg::DiagnosticArray & array)
 {
   SetupSnapshot snapshot;
@@ -216,6 +229,52 @@ bool setupGuideQuiet(
   const std::chrono::steady_clock::time_point now)
 {
   return !last_message.has_value() || now - *last_message >= kSetupGuideQuietAfter;
+}
+
+std::string setupWaitingMessage(const bool seen_guide, const bool guide_quiet)
+{
+  if (!guide_quiet) {
+    return "Waiting for a valid setup report...";
+  }
+  if (seen_guide) {
+    return "The setup guide (setup_guide) has stopped reporting.";
+  }
+  return "Waiting for the setup guide. It runs when the station is started for the arm "
+         "(teleop:=true), as windows-arm.cmd and ./scripts/macos.sh arm do.";
+}
+
+SetupDockPolicy::SetupDockPolicy(const std::chrono::steady_clock::duration hide_after)
+: hide_after_(hide_after)
+{
+}
+
+DockAction SetupDockPolicy::update(
+  const SetupDockInput input, const std::chrono::steady_clock::time_point now)
+{
+  DockAction action = DockAction::None;
+  switch (input) {
+    case SetupDockInput::NeedsAttention:
+      if (last_ != SetupDockInput::NeedsAttention) {
+        action = DockAction::Show;
+      }
+      hidden_ = false;
+      break;
+    case SetupDockInput::Ready:
+      if (last_ != SetupDockInput::Ready) {
+        ready_since_ = now;
+        hidden_ = false;
+      }
+      if (!hidden_ && now - ready_since_ >= hide_after_) {
+        action = DockAction::Hide;
+        hidden_ = true;
+      }
+      break;
+    case SetupDockInput::Waiting:
+      hidden_ = false;
+      break;
+  }
+  last_ = input;
+  return action;
 }
 
 }  // namespace waybionic_rviz_plugins

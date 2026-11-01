@@ -594,9 +594,18 @@ same diagnostics the station already publishes, and also says each change in the
 | Zero | every drive that is switched on is zeroed or kept its saved zero | put the arm in its zero pose and press **Zero the arm** (it asks you to confirm) |
 | Ready | teleop is enabled | press Start (the Menu button) on the controller |
 
-The controller needs no other step: the guide shows it as connected once input arrives. When
-every step is done the panel shrinks to one line. If the guide itself is not running, the panel
-says it is waiting for it. Nothing in the panel moves the arm.
+The controller needs no other step: the guide shows it as connected once input arrives. Once
+every step is done, including Start, and the arm has stayed ready for four seconds, the panel
+closes so the other panels get its room. It opens again when something needs you: a step
+before Ready is to do or blocked, such as the controller dropping out, a drive losing its zero
+or the carrier being unplugged, or Ready is blocked because the drives stopped the arm. A step
+that is only being checked does not open it, and neither does stopping teleop (B or Start),
+which leaves only Start to press. The panel's close button, or Panels > SetupPanel, shows or
+hides it by hand, and it is not hidden again until the arm next becomes ready.
+
+If the guide itself is not running, the panel says so. A station started without the arm, such
+as the plain `wslg` viewer, has no guide: the arm launchers (`scripts\windows-arm.cmd`,
+`./scripts/macos.sh arm`) start it with `teleop:=true`. Nothing in the panel moves the arm.
 
 ### Switching joints off
 
