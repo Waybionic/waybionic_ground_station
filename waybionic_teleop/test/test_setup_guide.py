@@ -127,6 +127,32 @@ def test_a_drive_that_reports_a_fault_blocks_with_its_state():
     assert found.state == BLOCKED and 'base_yaw' in found.message and 'run failed' in found.message
 
 
+def test_a_drive_that_fails_its_health_check_says_what_it_found():
+    # The drive node raises the row's level for its health state but its message only has the
+    # move status, so the guide has to say what the health check found.
+    behind = row('drive.base_yaw', ERROR, 'CAN ID 1: run complete; last 001#F5000000000000F6',
+                 '0.000', can_id=1, state='FOLLOWING_ERROR', target_encoder_error_deg='-6.300')
+    found = step(ready_rows(**{'drive.base_yaw': behind}), 'drives')
+    assert found.state == BLOCKED
+    assert 'base_yaw (following error: 6.3 deg off its target)' in found.message
+    assert 'run complete' not in found.message
+
+    stalled = row('drive.elbow', ERROR, 'CAN ID 3: running', '0.000', can_id=3, state='STALLED',
+                  target_encoder_error_deg='2.000')
+    assert 'elbow (stalled: 2.0 deg off its target)' in step(
+        ready_rows(**{'drive.elbow': stalled}), 'drives').message
+
+    disabled = row('drive.elbow', ERROR, 'CAN ID 3: ready', '0.000', can_id=3, state='DISABLED')
+    assert 'elbow (disabled)' in step(ready_rows(**{'drive.elbow': disabled}), 'drives').message
+
+
+def test_a_drive_that_fails_its_move_keeps_its_own_status_when_it_is_healthy():
+    failed = row('drive.base_yaw', ERROR, 'CAN ID 1: run failed', '0.000', can_id=1, state='OK',
+                 target_encoder_error_deg='0.100')
+    assert 'base_yaw (run failed)' in step(
+        ready_rows(**{'drive.base_yaw': failed}), 'drives').message
+
+
 def test_drives_still_being_set_up_are_work_in_progress():
     pending = drive('base_yaw', 1, 'ready, setup 82h unconfirmed', WARN)
     assert step(ready_rows(**{'drive.base_yaw': pending}), 'drives').state == WORKING
