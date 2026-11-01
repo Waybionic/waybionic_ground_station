@@ -7,8 +7,10 @@
 #include <QApplication>
 #include <QDebug>
 #include <QDockWidget>
+#include <QFrame>
 #include <QList>
 #include <QMainWindow>
+#include <QScrollArea>
 #include <QString>
 
 #include "rclcpp/rclcpp.hpp"
@@ -20,21 +22,46 @@
 namespace
 {
 
+// A panel asks for the height of everything in it. The three stacked below ask for more than a
+// laptop screen has between them, which made the window taller than the screen and cut off its
+// bottom. In a scroll area a dock can be shorter than its panel, and the panel scrolls.
+void scrollInDock(QDockWidget * dock)
+{
+  QWidget * panel = dock->widget();
+  if (panel == nullptr || qobject_cast<QScrollArea *>(panel) != nullptr) {
+    return;
+  }
+  auto * scroll = new QScrollArea();
+  scroll->setFrameShape(QFrame::NoFrame);
+  scroll->setWidgetResizable(true);
+  // Giving the dock another widget hides the panel, so put it in the scroll area and show it.
+  dock->setWidget(scroll);
+  scroll->setWidget(panel);
+  panel->show();
+}
+
 // The station's own panels, from the top of the right-hand dock down, with the share of its
 // height each gets. RViz puts a panel its saved window state does not know in the left dock, so
 // they are stacked here whatever the layout file says. Panels that are not loaded are skipped.
+// The setup panel never scrolls: it asks for exactly the height its text needs, and it is the
+// one the operator has to read while it is open.
 void stackRightDock(QMainWindow * frame)
 {
   struct Entry
   {
     const char * name;
     int weight;
+    bool scrolls;
   };
-  const Entry order[] = {{"SetupPanel", 2}, {"JointControlPanel", 2}, {"DiagnosticsPanel", 5}};
+  const Entry order[] = {
+    {"SetupPanel", 2, false}, {"JointControlPanel", 2, true}, {"DiagnosticsPanel", 5, true}};
   QList<QDockWidget *> docks;
   QList<int> weights;
   for (const auto & entry : order) {
     if (auto * dock = frame->findChild<QDockWidget *>(QString::fromLatin1(entry.name))) {
+      if (entry.scrolls) {
+        scrollInDock(dock);
+      }
       docks.append(dock);
       weights.append(entry.weight);
     }
