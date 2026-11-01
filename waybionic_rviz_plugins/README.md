@@ -38,6 +38,9 @@ colcon test-result --verbose
 
 Both panels are in the ground station's right-hand dock, above the diagnostics panel
 (`ground_station_rviz` stacks them; a plain `rviz2` leaves them wherever the layout puts them).
+It also puts the joint control and diagnostics panels in scroll areas, so that the three together
+do not make the window taller than a laptop screen; the setup panel asks for the height its text
+needs and does not scroll.
 
 **Arm setup** (`waybionic_rviz_plugins/SetupPanel`) lists the start-up steps the `setup_guide`
 node publishes on the latched `/arm/setup` topic (a DiagnosticArray of `setup.<step>` rows:
@@ -45,7 +48,10 @@ carrier, drives, controller, zero, ready). Each row's message is what to do next
 are `title`, `state` (`ok`, `todo`, `blocked` or `working`), `action` (`zero` or empty) and
 `current`. When the guide asks for a zero, the panel offers a Zero button; after the operator
 confirms the arm is in its zero pose it calls the drive node's `/sim_arm_drives/zero`
-(`std_srvs/Trigger`) and shows the answer. Once every step is done the panel shrinks to one line.
+(`std_srvs/Trigger`) and shows the answer. Once every step is done the panel shrinks to one line,
+and four seconds later (`kSetupHideAfter`) it closes its dock; `SetupDockPolicy` opens it again, once,
+when a step before ready needs the operator (`SetupSnapshot::needsAttention`) and again hides it once
+the arm is next ready. Teleop merely being stopped changes nothing.
 
 **Joint control** (`waybionic_rviz_plugins/JointControlPanel`) shows a checkbox per joint,
 J1 to J5 and the tool. It reads the latched `/arm/joint_control` topic (a DiagnosticArray with
