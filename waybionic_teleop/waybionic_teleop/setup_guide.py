@@ -80,6 +80,23 @@ def carrier_step(rows):
     return Step('carrier', OK, 'Carrier connected')
 
 
+def fault(name, row):
+    """Say why a drive's row is an error: its health check, or else its move status."""
+    # The drive node raises the row's level for a failed health check, but its message only has
+    # the move status, such as "run complete", so the reason is in the row's state value.
+    health = value(row, 'state')
+    if health and health != 'OK':
+        text = health.lower().replace('_', ' ')
+        if health in ('FOLLOWING_ERROR', 'STALLED'):
+            try:
+                error = abs(float(value(row, 'target_encoder_error_deg')))
+                text += f': {error:.1f} deg off its target'
+            except ValueError:
+                pass
+        return f'{name} ({text})'
+    return f'{name} ({row.message.split(": ", 1)[-1]})'
+
+
 def drives_step(rows):
     drives = {name[len('drive.'):]: row for name, row in rows.items()
               if name.startswith('drive.')}
@@ -93,7 +110,7 @@ def drives_step(rows):
         return Step('drives', BLOCKED,
                     f'No answer from {", ".join(missing)}: check its power and CAN wiring, or '
                     'switch its joint off in Joint control')
-    failed = [f'{name} ({row.message.split(": ", 1)[-1]})' for name, row in on.items()
+    failed = [fault(name, row) for name, row in on.items()
               if row.level == DiagnosticStatus.ERROR]
     if failed:
         return Step('drives', BLOCKED, f'Drive fault: {", ".join(failed)}')

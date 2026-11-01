@@ -589,7 +589,7 @@ same diagnostics the station already publishes, and also says each change in the
 | Step | Done when | If it isn't |
 | --- | --- | --- |
 | Carrier | the carrier reports on USB and its E-stop is not pressed | plug in its USB-C cable; if it is plugged in but silent, replug it or flash it |
-| Drives | every drive that is switched on answers | the panel names the drive and its CAN ID: check its power and wiring, or switch its joint off (below) |
+| Drives | every drive that is switched on answers and passes its health check | the panel names the drive and what is wrong: no answer (with its CAN ID, so check its power and wiring, or switch its joint off, below), a failed move, or the health check, such as `following error: 6.3 deg off its target` |
 | Controller | `/joy` input is arriving | connect an Xbox controller (USB or Bluetooth) and press a button |
 | Zero | every drive that is switched on is zeroed or kept its saved zero | put the arm in its zero pose and press **Zero the arm** (it asks you to confirm) |
 | Ready | teleop is enabled | press Start (the Menu button) on the controller |
