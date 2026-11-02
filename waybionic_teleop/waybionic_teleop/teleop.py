@@ -38,6 +38,12 @@ def clamp(value, low, high):
     return min(max(value, low), high)
 
 
+def axis_words(axis):
+    """Return what to call a controller axis, for example 'left stick' for 'left_y'."""
+    side, _, kind = axis.rpartition('_')
+    return f'{side} stick' if kind in ('x', 'y') else axis.replace('_', ' ')
+
+
 @dataclass
 class HeadMode:
     """Chicken head mode while it is on: approaching its goal joints, then holding the tip."""
@@ -568,8 +574,9 @@ class ArmTeleop:
         if head is None:
             return 'off', ''
         if head.anchor is not None:
-            return 'hold', ('Holding the tip in place: the left stick tilts the tool, the right '
-                            'stick rolls it')
+            settings = self.config.head
+            return 'hold', (f'Holding the tip in place: the {axis_words(settings.tilt_axis)} '
+                            f'tilts the tool, the {axis_words(settings.roll_axis)} rolls it')
         if head.stuck >= HEAD_BLOCKED_S:
             return 'blocked', ('The way to the head position is blocked by '
                                + ', '.join(self.blocked or ['something']))
