@@ -51,6 +51,16 @@ xbox_teleop:
       joints: [joint_1, joint_2, joint_3, joint_4, joint_5]
       axes: [left_y, right_y, right_x]
       scales: [1.0, 1.0, 1.0]
+    # Chicken head mode (the Chicken head panel in RViz): the tool tip goes to this spot in
+    # base_link, 30 cm forward and 55 cm up with the tool pointing forward (90 degrees from straight
+    # up), and stays there while the other joints move. The first stick tilts the tool about the
+    # tip (up tilts it up) and the second rolls it. The tool can tilt through about 215 degrees at
+    # this spot.
+    chicken_head:
+      position: [0.30, 0.0, 0.55]
+      pitch_deg: 90.0
+      axes: [left_y, right_x]
+      scales: [1.0, 1.0]
     max_linear_speed_mm_s: 50.0
     max_linear_accel_mm_s2: 250.0
     max_tilt_speed_deg_s: 30.0
