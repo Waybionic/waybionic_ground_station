@@ -19,6 +19,17 @@
   </class>
 
   <class
+    name="waybionic_rviz_plugins/ChickenHeadPanel"
+    type="waybionic_rviz_plugins::ChickenHeadPanel"
+    base_class_type="rviz_common::Panel">
+    <description>
+      Switch chicken head mode on or off. The teleop node holds the tool tip at a preset spot
+      while the sticks tilt and roll the tool; this panel only sends the switch and sends no
+      motion commands.
+    </description>
+  </class>
+
+  <class
     name="waybionic_rviz_plugins/JointControlPanel"
     type="waybionic_rviz_plugins::JointControlPanel"
     base_class_type="rviz_common::Panel">
