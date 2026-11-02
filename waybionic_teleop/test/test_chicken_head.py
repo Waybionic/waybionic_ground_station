@@ -2,13 +2,15 @@
 
 import math
 from pathlib import Path
+import re
 
 import pytest
 
+from waybionic_teleop import chicken_head
 from waybionic_teleop.collision import ArmCollision
 from waybionic_teleop.gamepad import AXES, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics
-from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
+from waybionic_teleop.teleop import ArmTeleop, axis_words, config_from_parameters, HEAD_STATES
 
 LIMITS = {'joint_1': (-math.pi, math.pi), 'joint_2': (-1.5708, 1.5708),
           'joint_3': (-1.5708, 1.5708), 'joint_4': (-1.5708, 1.5708),
@@ -16,6 +18,7 @@ LIMITS = {'joint_1': (-math.pi, math.pi), 'joint_2': (-1.5708, 1.5708),
 HOME = dict.fromkeys([*LIMITS, 'tool_grip'], 0.0)
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
         / 'waybionic_arm.urdf').read_text(encoding='utf-8')
+RVIZ = Path(__file__).resolve().parents[2] / 'waybionic_rviz_plugins'
 DT = 1.0 / 120.0
 TIP_TOLERANCE = 0.0005
 
@@ -82,6 +85,18 @@ def test_the_head_spot_and_sticks_come_from_the_config(teleop):
     assert head.position == (0.30, 0.0, 0.55)
     assert math.isclose(head.pitch, math.pi / 2)
     assert (head.tilt_axis, head.roll_axis) == ('left_y', 'right_x')
+
+
+@pytest.mark.parametrize('axis, words', [
+    ('left_y', 'left stick'), ('right_x', 'right stick'), ('left_trigger', 'left trigger')])
+def test_axes_are_named_the_way_an_operator_says_them(axis, words):
+    assert axis_words(axis) == words
+
+
+def test_the_hold_message_names_the_configured_inputs(params, arm):
+    teleop = enabled(build({**params, 'chicken_head.axes': ['right_y', 'left_x']}, arm))
+    reach_head(teleop)
+    assert 'the right stick tilts the tool, the left stick rolls it' in teleop.head_status()[1]
 
 
 def test_the_mode_is_off_until_it_is_switched_on(teleop):
@@ -297,3 +312,19 @@ def test_an_approach_that_cannot_make_progress_says_it_is_blocked(params, arm):
 def test_a_bad_head_config_is_refused(params, change, message):
     with pytest.raises(ValueError, match=message):
         config_from_parameters({**params, **change})
+
+
+def test_the_rviz_panel_uses_the_topic_and_service_the_node_offers():
+    header = (RVIZ / 'include' / 'waybionic_rviz_plugins' / 'chicken_head_model.hpp').read_text()
+    assert f'kChickenHeadTopic = "/{chicken_head.TOPIC}"' in header
+    assert f'kChickenHeadService = "/{chicken_head.SERVICE}"' in header
+
+
+def test_the_rviz_panel_reads_the_row_and_every_state_the_node_publishes():
+    source = (RVIZ / 'src' / 'chicken_head_model.cpp').read_text()
+    assert f'kRowName = "{chicken_head.ROW}"' in source
+    assert set(re.findall(r'text == "(\w+)"', source)) == set(HEAD_STATES)
+    for state in HEAD_STATES:
+        message = chicken_head.head_message(state, '')
+        assert message.status[0].name == chicken_head.ROW
+        assert [(item.key, item.value) for item in message.status[0].values] == [('state', state)]
