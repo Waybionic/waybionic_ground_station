@@ -4,12 +4,13 @@ import math
 from pathlib import Path
 import time
 
-from diagnostic_msgs.msg import DiagnosticArray
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 import pytest
 import rclpy
 from rclpy.parameter import Parameter
 from sensor_msgs.msg import JointState, Joy
 from std_msgs.msg import Bool, String
+from std_srvs.srv import SetBool
 
 from waybionic_teleop import joint_control, xbox_teleop_node
 from waybionic_teleop.gamepad import AXES, BUTTONS
@@ -336,3 +337,73 @@ def test_the_state_row_names_the_joints_that_are_off(node, monkeypatch):
     node.report()
     row = next(item for item in diagnostics[-1].status if item.name == 'teleop.state')
     assert row.message.startswith('Joints off: joint_1, joint_3; ')
+
+
+def head_rows(published):
+    """Return {state: message} for the chicken head rows the node has published."""
+    return {next(item.value for item in message.status[0].values if item.key == 'state'):
+            message.status[0].message for message in published}
+
+
+def test_the_head_service_switches_the_mode_and_publishes_its_state(node, monkeypatch):
+    published = []
+    monkeypatch.setattr(node.head_publisher, 'publish', published.append)
+    ready(node)
+    response = node.on_head(SetBool.Request(data=True), SetBool.Response())
+    assert response.success and 'moving' in response.message
+    assert node.teleop.head_status()[0] == 'approach'
+    assert 'approach' in head_rows(published)
+    response = node.on_head(SetBool.Request(data=False), SetBool.Response())
+    assert response.success and node.teleop.head_status()[0] == 'off'
+    assert 'off' in head_rows(published)
+
+
+def test_the_head_service_says_why_it_cannot_start(node, monkeypatch):
+    published = []
+    monkeypatch.setattr(node.head_publisher, 'publish', published.append)
+    node.load(String(data=URDF))
+    response = node.on_head(SetBool.Request(data=True), SetBool.Response())
+    assert not response.success and 'Start' in response.message
+    assert node.teleop.head_status()[0] == 'off'
+    assert published and published[-1].status[0].level == DiagnosticStatus.OK
+
+
+def test_the_head_service_without_a_robot_description_says_so(node, monkeypatch):
+    published = []
+    monkeypatch.setattr(node.head_publisher, 'publish', published.append)
+    response = node.on_head(SetBool.Request(data=True), SetBool.Response())
+    assert not response.success and 'robot_description' in response.message
+    assert 'unavailable' in head_rows(published)
+    assert published[-1].status[0].level == DiagnosticStatus.WARN
+
+
+def test_the_head_state_is_reported_with_the_other_rows(node, monkeypatch):
+    published = []
+    monkeypatch.setattr(node.head_publisher, 'publish', published.append)
+    ready(node)
+    node.report()
+    assert head_rows(published) == {'off': ''}
+
+
+def test_the_label_and_diagnostics_show_chicken_head(node, monkeypatch):
+    rows = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', rows.append)
+    ready(node)
+    node.on_head(SetBool.Request(data=True), SetBool.Response())
+    assert node.summary(True).startswith('HEAD\n')
+    node.report()
+    by_name = {row.name: row for row in rows[-1].status}
+    assert by_name['teleop.group'].values[0].value == 'chicken head'
+    assert 'tip' in by_name['teleop.group'].message
+    assert 'deg/s' in by_name['teleop.speed'].message
+
+
+def test_stopping_teleop_ends_the_mode_and_the_row_follows(node, monkeypatch):
+    published = []
+    monkeypatch.setattr(node.head_publisher, 'publish', published.append)
+    ready(node)
+    node.on_head(SetBool.Request(data=True), SetBool.Response())
+    tick(node, 'b')
+    assert not node.teleop.enabled
+    node.report()
+    assert list(head_rows(published[-1:])) == ['off']
