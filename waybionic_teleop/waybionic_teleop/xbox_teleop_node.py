@@ -5,7 +5,9 @@ Mapping and limits come from config/xbox_teleop.yaml and the robot_description j
 a joint the arm profile (``arm_profile``) locks stays at its angle, and so does one the drive
 node reports switched off on ``arm/joint_control``. The logic lives in
 :mod:`waybionic_teleop.teleop`. The node also reports its state on /diagnostics and draws a
-placeholder end effector and a status label in RViz.
+placeholder end effector and a status label in RViz. Chicken head mode, which holds the tool
+tip at a spot while the sticks tilt and roll the tool, is switched with a service and reported on
+a latched topic (:mod:`waybionic_teleop.chicken_head`).
 """
 
 import math
@@ -18,9 +20,10 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState, Joy, JoyFeedback
 from std_msgs.msg import Bool, String
+from std_srvs.srv import SetBool
 from visualization_msgs.msg import Marker, MarkerArray
 
-from waybionic_teleop import joint_control
+from waybionic_teleop import chicken_head, joint_control
 from waybionic_teleop.arm_profile import load_profile
 from waybionic_teleop.collision import ArmCollision
 from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS
@@ -88,6 +91,8 @@ class XboxTeleop(Node):
         self.create_subscription(JointState, 'joint_states', self.on_joint_states, 10)
         self.create_subscription(DiagnosticArray, joint_control.TOPIC, self.on_joint_control,
                                  latched)
+        self.head_publisher = self.create_publisher(DiagnosticArray, chicken_head.TOPIC, latched)
+        self.create_service(SetBool, chicken_head.SERVICE, self.on_head)
         self.command_publisher = self.create_publisher(JointState, 'joint_commands', 10)
         self.enable_publisher = self.create_publisher(Bool, 'teleop_enabled', latched)
         # game_controller_node rumbles a local controller; joy_udp_receiver passes it on.
@@ -159,6 +164,21 @@ class XboxTeleop(Node):
             return
         self.joy, self.joy_time = message, time.monotonic()
         self.joy_count += 1
+
+    def on_head(self, request, response):
+        if self.teleop is None:
+            response.success, response.message = False, self.problem
+        else:
+            response.success, response.message = self.teleop.set_head_mode(request.data)
+        self.publish_head()
+        return response
+
+    def publish_head(self):
+        if self.teleop is None:
+            state, message = chicken_head.UNAVAILABLE, self.problem
+        else:
+            state, message = self.teleop.head_status()
+        self.head_publisher.publish(chicken_head.head_message(state, message))
 
     def on_joint_control(self, message):
         self.disabled = joint_control.disabled_joints(message)
@@ -275,7 +295,8 @@ class XboxTeleop(Node):
                 state += '\n' + stop_reason(teleop.blocked)
         else:
             state = 'DISABLED\nPRESS-MENU' if fresh else 'NO-CONTROLLER'
-        return f'{teleop.active_group.name.upper()}\n{self.speed_percent():.0f}%\n{state}'
+        name = 'HEAD' if teleop.head is not None else teleop.active_group.name.upper()
+        return f'{name}\n{self.speed_percent():.0f}%\n{state}'
 
     def speed_percent(self):
         return 100.0 * self.config.speed_levels[self.teleop.level]
@@ -335,15 +356,19 @@ class XboxTeleop(Node):
         else:
             group = teleop.active_group
             cartesian = group.mode == 'cartesian'
+            head = teleop.head is not None
             hint = 'B stops, Y switches group, A holds to go home'
-            if group.mode == 'incision':
+            if head:
+                hint = 'B stops; Y or A leaves chicken head'
+            elif group.mode == 'incision':
                 hint = ('Tilt stays in the arm plane; going home is off here; B stops; '
                         'Y switches once the tool is withdrawn')
             note = teleop.note or ('At limit: ' + ', '.join(teleop.blocked) if teleop.blocked
                                    else ('LB moves along one axis; ' if cartesian else '') + hint)
             if teleop.disabled:
                 note = f'Joints off: {", ".join(sorted(teleop.disabled))}; {note}'
-            speed = (f'{1000.0 * teleop.linear_speed:.1f} mm/s' if group.mode != 'joint'
+            speed = (f'{1000.0 * teleop.linear_speed:.1f} mm/s'
+                     if group.mode != 'joint' and not head
                      else f'{math.degrees(teleop.speed):.0f} deg/s')
             low, high = self.config.tool_limits
             closed = (self.measured.get(self.config.tool_joint, low) - low) / (high - low)
@@ -351,7 +376,9 @@ class XboxTeleop(Node):
                 status('teleop.state', DiagnosticStatus.WARN if teleop.warning
                        else DiagnosticStatus.OK, 'enabled' if teleop.enabled else 'disabled',
                        '', note),
-                status('teleop.group', DiagnosticStatus.OK, group.name, '', group.describe()),
+                status('teleop.group', DiagnosticStatus.OK,
+                       'chicken head' if head else group.name, '',
+                       teleop.head_status()[1] if head else group.describe()),
                 status('teleop.speed', DiagnosticStatus.OK, f'{self.speed_percent():.0f}', '%',
                        f'{speed} max; D-pad up/down changes it'),
                 status('teleop.tool', DiagnosticStatus.OK, f'{100.0 * closed:.0f}', '%',
@@ -360,6 +387,7 @@ class XboxTeleop(Node):
         message = DiagnosticArray(status=statuses)
         message.header.stamp = self.get_clock().now().to_msg()
         self.diagnostics_publisher.publish(message)
+        self.publish_head()
 
 
 def main():
