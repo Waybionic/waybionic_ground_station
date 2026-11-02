@@ -101,6 +101,8 @@ before starting the SDL bridge.
 | Incision group: left stick up/down | Insert or withdraw the tool along its own axis |
 | Incision group: right stick up/down | Tilt the tool about the incision point |
 | Incision group: right stick left/right | Tool roll |
+| Chicken head mode: left stick up/down | Tilt the tool about the held tip (the D-pad left/right tilt it too) |
+| Chicken head mode: right stick left/right | Tool roll |
 | RT / LT | Close / open the placeholder end effector |
 | D-pad up/down | Speed: 10, 25, 50 or 100% of 60 deg/s, or of 50 mm/s and 30 deg/s of tilt in the Cartesian and incision groups |
 | A (hold) | Return to the zero pose (not in the incision group) |
@@ -175,6 +177,29 @@ incision. With five joints, the tool can only tilt in the arm's vertical plane.
   the point moves onto the axis instead of the arm moving. Further away, the group
   stops rather than pull the tool back: press Y, withdraw the tool in another group,
   then select the incision group again.
+
+**Chicken head mode** holds the tool tip at one spot while the rest of the arm moves around
+it, as a chicken keeps its head still. Press Start first, then tick **Chicken head mode** in
+the Chicken head panel (right-hand dock, under Arm setup). The same switch is the
+`/arm/chicken_head/set_enabled` service (`std_srvs/SetBool`), and its state is on the latched
+`/arm/chicken_head` topic. The arm moves every joint in a straight line to the head spot, at
+the current speed level, which takes a few seconds, and then holds it there. The default spot
+is 30 cm in front of the base and 55 cm up, with the tool pointing forward (`chicken_head` in
+`xbox_teleop.yaml`). Once the panel says *holding*, centre the sticks: the left stick tilts the
+tool and the right stick rolls it. The shoulder, elbow and wrist swing as far as the tilt needs,
+and in simulation the tip stays within half a millimetre of the spot.
+
+- The panel refuses, and says why, when teleop is not enabled, when a joint is locked or
+  switched off (the mode needs J1 to J5), when the tool is inserted through the incision
+  point, or when the head spot is out of reach of the arm's joint limits.
+- The mode ends, and the arm holds where it is, when you untick the box, press B, press Y
+  (which also selects the next group) or A, stop teleop with Start, or the controller drops
+  out.
+- Something in the way, such as the table or the base, stops the approach. After 1.5 s the
+  panel says *blocked* and names the joint. A tilt that reaches a joint limit stops there and
+  names the joint, and the tip stays held.
+- The approach moves all five joints at once, so on a real arm try it first at a low speed
+  with the stop within reach.
 
 ### Joint limits and collision checks
 

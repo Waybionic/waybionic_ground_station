@@ -20,6 +20,8 @@
 #include <rviz_common/display_context.hpp>
 #include <rviz_common/ros_integration/ros_node_abstraction_iface.hpp>
 
+#include "waybionic_rviz_plugins/panel_fit.hpp"
+
 namespace waybionic_rviz_plugins
 {
 namespace
@@ -392,21 +394,9 @@ void SetupPanel::resizeEvent(QResizeEvent * event)
   fitHeight();
 }
 
-// A word-wrapped label reports a one-line minimum height, and a dock gives its panel no height
-// for its width, so a long message was squeezed over the row below it. Asking for the height the
-// layout needs at this width keeps the text readable: a dock or scroll area that is shorter
-// scrolls the panel instead.
 void SetupPanel::fitHeight()
 {
-  // Before the dock has laid the panel out it is far narrower than it will be, so the height it
-  // would need there is meaningless, and as a minimum it would stop the window from maximizing.
-  if (layout() == nullptr || width() < minimumWidth()) {
-    return;
-  }
-  const int needed = std::min(layout()->totalHeightForWidth(width()), kMaxFittedHeight);
-  if (needed > 0 && needed != minimumHeight()) {
-    setMinimumHeight(needed);
-  }
+  fitPanelHeight(this, kMaxFittedHeight);
 }
 
 void SetupPanel::render()

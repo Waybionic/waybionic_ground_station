@@ -27,14 +27,19 @@ set(THIS_PACKAGE_INCLUDE_DEPENDS
 )
 
 add_library(${PROJECT_NAME} SHARED
+  include/waybionic_rviz_plugins/chicken_head_model.hpp
+  include/waybionic_rviz_plugins/chicken_head_panel.hpp
   include/waybionic_rviz_plugins/diagnostics_source.hpp
   include/waybionic_rviz_plugins/diagnostics_panel.hpp
   include/waybionic_rviz_plugins/joint_control_model.hpp
   include/waybionic_rviz_plugins/joint_control_panel.hpp
   include/waybionic_rviz_plugins/motion_test_panel.hpp
+  include/waybionic_rviz_plugins/panel_fit.hpp
   include/waybionic_rviz_plugins/ros_diagnostics_source.hpp
   include/waybionic_rviz_plugins/setup_model.hpp
   include/waybionic_rviz_plugins/setup_panel.hpp
+  src/chicken_head_model.cpp
+  src/chicken_head_panel.cpp
   src/diagnostics_panel.cpp
   src/joint_control_model.cpp
   src/joint_control_panel.cpp
@@ -168,6 +173,18 @@ if(BUILD_TESTING)
       ${CMAKE_CURRENT_SOURCE_DIR}/include
     )
     ament_target_dependencies(test_setup_model diagnostic_msgs)
+  endif()
+
+  ament_add_gtest(test_chicken_head_model
+    test/test_chicken_head_model.cpp
+    src/chicken_head_model.cpp
+    TIMEOUT 60
+  )
+  if(TARGET test_chicken_head_model)
+    target_include_directories(test_chicken_head_model PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    ament_target_dependencies(test_chicken_head_model diagnostic_msgs)
   endif()
 endif()
 
