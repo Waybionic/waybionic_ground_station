@@ -64,11 +64,12 @@ const ModeState & anOnState(const ModeSpec & spec)
   return spec.states.front();
 }
 
-TEST(ModeModel, ListsChickenHeadFirst)
+TEST(ModeModel, ListsChickenHeadThenDemo)
 {
   const auto & specs = modeSpecs();
-  ASSERT_GE(specs.size(), 1u);
-  EXPECT_EQ(specs.front(), &chickenHeadSpec());
+  ASSERT_EQ(specs.size(), 2u);
+  EXPECT_EQ(specs[0], &chickenHeadSpec());
+  EXPECT_EQ(specs[1], &demoSpec());
 }
 
 TEST(ModeModel, EveryModeHasItsOwnRowTopicAndService)
@@ -283,6 +284,57 @@ TEST(ModeModel, ABlockedModeIsShownAsAWarningAndAHoldingOneAsActive)
   EXPECT_EQ(tone("blocked"), Tone::Warning);
   EXPECT_EQ(tone("hold"), Tone::Active);
   EXPECT_EQ(tone("off"), Tone::Quiet);
+}
+
+TEST(ModeModel, DemoIsOnWhileItRunsAndNotWhileItReturns)
+{
+  const auto & spec = demoSpec();
+  const auto parse = [&spec](const std::string & name) {
+      return parseMode(makeArray({makeStatus(spec.row, name)}), spec).state;
+    };
+
+  EXPECT_FALSE(parse("off").on);
+  EXPECT_TRUE(parse("running").on);
+  EXPECT_FALSE(parse("stopping").on);
+  EXPECT_FALSE(parse("unavailable").on);
+  EXPECT_EQ(parse("running").word, "running");
+  EXPECT_EQ(parse("stopping").word, "returning");
+  // Returning is something going on, so it is not shown as quiet, but it is not a problem.
+  EXPECT_EQ(parse("stopping").tone, Tone::Active);
+  EXPECT_EQ(parse("off").tone, Tone::Quiet);
+}
+
+TEST(ModeModel, ADemoThatStoppedItselfIsAnOffStateWithAWarning)
+{
+  const auto & spec = demoSpec();
+  const auto snapshot = parseMode(
+    makeArray({makeStatus(
+        spec.row, "off", "Demo stopped: the arm would hit forearm_link: table",
+        DiagnosticStatus::WARN)}), spec);
+
+  ASSERT_TRUE(snapshot.valid);
+  EXPECT_FALSE(snapshot.state.on);
+  EXPECT_TRUE(snapshot.warning);
+  EXPECT_EQ(snapshot.message, "Demo stopped: the arm would hit forearm_link: table");
+}
+
+TEST(ModeModel, EachModeOnlyReadsItsOwnRowAndStates)
+{
+  const auto array = makeArray({makeStatus("chicken_head", "hold"), makeStatus("demo", "running")});
+
+  const auto head = parseMode(array, chickenHeadSpec());
+  const auto demo = parseMode(array, demoSpec());
+  ASSERT_TRUE(head.valid);
+  ASSERT_TRUE(demo.valid);
+  EXPECT_EQ(head.state.name, "hold");
+  EXPECT_EQ(demo.state.name, "running");
+
+  // A state of one mode is not a state of the other.
+  const auto wrong = parseMode(makeArray({makeStatus("demo", "hold")}), demoSpec());
+  EXPECT_FALSE(wrong.valid);
+  EXPECT_EQ(wrong.error, "unknown state 'hold'");
+  EXPECT_EQ(parseMode(makeArray({makeStatus("demo", "running")}), chickenHeadSpec()).error,
+    "no chicken_head status");
 }
 
 TEST(ModeModel, AnOnStateExistsForEveryMode)

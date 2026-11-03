@@ -66,6 +66,9 @@ struct ModeSnapshot
 /// Chicken head mode: the tool tip is held at a spot while the sticks tilt and roll the tool.
 const ModeSpec & chickenHeadSpec();
 
+/// Demo mode: the arm moves around slowly by itself, and comes back to where it started.
+const ModeSpec & demoSpec();
+
 /// The modes in the order the panel lists them.
 const std::vector<const ModeSpec *> & modeSpecs();
 

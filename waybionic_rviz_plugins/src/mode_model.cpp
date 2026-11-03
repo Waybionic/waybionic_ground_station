@@ -30,8 +30,8 @@ std::string shorten(const std::string & text)
 
 }  // namespace
 
-// The states, row, topic and service here are the ones waybionic_teleop's chicken_head module
-// publishes; a test in waybionic_teleop keeps the two in step.
+// The states, row, topic and service in each table here are the ones waybionic_teleop's module for
+// the mode publishes (chicken_head, demo_mode); a test in waybionic_teleop keeps the two in step.
 const ModeSpec & chickenHeadSpec()
 {
   static const ModeSpec spec{
@@ -49,9 +49,25 @@ const ModeSpec & chickenHeadSpec()
   return spec;
 }
 
+const ModeSpec & demoSpec()
+{
+  static const ModeSpec spec{
+    "demo", "Demo mode",
+    "The arm moves around by itself, slowly and smoothly, and comes back to where it started when "
+    "you switch it off. Press Start first.",
+    "/arm/demo", "/arm/demo/set_enabled",
+    {
+      {"off", "off", false, Tone::Quiet},
+      {"running", "running", true, Tone::Active},
+      {"stopping", "returning", false, Tone::Active},
+      {"unavailable", "unavailable", false, Tone::Quiet},
+    }};
+  return spec;
+}
+
 const std::vector<const ModeSpec *> & modeSpecs()
 {
-  static const std::vector<const ModeSpec *> specs{&chickenHeadSpec()};
+  static const std::vector<const ModeSpec *> specs{&chickenHeadSpec(), &demoSpec()};
   return specs;
 }
 
