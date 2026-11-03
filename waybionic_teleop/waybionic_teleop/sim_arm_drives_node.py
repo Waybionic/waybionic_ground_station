@@ -72,6 +72,10 @@ import yaml
 
 REPLY_TIMEOUT_S = 0.5
 REPORT_PERIOD_S = 0.5
+# A drive is judged stalled only while it is told to move this many times the distance that
+# counts as moving, in the time that is allowed for it. Told to go slower, it covers less than that
+# distance even when it does exactly what it is told, as a joint does at the end of a slow swing.
+STALL_MARGIN = 1.5
 # The carrier reports ten times a second.
 CARRIER_TIMEOUT_S = 0.5
 # Zeroing waits for the joint commands to stop, so teleop must be disabled first.
@@ -137,7 +141,7 @@ class SimArmDrives(Node):
         self.command_timeout = float(params.get('command_timeout_s', 0.5))
         self.following_error = int(params.get('following_error_counts', 4096))
         self.following_ticks = int(params.get('following_error_ticks', 12))
-        health_thresholds = DriveHealthThresholds(
+        self.health_thresholds = health_thresholds = DriveHealthThresholds(
             following_error_degrees=float(params['health_following_error_degrees']),
             stall_movement_degrees=float(params['health_stall_movement_degrees']),
             stall_duration_seconds=float(params['health_stall_duration_seconds']),
@@ -1030,10 +1034,15 @@ class SimArmDrives(Node):
                     servo = self.bus.drives.get(drive.can_id)
                     if servo is not None:
                         enabled = enabled and servo.enabled
+                # The drive's output turns at its shaft speed divided by the gear ratio.
+                output_speed = health_motor_rates[index] * 6.0 / drive.gear_ratio
+                stall_window = self.health_thresholds.stall_duration_seconds
+                told_to_move = output_speed * stall_window >= (
+                    STALL_MARGIN * self.health_thresholds.stall_movement_degrees)
                 self.drive_health_states[index] = self.drive_health_monitors[index].evaluate(
                     target_position=target * counts_to_joint_degrees,
                     encoder_position=count * counts_to_joint_degrees,
-                    motion_commanded=self.authorized and health_motor_rates[index] > 0.0,
+                    motion_commanded=self.authorized and told_to_move,
                     enabled=enabled,
                     reply_age_seconds=now - heard,
                     now_seconds=now,
