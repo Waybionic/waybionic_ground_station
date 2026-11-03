@@ -27,23 +27,23 @@ set(THIS_PACKAGE_INCLUDE_DEPENDS
 )
 
 add_library(${PROJECT_NAME} SHARED
-  include/waybionic_rviz_plugins/chicken_head_model.hpp
-  include/waybionic_rviz_plugins/chicken_head_panel.hpp
   include/waybionic_rviz_plugins/diagnostics_source.hpp
   include/waybionic_rviz_plugins/diagnostics_panel.hpp
   include/waybionic_rviz_plugins/joint_control_model.hpp
   include/waybionic_rviz_plugins/joint_control_panel.hpp
+  include/waybionic_rviz_plugins/mode_model.hpp
+  include/waybionic_rviz_plugins/motion_modes_panel.hpp
   include/waybionic_rviz_plugins/motion_test_panel.hpp
   include/waybionic_rviz_plugins/panel_fit.hpp
   include/waybionic_rviz_plugins/ros_diagnostics_source.hpp
   include/waybionic_rviz_plugins/setup_model.hpp
   include/waybionic_rviz_plugins/setup_panel.hpp
-  src/chicken_head_model.cpp
-  src/chicken_head_panel.cpp
   src/diagnostics_panel.cpp
   src/joint_control_model.cpp
   src/joint_control_panel.cpp
   src/mock_diagnostics_source.cpp
+  src/mode_model.cpp
+  src/motion_modes_panel.cpp
   src/ros_diagnostics_source.cpp
   src/motion_test_panel.cpp
   src/setup_model.cpp
@@ -175,16 +175,16 @@ if(BUILD_TESTING)
     ament_target_dependencies(test_setup_model diagnostic_msgs)
   endif()
 
-  ament_add_gtest(test_chicken_head_model
-    test/test_chicken_head_model.cpp
-    src/chicken_head_model.cpp
+  ament_add_gtest(test_mode_model
+    test/test_mode_model.cpp
+    src/mode_model.cpp
     TIMEOUT 60
   )
-  if(TARGET test_chicken_head_model)
-    target_include_directories(test_chicken_head_model PRIVATE
+  if(TARGET test_mode_model)
+    target_include_directories(test_mode_model PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/include
     )
-    ament_target_dependencies(test_chicken_head_model diagnostic_msgs)
+    ament_target_dependencies(test_mode_model diagnostic_msgs)
   endif()
 endif()
 

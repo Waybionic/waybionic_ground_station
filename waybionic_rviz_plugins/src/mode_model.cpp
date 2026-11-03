@@ -1,14 +1,14 @@
-#include "waybionic_rviz_plugins/chicken_head_model.hpp"
+#include "waybionic_rviz_plugins/mode_model.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
+#include <vector>
 
 namespace waybionic_rviz_plugins
 {
 namespace
 {
-
-constexpr const char * kRowName = "chicken_head";
 
 // Problem texts quote the offending message, which ends up in the panel, so keep them short
 // and printable whatever the message contains.
@@ -28,42 +28,49 @@ std::string shorten(const std::string & text)
   return result;
 }
 
-bool parseState(const std::string & text, HeadState * state)
-{
-  if (text == "off") {
-    *state = HeadState::Off;
-  } else if (text == "approach") {
-    *state = HeadState::Approach;
-  } else if (text == "hold") {
-    *state = HeadState::Hold;
-  } else if (text == "blocked") {
-    *state = HeadState::Blocked;
-  } else if (text == "unavailable") {
-    *state = HeadState::Unavailable;
-  } else {
-    return false;
-  }
-  return true;
-}
-
 }  // namespace
 
-HeadSnapshot parseChickenHead(const diagnostic_msgs::msg::DiagnosticArray & array)
+// The states, row, topic and service here are the ones waybionic_teleop's chicken_head module
+// publishes; a test in waybionic_teleop keeps the two in step.
+const ModeSpec & chickenHeadSpec()
 {
-  HeadSnapshot snapshot;
+  static const ModeSpec spec{
+    "chicken_head", "Chicken head mode",
+    "Moves the tool tip to a preset spot and holds it there while the sticks tilt and roll the "
+    "tool.",
+    "/arm/chicken_head", "/arm/chicken_head/set_enabled",
+    {
+      {"off", "off", false, Tone::Quiet},
+      {"approach", "moving to the head spot", true, Tone::Active},
+      {"hold", "holding", true, Tone::Active},
+      {"blocked", "blocked", true, Tone::Warning},
+      {"unavailable", "unavailable", false, Tone::Quiet},
+    }};
+  return spec;
+}
+
+const std::vector<const ModeSpec *> & modeSpecs()
+{
+  static const std::vector<const ModeSpec *> specs{&chickenHeadSpec()};
+  return specs;
+}
+
+ModeSnapshot parseMode(const diagnostic_msgs::msg::DiagnosticArray & array, const ModeSpec & spec)
+{
+  ModeSnapshot snapshot;
   const diagnostic_msgs::msg::DiagnosticStatus * row = nullptr;
   for (const auto & status : array.status) {
-    if (status.name != kRowName) {
+    if (status.name != spec.row) {
       continue;
     }
     if (row != nullptr) {
-      snapshot.error = "duplicate chicken_head status";
+      snapshot.error = "duplicate " + spec.row + " status";
       return snapshot;
     }
     row = &status;
   }
   if (row == nullptr) {
-    snapshot.error = "no chicken_head status";
+    snapshot.error = "no " + spec.row + " status";
     return snapshot;
   }
 
@@ -82,36 +89,19 @@ HeadSnapshot parseChickenHead(const diagnostic_msgs::msg::DiagnosticArray & arra
     snapshot.error = "missing 'state' value";
     return snapshot;
   }
-  if (!parseState(*state_text, &snapshot.state)) {
+  const auto known = std::find_if(
+    spec.states.begin(), spec.states.end(),
+    [state_text](const ModeState & state) {return state.name == *state_text;});
+  if (known == spec.states.end()) {
     snapshot.error = "unknown state '" + shorten(*state_text) + "'";
     return snapshot;
   }
 
+  snapshot.state = *known;
   snapshot.message = row->message;
+  snapshot.warning = row->level >= diagnostic_msgs::msg::DiagnosticStatus::WARN;
   snapshot.valid = true;
   return snapshot;
-}
-
-bool headIsOn(const HeadState state)
-{
-  return state == HeadState::Approach || state == HeadState::Hold || state == HeadState::Blocked;
-}
-
-const char * headStateWord(const HeadState state)
-{
-  switch (state) {
-    case HeadState::Off:
-      return "off";
-    case HeadState::Approach:
-      return "moving to the head spot";
-    case HeadState::Hold:
-      return "holding";
-    case HeadState::Blocked:
-      return "blocked";
-    case HeadState::Unavailable:
-      return "unavailable";
-  }
-  return "unknown";
 }
 
 bool teleopQuiet(
@@ -121,10 +111,10 @@ bool teleopQuiet(
   return !last_message.has_value() || now - *last_message >= kTeleopQuietAfter;
 }
 
-std::string headWaitingMessage(const bool seen_report, const bool teleop_quiet)
+std::string modeWaitingMessage(const bool seen_report, const bool teleop_quiet)
 {
   if (!teleop_quiet) {
-    return "Waiting for a valid chicken head report...";
+    return "Waiting for a valid report...";
   }
   if (seen_report) {
     return "The teleop node (xbox_teleop) has stopped reporting.";
