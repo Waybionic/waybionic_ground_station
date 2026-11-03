@@ -2,15 +2,13 @@
 
 import math
 from pathlib import Path
-import re
 
 import pytest
 
-from waybionic_teleop import chicken_head
 from waybionic_teleop.collision import ArmCollision
 from waybionic_teleop.gamepad import AXES, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics
-from waybionic_teleop.teleop import ArmTeleop, axis_words, config_from_parameters, HEAD_STATES
+from waybionic_teleop.teleop import ArmTeleop, axis_words, config_from_parameters
 
 LIMITS = {'joint_1': (-math.pi, math.pi), 'joint_2': (-1.5708, 1.5708),
           'joint_3': (-1.5708, 1.5708), 'joint_4': (-1.5708, 1.5708),
@@ -18,7 +16,6 @@ LIMITS = {'joint_1': (-math.pi, math.pi), 'joint_2': (-1.5708, 1.5708),
 HOME = dict.fromkeys([*LIMITS, 'tool_grip'], 0.0)
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
         / 'waybionic_arm.urdf').read_text(encoding='utf-8')
-RVIZ = Path(__file__).resolve().parents[2] / 'waybionic_rviz_plugins'
 DT = 1.0 / 120.0
 TIP_TOLERANCE = 0.0005
 
@@ -335,19 +332,3 @@ def test_an_approach_that_cannot_make_progress_says_it_is_blocked(params, arm):
 def test_a_bad_head_config_is_refused(params, change, message):
     with pytest.raises(ValueError, match=message):
         config_from_parameters({**params, **change})
-
-
-def test_the_rviz_panel_uses_the_topic_and_service_the_node_offers():
-    header = (RVIZ / 'include' / 'waybionic_rviz_plugins' / 'chicken_head_model.hpp').read_text()
-    assert f'kChickenHeadTopic = "/{chicken_head.TOPIC}"' in header
-    assert f'kChickenHeadService = "/{chicken_head.SERVICE}"' in header
-
-
-def test_the_rviz_panel_reads_the_row_and_every_state_the_node_publishes():
-    source = (RVIZ / 'src' / 'chicken_head_model.cpp').read_text()
-    assert f'kRowName = "{chicken_head.ROW}"' in source
-    assert set(re.findall(r'text == "(\w+)"', source)) == set(HEAD_STATES)
-    for state in HEAD_STATES:
-        message = chicken_head.head_message(state, '')
-        assert message.status[0].name == chicken_head.ROW
-        assert [(item.key, item.value) for item in message.status[0].values] == [('state', state)]

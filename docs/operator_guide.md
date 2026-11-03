@@ -180,7 +180,7 @@ incision. With five joints, the tool can only tilt in the arm's vertical plane.
 
 **Chicken head mode** holds the tool tip at one spot while the rest of the arm moves around
 it, as a chicken keeps its head still. Press Start first, then tick **Chicken head mode** in
-the Chicken head panel (right-hand dock, under Arm setup). The same switch is the
+the Motion modes panel (right-hand dock, under Arm setup). The same switch is the
 `/arm/chicken_head/set_enabled` service (`std_srvs/SetBool`), and its state is on the latched
 `/arm/chicken_head` topic. The arm moves every joint in a straight line to the head spot, at
 the current speed level, which takes a few seconds, and then holds it there. The default spot

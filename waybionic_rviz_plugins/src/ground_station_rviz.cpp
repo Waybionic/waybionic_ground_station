@@ -43,7 +43,7 @@ void scrollInDock(QDockWidget * dock)
 // The station's own panels, from the top of the right-hand dock down, with the share of its
 // height each gets. RViz puts a panel its saved window state does not know in the left dock, so
 // they are stacked here whatever the layout file says. Panels that are not loaded are skipped.
-// The setup and chicken head panels never scroll: they ask for exactly the height their text
+// The setup and motion modes panels never scroll: they ask for exactly the height their text
 // needs, and the setup panel is the one the operator has to read while it is open.
 void stackRightDock(QMainWindow * frame)
 {
@@ -54,7 +54,7 @@ void stackRightDock(QMainWindow * frame)
     bool scrolls;
   };
   const Entry order[] = {
-    {"SetupPanel", 2, false}, {"ChickenHeadPanel", 1, false}, {"JointControlPanel", 2, true},
+    {"SetupPanel", 2, false}, {"MotionModesPanel", 1, false}, {"JointControlPanel", 2, true},
     {"DiagnosticsPanel", 5, true}};
   QList<QDockWidget *> docks;
   QList<int> weights;
