@@ -939,7 +939,7 @@ class ArmTeleop:
         """End the demo if a step ran into something, or once its swing has shrunk to nothing."""
         stopped = [name for name in self.blocked if name != self.config.tool_joint]
         if stopped:
-            self.end_demo('Demo stopped: the arm would hit ' + ', '.join(stopped),
+            self.end_demo('Demo stopped: blocked by ' + ', '.join(stopped),
                           warning=True, hand_back=True)
         elif self.demo.finished:
             # Back at the start pose, less the rounding of every step it took.

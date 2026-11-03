@@ -8,7 +8,6 @@ pose gently and returns to exactly that pose. Everything runs on a demo clock th
 level can slow down, so slowing the demo slows the start and the return as well.
 """
 
-import copy
 import math
 
 # How fast the demo clock may speed up or slow down, per second, so that changing the speed
@@ -103,7 +102,6 @@ class Wander:
         self.ramp.aim(1.0)
         self.clock = 0.0
         self.tempo = tempo
-        self.before = None
 
     @property
     def finished(self):
@@ -112,17 +110,10 @@ class Wander:
 
     def advance(self, dt, tempo):
         """Move ``dt`` seconds on, with the demo clock heading for ``tempo`` times real time."""
-        self.before = (self.clock, self.tempo, copy.copy(self.ramp))
         self.tempo += clamp(tempo - self.tempo, -TEMPO_RATE * dt, TEMPO_RATE * dt)
         gone = self.tempo * dt
         self.clock += gone
         self.ramp.step(gone)
-
-    def rollback(self):
-        """Undo the last ``advance``, for a step the arm could not take."""
-        if self.before is not None:
-            self.clock, self.tempo, self.ramp = self.before
-            self.before = None
 
     def positions(self):
         """Return {joint: angle} at the demo clock."""

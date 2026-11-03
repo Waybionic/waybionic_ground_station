@@ -232,21 +232,6 @@ def test_the_clock_changes_its_pace_gradually():
     assert paces[-1] == pytest.approx(0.2)
 
 
-def test_a_step_that_could_not_be_taken_is_undone():
-    wander = Wander(CENTRE, SWINGS, LOOP, RAMP)
-    settle(wander, 5.0)
-    clock, tempo, level = wander.clock, wander.tempo, wander.ramp.level
-    positions = wander.positions()
-    wander.advance(DT, 0.5)
-    assert wander.positions() != positions
-    wander.rollback()
-    assert (wander.clock, wander.tempo, wander.ramp.level) == (clock, tempo, level)
-    assert wander.positions() == positions
-    # There is only one step to undo.
-    wander.rollback()
-    assert wander.clock == clock
-
-
 @pytest.mark.parametrize('loop', [0.0, -5.0, math.inf])
 def test_a_wander_needs_a_positive_finite_loop(loop):
     with pytest.raises(ValueError, match='loop'):

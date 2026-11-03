@@ -459,7 +459,7 @@ def test_the_demo_state_is_reported_with_the_other_rows(node, monkeypatch):
 def test_the_demo_row_is_a_warning_only_when_there_is_something_to_warn_about():
     from waybionic_teleop import demo_mode
     levels = {(state, bool(message)): demo_mode.demo_message(state, message).status[0].level
-              for state, message in [('off', ''), ('off', 'Demo stopped: the arm would hit x'),
+              for state, message in [('off', ''), ('off', 'Demo stopped: blocked by x'),
                                      ('running', 'Moving'), ('stopping', 'Returning'),
                                      ('unavailable', 'No model')]}
     assert levels == {('off', False): DiagnosticStatus.OK, ('off', True): DiagnosticStatus.WARN,
