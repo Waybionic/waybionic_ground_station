@@ -247,6 +247,29 @@ def test_stop_group_and_home_end_the_mode(teleop, button):
     assert teleop.head_status()[0] == 'off'
 
 
+def test_switching_the_mode_off_with_a_stick_held_waits_for_it_to_centre(teleop):
+    reach_head(teleop)
+    run(teleop, 0.5, left_y=1.0)
+    ok, _ = teleop.set_head_mode(False)
+    assert ok
+    held = dict(teleop.targets)
+    # The same stick would move the shoulder in the active group, which must not happen yet.
+    run(teleop, 1.0, left_y=1.0)
+    assert teleop.targets == held
+    assert 'Center' in teleop.note and teleop.warning
+    run(teleop, 0.2)
+    assert not teleop.wait_for_center
+    run(teleop, 0.5, left_y=1.0)
+    assert teleop.targets != held
+
+
+def test_switching_the_mode_off_with_the_sticks_centred_waits_for_nothing(teleop):
+    reach_head(teleop)
+    ok, _ = teleop.set_head_mode(False)
+    assert ok and not teleop.wait_for_center
+    assert 'Chicken head off' in teleop.note
+
+
 def test_the_mode_needs_teleop_enabled_first(params, arm):
     teleop = build(params, arm)
     ok, message = teleop.set_head_mode(True)

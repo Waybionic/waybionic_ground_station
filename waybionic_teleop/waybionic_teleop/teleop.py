@@ -30,6 +30,7 @@ HEAD_STATES = ('off', 'approach', 'hold', 'blocked', 'unavailable')
 HEAD_UNAVAILABLE = ('Chicken head needs the arm model and a chicken_head section in '
                     'xbox_teleop.yaml')
 WAIT_NOTE = 'Center motion controls before moving in the new group'
+HAND_BACK_NOTE = 'Center motion controls to take over from the mode that just ended'
 INCISION_JOINT_OFF = ('A joint is switched off with the tool through the incision point; switch '
                       'it back on in Joint control to withdraw the tool')
 
@@ -256,6 +257,9 @@ class ArmTeleop:
         # Whether the tool was out of the body when it last left the incision group.
         self.withdrawn = True
         self.held = set()
+        # The sticks and triggers in the last controller sample, for a mode that ends between
+        # samples.
+        self.last_axes = ()
         self.wait_for_center = False
         self.wait_note = WAIT_NOTE
         # Chicken head mode, while it is on: see set_head_mode.
@@ -332,6 +336,7 @@ class ArmTeleop:
 
     def update(self, axes, buttons, measured, dt):
         """Apply one controller sample; return True when the targets should be sent."""
+        self.last_axes = axes
         held = {name for name, index in BUTTON.items() if index < len(buttons) and buttons[index]}
         pressed = {action for action, name in self.config.buttons.items()
                    if name in held - self.held}
@@ -380,6 +385,12 @@ class ArmTeleop:
             # withdrawn tool takes a new one, at its tip; one still inside stays stopped.
             if not self.align_incision() and withdrawn:
                 self.incision = None
+
+    def hand_back(self):
+        """After a mode ends, hold the arm until the controls are centred, if they are held."""
+        if self.motion_input_held(self.last_axes):
+            self.wait_for_center = True
+            self.wait_note = HAND_BACK_NOTE
 
     def motion_input_held(self, axes):
         config = self.config
@@ -608,7 +619,7 @@ class ArmTeleop:
         """Switch chicken head mode on or off; return (whether it is as asked, what to tell)."""
         if not enabled:
             if self.head is not None:
-                self.end_head('Chicken head off: the arm holds where it is')
+                self.end_head('Chicken head off: the arm holds where it is', hand_back=True)
             return True, 'Chicken head is off'
         if self.head is not None:
             return True, 'Chicken head is already on'
@@ -622,8 +633,13 @@ class ArmTeleop:
         self.note, self.warning = 'Chicken head: moving the tip to the head position', False
         return True, 'Chicken head is on: moving the tip to the head position'
 
-    def end_head(self, note=''):
-        """Leave chicken head mode, if it is on, holding the arm where it is."""
+    def end_head(self, note='', hand_back=False):
+        """
+        Leave chicken head mode, if it is on, holding the arm where it is.
+
+        With ``hand_back``, the sticks that tilt and roll the tool must be centred before the
+        active group's sticks move the arm.
+        """
         if self.head is None:
             return
         self.head = None
@@ -632,6 +648,8 @@ class ArmTeleop:
         self.command_targets = dict(self.targets)
         if note:
             self.note, self.warning = note, False
+        if hand_back:
+            self.hand_back()
 
     def head_step(self, axes, dt):
         """Take one step of chicken head mode: toward the head spot, or holding it."""
