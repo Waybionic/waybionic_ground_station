@@ -61,6 +61,25 @@ xbox_teleop:
       pitch_deg: 90.0
       axes: [left_y, right_x]
       scales: [1.0, 1.0]
+    # Demo mode (the Motion modes panel in RViz): the arm moves around by itself, slowly and
+    # smoothly, and the sticks do nothing. Each joint swings about the pose the arm is in when the
+    # mode starts: it makes `cycles` whole swings of up to `amplitudes_deg` in every `loop_s`
+    # seconds, starting `phases_deg` into its swing, so the arm does not repeat itself before
+    # the loop is over. The swing grows over `ramp_s` seconds at the start and shrinks over as
+    # long when the mode is switched off, which brings the arm back to where it started. A joint
+    # stays `margin_deg` clear of its limits, and one with less room than `min_swing_deg` stays
+    # still. No joint may go faster than `max_speed_deg_s`: settings that would are refused when
+    # teleop starts. The speed level can slow the demo but never speeds it up.
+    demo:
+      joints: [joint_1, joint_2, joint_3, joint_4, joint_5]
+      amplitudes_deg: [30.0, 15.0, 25.0, 20.0, 35.0]
+      cycles: [3, 5, 4, 6, 2]
+      phases_deg: [0.0, 140.0, 250.0, 70.0, 200.0]
+      loop_s: 120.0
+      ramp_s: 12.0
+      margin_deg: 10.0
+      min_swing_deg: 3.0
+      max_speed_deg_s: 12.0
     max_linear_speed_mm_s: 50.0
     max_linear_accel_mm_s2: 250.0
     max_tilt_speed_deg_s: 30.0
