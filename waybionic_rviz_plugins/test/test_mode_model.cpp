@@ -309,13 +309,13 @@ TEST(ModeModel, ADemoThatStoppedItselfIsAnOffStateWithAWarning)
   const auto & spec = demoSpec();
   const auto snapshot = parseMode(
     makeArray({makeStatus(
-        spec.row, "off", "Demo stopped: the arm would hit forearm_link: table",
+        spec.row, "off", "Demo stopped: blocked by forearm_link: table",
         DiagnosticStatus::WARN)}), spec);
 
   ASSERT_TRUE(snapshot.valid);
   EXPECT_FALSE(snapshot.state.on);
   EXPECT_TRUE(snapshot.warning);
-  EXPECT_EQ(snapshot.message, "Demo stopped: the arm would hit forearm_link: table");
+  EXPECT_EQ(snapshot.message, "Demo stopped: blocked by forearm_link: table");
 }
 
 TEST(ModeModel, EachModeOnlyReadsItsOwnRowAndStates)
