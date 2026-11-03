@@ -63,13 +63,15 @@ cannot be switched.
 
 **Motion modes** (`waybionic_rviz_plugins/MotionModesPanel`) has one checkbox for each mode in which
 the teleop node moves the arm by itself. Chicken head mode holds the tool tip at a preset spot while
-the sticks tilt and roll the tool. Each mode has a latched topic with one row whose `state` says
-what it is doing (for chicken head, `/arm/chicken_head`: `off`, `approach`, `hold`, `blocked` or
+the sticks tilt and roll the tool, and demo mode moves the arm around slowly and smoothly. Each mode
+has a latched topic with one row whose `state` says what it is doing (`/arm/chicken_head`: `off`,
+`approach`, `hold`, `blocked` or `unavailable`; `/arm/demo`: `off`, `running`, `stopping` or
 `unavailable`) and whose message says what is going on, and a `std_srvs/SetBool` service the panel
-calls when the box is clicked (`/arm/chicken_head/set_enabled`). As in the joint control panel, a
-box follows the topic, not the click: a refusal such as "Press Start first" is shown for a few
-seconds and the box stays as it was. The panel sends only the switches, never a motion command; the
-teleop node moves the arm. The modes, their topics and the words for their states are one table
+calls when the box is clicked (`/arm/chicken_head/set_enabled`, `/arm/demo/set_enabled`). As in the
+joint control panel, a box follows the topic, not the click: a refusal such as "Press Start first"
+is shown for a few seconds and the box stays as it was, and a row that is a warning, such as a demo
+that stopped because something was in the way, is shown in the warning colour. The panel sends only
+the switches, never a motion command; the teleop node moves the arm. The modes, their topics and the words for their states are one table
 each in `mode_model.cpp` (`ModeSpec`), and a test in `waybionic_teleop` keeps the table in step with
 the node's own module for the mode. Adding a mode to the panel is adding a table.
 

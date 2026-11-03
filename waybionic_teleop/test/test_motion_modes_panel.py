@@ -5,14 +5,15 @@ import re
 
 import pytest
 
-from waybionic_teleop import chicken_head
-from waybionic_teleop.teleop import HEAD_STATES
+from waybionic_teleop import chicken_head, demo_mode
+from waybionic_teleop.teleop import DEMO_STATES, HEAD_STATES
 
 SOURCE = (Path(__file__).resolve().parents[2] / 'waybionic_rviz_plugins' / 'src'
           / 'mode_model.cpp').read_text(encoding='utf-8')
 # The panel's table of each mode, the node's module for it, the message it publishes, and the
 # states the node can be in.
-MODES = [('chickenHeadSpec', chicken_head, chicken_head.head_message, HEAD_STATES)]
+MODES = [('chickenHeadSpec', chicken_head, chicken_head.head_message, HEAD_STATES),
+         ('demoSpec', demo_mode, demo_mode.demo_message, DEMO_STATES)]
 
 
 def spec_text(function):
@@ -47,4 +48,4 @@ def test_every_state_is_published_as_one_row_with_that_state(function, contract,
 
 def test_the_panel_lists_both_modes_and_only_those():
     assert re.findall(r'static const std::vector<const ModeSpec \*> specs\{([^}]*)\}', SOURCE) == [
-        '&chickenHeadSpec()']
+        '&chickenHeadSpec(), &demoSpec()']
