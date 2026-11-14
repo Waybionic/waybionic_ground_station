@@ -1,0 +1,4 @@
+# The only Python package the Windows launcher's carrier bridge needs. Installed with
+# pip install --require-hashes --no-deps --target <dir> -r requirements.txt
+pyserial==3.5 \
+    --hash=sha256:c4451db6ba391ca6ca299fb3ec7bae67a5c55dde170964c7a14ceefec02f2cf0
