@@ -45,7 +45,7 @@ Then open the arm in RViz:
 
 | Folder | Contents |
 | --- | --- |
-| `waybionic_description` | The arm's URDF and meshes, generated from the SolidWorks assembly by `scripts/cad/`. Regenerate it after CAD changes rather than editing it. |
+| `waybionic_description` | The arm's URDF and meshes, generated from the SolidWorks assembly by `scripts/cad/`, with joint limits where the CAD parts touch. Regenerate it after CAD changes rather than editing it. |
 | `waybionic_bringup` | `ground_station.launch.py`, the RViz layouts and the launch tests |
 | `waybionic_teleop` | Controller teleop, the collision checks, and the MKS drive node, simulated or real |
 | `waybionic_can` | The MKS CAN protocol, CAN simulation and the UNO R4 carrier firmware |

@@ -33,6 +33,7 @@ setup(
             'autoplay = waybionic_teleop.autoplay_node:main',
             'setup_guide = waybionic_teleop.setup_guide:main',
             'joy_udp_receiver = waybionic_teleop.joy_udp_receiver:main',
+            'joint_state_guard = waybionic_teleop.joint_state_guard:main',
         ],
     },
 )
