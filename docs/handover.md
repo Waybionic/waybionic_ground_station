@@ -95,3 +95,17 @@ happened to them.
   shows what each has. `feature/estop-status-malik` is the one worth reviving (#60).
 - Teammates who ran the Windows launcher from `feature/joint-enable` should switch to `main`
   once #57 is merged; that branch can then be deleted.
+
+## Repository settings changed at the handover (14 November 2026)
+
+- **The container image is public**, so a Windows laptop can pull it without logging in. The
+  organisation's Packages policy ("Package creation") still does not allow members to create
+  public packages: it was switched on for a minute to make this one package public, then
+  switched off again. See [RELEASING.md](RELEASING.md) to redo it.
+- **A tag ruleset, "Protect release tags"**, lets only the `maintainers` team create, move or
+  delete `v*` tags. "Protect main" is unchanged.
+- **Merged branches are deleted automatically** (the repository setting is on), and the 39
+  branches that were provably merged were deleted. Branches with unmerged work were kept.
+- **PRs #51 and #54 were closed** as superseded by #55 and #57, with comments crediting their
+  authors.
+- Secret scanning and Dependabot are off on this repository. They were not changed.

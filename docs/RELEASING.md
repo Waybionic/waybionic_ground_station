@@ -18,16 +18,30 @@ Windows on ARM and Intel Macs are not built or tested.
 
 ## One-time setup (a GitHub organisation owner)
 
-1. **Make the image public**, so a Windows laptop can pull it without logging in. Organisation
-   > Packages > `waybionic_ground_station` > Package settings > Danger Zone > Change
-   visibility > Public. Check it from a machine that is not logged in:
-   `docker pull ghcr.io/waybionic/waybionic_ground_station:jazzy`. While it is private, the
-   launcher tells people to run `docker login ghcr.io` with a token that has `read:packages`.
+Steps 1 and 2 were done on 14 November 2026 and are kept here for the day the package is
+deleted and recreated, which makes it private again.
+
+1. **Make the image public**, so a Windows laptop can pull it without logging in. GitHub has no
+   API for this; use the web page. The **Public** option is greyed out ("Setting is disabled
+   by organization administrators") until the organisation allows it, so:
+   1. Organisation settings > Packages > Package creation: tick **Public** and Save.
+   2. Organisation > Packages > `waybionic_ground_station` > Package settings > Danger Zone >
+      Change visibility > Public, and type the package name to confirm.
+   3. Untick **Public** in the organisation setting again and Save, so members still cannot
+      create public packages. The package stays public.
+
+   Check it from a machine that is not logged in, for example
+   `curl -s "https://ghcr.io/token?service=ghcr.io&scope=repository:waybionic/waybionic_ground_station:pull"`,
+   which returns a token only when the package is public (a private one answers 401). While
+   it is private, the launcher tells people to run `docker login ghcr.io` with a token that has
+   `read:packages`.
 2. **Restrict who can start a release.** Anyone with write access can push a tag, and a tag
    starts the workflow. The workflow only releases a commit on `main` that has a tested image
-   and only drafts a release, so a stray tag does little harm, but restrict it anyway:
-   Settings > Rules > Rulesets > New tag ruleset, target `v*`, restrict creations, updates and
-   deletions, with the software leads on the bypass list.
+   and only drafts a release, so a stray tag does little harm, but it is restricted anyway:
+   the ruleset "Protect release tags" (Settings > Rules > Rulesets) stops anyone creating,
+   moving or deleting a `v*` tag unless they are in the `maintainers` team, the team that can
+   also bypass "Protect main". Add a new lead to that team (organisation > Teams) so they can
+   tag; repository admins can change the ruleset itself.
 3. Optional: an Actions environment with required reviewers, if you want a second person to
    approve each release.
 
