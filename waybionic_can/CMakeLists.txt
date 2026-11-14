@@ -15,6 +15,7 @@ set(COMMON_SOURCES
   ${ARDUINO_LIB_SRC}/common/BusLoad.cpp
   ${ARDUINO_LIB_SRC}/common/Candump.cpp
   ${ARDUINO_LIB_SRC}/common/GatewayLogic.cpp
+  ${ARDUINO_LIB_SRC}/common/Mcp2515CanTransport.cpp
   ${ARDUINO_LIB_SRC}/common/MksFrame.cpp
   ${ARDUINO_LIB_SRC}/common/NodeLogic.cpp
   ${ARDUINO_LIB_SRC}/common/SlcanBridge.cpp
@@ -68,7 +69,7 @@ if(BUILD_TESTING)
 
   set(UNIT_TESTS
     test_mks_frame test_node_logic test_gateway_logic test_bringup_console test_slcan_bridge
-    test_bus_load)
+    test_bus_load test_mcp2515_transport)
   foreach(test_name ${UNIT_TESTS})
     ament_add_gtest(${test_name} tests/unit/${test_name}.cpp)
     if(TARGET ${test_name})

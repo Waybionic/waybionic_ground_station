@@ -5,11 +5,11 @@ import math
 
 from geometry_msgs.msg import TransformStamped
 import rclpy
-from rclpy._rclpy_pybind11 import RCLError
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.time import Time
 import tf2_ros
+from waybionic_teleop.ros_shutdown import is_shutdown_error
 
 
 class CameraFollower(Node):
@@ -66,19 +66,8 @@ def main():
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
-    except RCLError as error:
-        # SIGINT can shut down the context before spin recreates its wait set.
-        if rclpy.ok() or 'the given context is not valid' not in str(error):
-            raise
-    except RuntimeError as error:
-        # A TF subscription can surface this Jazzy binding error if its ROS context is
-        # already invalidated during SIGINT. Other runtime errors must still fail.
-        if (rclpy.ok() or not str(error).startswith(
-                "Unable to convert call argument '0' to Python object")):
-            raise
-    except TypeError as error:
-        # tf2 can no longer read the lookup time once SIGINT has invalidated the context.
-        if rclpy.ok() or not str(error).startswith('time must have sec and nanosec'):
+    except (RuntimeError, TypeError) as error:
+        if not is_shutdown_error(error):
             raise
     finally:
         node.destroy_node()

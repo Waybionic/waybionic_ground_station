@@ -1,5 +1,6 @@
 """Exercise the ROS command gate and MKS frames without a hardware CAN interface."""
 
+from collections import deque
 import importlib.util
 import math
 from pathlib import Path
@@ -14,25 +15,38 @@ from rclpy._rclpy_pybind11 import RCLError
 from rclpy.parameter import Parameter
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, String
-from std_srvs.srv import Trigger
+from std_srvs.srv import SetBool, Trigger
 
 from waybionic_control.drive_health import (
     DriveHealthMonitor,
     DriveHealthState,
     DriveHealthThresholds,
 )
-from waybionic_teleop import joy_udp_receiver, mks_can, sim_arm_drives_node, xbox_teleop_node
+from waybionic_teleop import (
+    autoplay_node,
+    carrier,
+    joy_udp_receiver,
+    mks_can,
+    ros_shutdown,
+    sim_arm_drives_node,
+    xbox_teleop_node,
+)
 from waybionic_teleop.gamepad import AXES, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 from waybionic_teleop.sim_arm_drives_node import (
+    HOLD_RPM,
+    HOLD_S,
     QUIET_BEFORE_ZERO_S,
     REPLY_TIMEOUT_S,
     REPORT_PERIOD_S,
     SimArmDrives,
+    START_DEADBAND_COUNTS,
 )
 from waybionic_teleop.sim_drives import SimulatedServo
 from waybionic_teleop.slcan_bus import SlcanBus
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
+from waybionic_teleop.wander import Wander
+import yaml
 
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
         / 'waybionic_arm.urdf').read_text(encoding='utf-8')
@@ -60,6 +74,7 @@ SHUTDOWN_NODES = [
     (joy_udp_receiver, 'JoyUdpReceiver'),
     (camera_module, 'CameraFollower'),
     (joint_demo_module, 'JointDemo'),
+    (autoplay_node, 'Autoplay'),
 ]
 
 
@@ -109,8 +124,15 @@ def sent_frame(node, index):
 
 def assert_stopped(node):
     assert not node.authorized
-    assert all(servo.enabled and servo.target is None and servo.rpm == 0.0
-               for servo in node.bus.drives.values())
+    # Two ticks at full speed past the count, and a count of rounding.
+    reach = (2 * node.period * node.max_rpm / 60.0 * mks_can.COUNTS_PER_REV
+             + START_DEADBAND_COUNTS + 1)
+    for index, drive in enumerate(node.map.drives):
+        servo = node.bus.drives[drive.can_id]
+        # A drive stopped mid-move runs on only to its hold, its last move's nearby end.
+        assert servo.enabled and servo.target in (None, node.held[index])
+        assert (servo.rpm == 0.0 if servo.target is None
+                else abs(servo.target - servo.axis) <= reach and servo.speed <= HOLD_RPM)
     assert all(sent_frame(node, index) == (mks_can.ABSOLUTE_AXIS, bytes(6))
                for index in range(len(node.map.drives)))
 
@@ -372,6 +394,8 @@ def test_stale_encoder_feedback_stops_before_sending_another_position(node):
     assert not node.authorized
     node.on_enabled(Bool(data=False))
     node.on_enabled(Bool(data=True))
+    # The base was stopped mid-move, so it moves again once a reading shows it has settled.
+    advance(node)
     node.on_command(command(node, joint_1=1.0))
     advance(node)
     assert node.authorized and node.bus.drives[1].target is not None
@@ -420,7 +444,11 @@ def test_a_drive_that_fails_its_move_stops_every_drive_until_zeroed(node, monkey
     node.on_command(command(node, joint_1=0.31, joint_2=0.31))
     advance(node)
     assert not node.authorized and not node.zeroed[1] and 'shoulder' in node.stop_reason
-    assert all(servo.target is None and servo.rpm == 0.0 for servo in node.bus.drives.values())
+    # The others hold where their moves end; the shoulder, no longer trusted, gets no hold.
+    assert_stopped(node)
+    advance(node)
+    assert shoulder.target is None and node.hold_tick[1] == -1
+    assert node.hold_tick[0] == node.ticks
     published = []
     monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
     node.report()
@@ -456,6 +484,265 @@ def test_a_drive_that_stops_following_its_targets_stops_every_drive(node, monkey
     assert all(servo.target is None and servo.rpm == 0.0 for servo in node.bus.drives.values())
 
 
+def test_a_reversing_drive_stops_before_it_gets_a_target_behind_it(node, monkeypatch):
+    ready(node)
+    clock = [time.monotonic()]
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: clock[0])
+    # A gentler ramp keeps the base turning when the stick reverses, and a slow stroke back
+    # lets the fast stroke forward put the next target behind the still-turning base.
+    node.acc = 240
+    base = node.bus.drives[1]
+    stops, angle, turns, latched = capture_sends(node, monkeypatch), 0.0, [0.0], []
+    rates = [0.5] * 30 + [-0.3] * 40 + [0.5] * 20 + [0.0] * 30
+    for previous, rate in zip([0.5] + rates, rates):
+        if rate != previous:
+            turns.append(base.axis)
+        angle += rate * node.period
+        node.on_enabled(Bool(data=True))
+        node.on_command(command(node, velocities={'joint_1': rate}, joint_1=angle))
+        clock[0] += node.period
+        advance(node)
+        # Firmware V1.0.9 would run back to this target after the next stop.
+        latched.append(base.latched)
+    assert node.authorized and latched == [None] * len(rates)
+    # Each reversal and the final hold stopped the base, which followed the stick both ways.
+    assert stops.count(mks_can.stop(1, 0)) >= 3
+    assert turns[0] < turns[1] > turns[2] < turns[3]
+    held = base.axis
+    for _ in range(60):
+        node.on_enabled(Bool(data=True))
+        node.on_command(command(node, velocities={}, joint_1=angle))
+        clock[0] += node.period
+        advance(node)
+    assert base.axis == held and node.authorized
+
+
+def test_a_drive_that_turns_after_its_stop_stops_every_drive_but_keeps_its_zero(node):
+    ready(node)
+    node.following_error, node.following_ticks = 400, 5
+    hold = command(node, velocities={})
+    node.on_command(hold)
+    advance(node)
+    assert node.sent[0] == (None, 0) and node.held[0] == 0
+    # The base runs on to a target its firmware kept from before the stop.
+    base = node.bus.drives[1]
+    base.target, base.speed, base.acc = 20000, 60, 0
+    for _ in range(100):
+        node.on_enabled(Bool(data=True))
+        node.on_command(hold)
+        advance(node)
+        if not node.authorized:
+            break
+    assert node.stop_reason.startswith('base_yaw turned +') and all(node.zeroed)
+    assert 400 < base.axis < 2000 and base.target is None and base.rpm == 0.0
+
+
+def stroke(node, clock, ticks, rate=0.5):
+    """Turn the base with the stick for some ticks of a mocked clock; return its angle."""
+    angle = 0.0
+    for _ in range(ticks):
+        angle += rate * node.period
+        node.on_enabled(Bool(data=True))
+        node.on_command(command(node, velocities={'joint_1': rate}, joint_1=angle))
+        clock[0] += node.period
+        advance(node)
+    return angle
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    clock = [time.monotonic()]
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: clock[0])
+    return clock
+
+
+def test_a_target_kept_by_the_firmware_never_runs_past_the_hold_behind_the_stop(node, clock):
+    ready(node)
+    base = node.bus.drives[1]
+    angle = stroke(node, clock, 20)
+    up = node.direction[0]
+    assert up
+    # Firmware V1.0.9 kept a target from earlier in the stroke, and runs back to it at once
+    # when the stick's release stops the base.
+    base.latched = (round(base.axis) - 3000 * up, 300, 0)
+    stopped = base.axis
+    node.on_command(command(node, velocities={}, joint_1=angle))
+    assert base.latched is None and base.target == node.held[0]
+    assert 0 <= (node.held[0] - stopped) * up <= (
+        2 * node.period * node.max_rpm / 60.0 * mks_can.COUNTS_PER_REV + START_DEADBAND_COUNTS)
+    lowest = stopped * up
+    for _ in range(60):
+        node.on_enabled(Bool(data=True))
+        node.on_command(command(node, velocities={}, joint_1=angle))
+        clock[0] += node.period
+        advance(node)
+        lowest = min(lowest, base.axis * up)
+    # The hold right behind the stop took over before the base turned back at all.
+    assert node.authorized and lowest == stopped * up and base.axis == node.held[0]
+
+
+def test_a_target_kept_by_the_firmware_is_taken_over_within_a_tick_of_the_hold(
+        node, clock, monkeypatch):
+    ready(node)
+    base = node.bus.drives[1]
+    angle = stroke(node, clock, 20)
+    up = node.direction[0]
+    assert up
+    node.on_command(command(node, velocities={}, joint_1=angle))
+    stopped_at, held = clock[0], node.held[0]
+
+    def hold_tick():
+        node.on_enabled(Bool(data=True))
+        node.on_command(command(node, velocities={}, joint_1=angle))
+        clock[0] += node.period
+        advance(node)
+    for _ in range(5):
+        hold_tick()
+    # The base reaches its hold, then runs back to a target its firmware kept. The hold goes
+    # out again on the next tick, before the following error could stop the arm.
+    base.target, base.speed, base.acc = held - 20000 * up, 300, 0
+    farthest = 0
+    for _ in range(20):
+        hold_tick()
+        farthest = max(farthest, (held - base.axis) * up)
+    assert node.authorized and 0 < farthest < 1500 and base.axis == held
+    # Once HOLD_S has passed, nothing but stops goes out to a drive at rest.
+    while clock[0] - stopped_at < HOLD_S:
+        hold_tick()
+    sent = capture_sends(node, monkeypatch)
+    for _ in range(10):
+        hold_tick()
+    assert all(frame[0] != mks_can.ABSOLUTE_AXIS for frame in sent)
+
+
+def test_a_drive_disabled_mid_stroke_is_held_every_tick_for_the_hold_time(
+        node, clock, monkeypatch):
+    ready(node)
+    base = node.bus.drives[1]
+    stroke(node, clock, 20)
+    up = node.direction[0]
+    assert up
+    sent = capture_sends(node, monkeypatch)
+    node.on_enabled(Bool(data=False))
+    stopped_at, held = clock[0], node.held[0]
+    hold = mks_can.absolute_axis(1, held, min(HOLD_RPM, node.max_rpm), node.acc)
+    # The hold goes out right behind the stop, a little ahead of the base, never behind it.
+    assert sent == [mks_can.stop(1, 0), hold] and (held - base.axis) * up >= 0
+    ticks = []
+    for _ in range(40):
+        sent.clear()
+        clock[0] += node.period
+        advance(node)
+        ticks.append((clock[0] - stopped_at, sent.count(hold)))
+    assert all(holds == 1 for elapsed, holds in ticks if elapsed < HOLD_S - 1e-6)
+    assert all(holds == 0 for elapsed, holds in ticks if elapsed > HOLD_S + 1e-6)
+    assert not node.authorized and base.axis == held and base.target is None
+
+
+@pytest.mark.parametrize('state', ['moving', 'disabled', 'holding'])
+def test_zeroing_sends_no_hold_in_the_old_coordinates(node, clock, monkeypatch, state):
+    ready(node)
+    base = node.bus.drives[1]
+    angle = stroke(node, clock, 10)
+    if state == 'disabled':
+        node.on_enabled(Bool(data=False))
+    elif state == 'holding':
+        node.on_command(command(node, velocities={}, joint_1=angle))
+        assert node.authorized
+    if state != 'moving':
+        # Its hold, a few thousand counts out, would be within reach of the new zero.
+        assert node.hold_until[0] > clock[0] and 0 < abs(node.held[0]) < node.following_error
+    sent = capture_sends(node, monkeypatch)
+    node.zero()
+    for _ in range(10):
+        clock[0] += node.period
+        advance(node)
+    assert all(node.zeroed) and node.counts[0] == 0
+    assert not [frame for frame in sent
+                if frame[0] == mks_can.ABSOLUTE_AXIS and frame[1:3] != b'\x00\x00']
+    assert base.axis == 0 and base.target is None
+
+
+def test_a_drive_that_turns_after_a_disable_stops_every_drive_again(node, clock):
+    ready(node)
+    node.following_error, node.following_ticks = 400, 5
+    base = node.bus.drives[1]
+    stroke(node, clock, 20)
+    up = node.direction[0]
+    node.on_enabled(Bool(data=False))
+    held = node.held[0]
+    for _ in range(40):
+        clock[0] += node.period
+        advance(node)
+    assert not node.authorized and base.axis == held and node.stop_reason == 'Teleop disabled'
+    # Its hold over, the base runs on to a target its firmware kept, though disarmed.
+    base.target, base.speed, base.acc = held + 20000 * up, 60, 0
+    for _ in range(100):
+        clock[0] += node.period
+        advance(node)
+        if node.stop_reason != 'Teleop disabled':
+            break
+    assert node.stop_reason.startswith('base_yaw turned ') and all(node.zeroed)
+    assert 400 < (base.axis - held) * up < 2000 and base.target is None and base.rpm == 0.0
+
+
+def test_a_hold_from_an_old_count_never_pulls_the_drive_back(node, clock):
+    ready(node)
+    base = node.bus.drives[1]
+    stroke(node, clock, 20)
+    up, speed = node.direction[0], node.sent[0][1]
+    # The base's last few counts were lost, so the node's count is four ticks behind it.
+    lag = 4 * node.period
+    node.counts[0] -= round(up * lag * speed / 60.0 * mks_can.COUNTS_PER_REV)
+    node.since_count[0] += lag
+    node.on_enabled(Bool(data=False))
+    assert (node.held[0] - base.axis) * up >= -1
+
+
+def test_no_hold_goes_out_once_an_estop_press_is_released(node, clock, monkeypatch):
+    ready(node)
+    stroke(node, clock, 20)
+    node.interface = 'slcan'
+    monkeypatch.setattr(node.bus, 'take_refused', lambda: [], raising=False)
+    sent = capture_sends(node, monkeypatch)
+    flags = carrier.ESTOP_WIRED
+    node.on_reply(carrier.STATUS_ID, bytes([1, flags | carrier.ESTOP_PRESSED, 0, 0, 0, 0, 0, 0]),
+                  clock[0])
+    assert node.stop_reason == 'E-stop pressed' and mks_can.stop(1, 0) in sent
+    clock[0] += node.period
+    advance(node)
+    node.on_reply(carrier.STATUS_ID, bytes([2, flags, 0, 0, 0, 0, 0, 0]), clock[0])
+    assert not node.estop_pressed
+    for _ in range(10):
+        clock[0] += node.period
+        advance(node)
+    # The drives may have restarted with new counts, so nothing but stops went out.
+    assert not [frame for frame in sent
+                if frame[0] == mks_can.ABSOLUTE_AXIS and frame[1:3] != b'\x00\x00']
+
+
+def test_closing_mid_move_holds_the_drive_until_the_hold_time_is_over(node, usb_carrier):
+    ready(node)
+    node.on_command(command(node, velocities={'joint_1': 0.5}, joint_1=0.5))
+    for _ in range(3):
+        advance(node)
+    assert node.sent[0][0] is not None
+    port = usb_carrier()
+    node.interface = 'slcan'
+    node.bus = SlcanBus('/dev/fake', 1000000, open_port=lambda: port)
+    started = time.monotonic()
+    node.close()
+    written = b''.join(port.writes)
+    frames = [line for line in written.split(b'\r') if line.startswith(b't')]
+    hold = mks_can.absolute_axis(1, node.held[0], min(HOLD_RPM, node.max_rpm), node.acc)
+    hold_line = b't001%d%s' % (len(hold), hold.hex().upper().encode())
+    # The hold goes out right behind the base's stop, then about once a tick for HOLD_S.
+    assert frames[frames.index(stop_line(1)) + 1] == hold_line
+    assert 0.6 * HOLD_S / node.period <= frames.count(hold_line) <= HOLD_S / node.period + 2
+    assert written.endswith(b'C\r') and port.closed
+    assert HOLD_S <= time.monotonic() - started < sim_arm_drives_node.CLOSE_TIMEOUT_S + 0.1
+
+
 def test_a_drive_that_restarts_between_polls_is_set_up_and_zeroed_again(node):
     start = dict.fromkeys(node.map.joints, 0.0)
     start['joint_2'] = 1.2
@@ -476,6 +763,143 @@ def test_a_drive_that_restarts_between_polls_is_set_up_and_zeroed_again(node):
     node.on_enabled(Bool(data=False))
     node.on_enabled(Bool(data=True))
     assert not node.authorized
+
+
+@pytest.fixture
+def drives_with(monkeypatch, parameters):
+    """Make drive nodes with changed parameters, all destroyed after the test."""
+    monkeypatch.setenv('ROS_AUTOMATIC_DISCOVERY_RANGE', 'OFF')
+    context = rclpy.Context()
+    rclpy.init(context=context)
+    made = []
+
+    def make(**changes):
+        configured = parameters('arm_drives.yaml', 'sim_arm_drives')
+        configured.update(changes)
+        made.append(SimArmDrives(context=context, parameter_overrides=[
+            Parameter(name, value=value) for name, value in configured.items()]))
+        return made[-1]
+    yield make
+    for made_node in made:
+        made_node.destroy_node()
+    rclpy.try_shutdown(context=context)
+
+
+def zeroed_with_state(drives_with, path):
+    """Zero drives powered on away from the zero pose, saving the zero to path."""
+    node = drives_with(zero_state=str(path), zero_on_start=False)
+    for index, servo in enumerate(node.bus.drives.values()):
+        # Power-on starts the raw encoder at the shaft's magnetic angle.
+        servo.raw_shift, servo.axis = 1000 * index + 7, 5000.0
+    advance(node)
+    assert not path.exists()
+    assert node.on_zero(Trigger.Request(), Trigger.Response()).success
+    for _ in range(3):
+        advance(node)
+    return node
+
+
+def restart(drives_with, old, path):
+    """Start the node again on the same simulated drives, as a relaunch does."""
+    node = drives_with(zero_state=str(path), zero_on_start=False)
+    node.bus = old.bus
+    for index in range(len(node.map.drives)):
+        node.set_up(index)
+    return node
+
+
+def test_a_zero_is_saved_once_every_drive_reports_its_fingerprint(drives_with, tmp_path):
+    path = tmp_path / 'state' / 'drive_zero.yaml'
+    node = zeroed_with_state(drives_with, path)
+    saved = yaml.safe_load(path.read_text(encoding='utf-8'))['drives']
+    assert saved == {drive.name: {'can_id': drive.can_id, 'offset': 1000 * index + 5007}
+                     for index, drive in enumerate(node.map.drives)}
+    assert not node.checks and not list(tmp_path.glob('state/*.partial'))
+
+
+def test_a_restart_keeps_the_zero_of_drives_that_stayed_powered(drives_with, tmp_path):
+    path = tmp_path / 'drive_zero.yaml'
+    old = zeroed_with_state(drives_with, path)
+    # The arm is driven or pushed elsewhere before the station restarts.
+    for servo in old.bus.drives.values():
+        servo.axis = 2000.0
+    node = restart(drives_with, old, path)
+    assert not any(node.zeroed) and node.checks
+    published = []
+    node.state_publisher.publish = published.append
+    for _ in range(3):
+        advance(node)
+    assert all(node.zeroed) and not node.checks
+    assert node.counts == [2000] * len(node.map.drives)
+    assert published[-1].position[:len(node.map.joints)] == pytest.approx(
+        list(node.map.to_positions(node.counts).values()))
+    ready(node)
+
+
+def test_a_restart_after_a_power_cycle_does_not_keep_the_zero(drives_with, tmp_path):
+    path = tmp_path / 'drive_zero.yaml'
+    old = zeroed_with_state(drives_with, path)
+    saved = yaml.safe_load(path.read_text(encoding='utf-8'))['drives']
+    for drive in old.map.drives:
+        # Powered on again where its raw encoder reads its saved offset, so only the zero
+        # status shows it lost its zero.
+        old.bus.drives[drive.can_id].power_cycle(saved[drive.name]['offset'])
+    node = restart(drives_with, old, path)
+    for _ in range(3):
+        advance(node)
+    assert not any(node.zeroed) and not node.checks
+    node.on_description(String(data=URDF))
+    node.on_enabled(Bool(data=False))
+    node.on_enabled(Bool(data=True))
+    assert not node.authorized
+
+
+def test_a_restart_does_not_keep_a_zero_made_elsewhere(drives_with, tmp_path):
+    path = tmp_path / 'drive_zero.yaml'
+    old = zeroed_with_state(drives_with, path)
+    base = old.bus.drives[old.map.drives[0].can_id]
+    base.axis = 3000.0
+    base.receive(mks_can.set_zero(base.can_id))
+    node = restart(drives_with, old, path)
+    for _ in range(3):
+        advance(node)
+    assert node.zeroed == [False] + [True] * (len(node.map.drives) - 1)
+
+
+def test_a_fault_or_a_new_zero_forgets_the_saved_zero(drives_with, tmp_path):
+    path = tmp_path / 'drive_zero.yaml'
+    node = zeroed_with_state(drives_with, path)
+    node.zero()
+    assert not path.exists() and not node.saved_zero
+    for _ in range(3):
+        advance(node)
+    assert path.exists()
+    node.fault(0, 'is 5000 counts from its target')
+    assert not path.exists() and not node.saved_zero
+    for _ in range(3):
+        advance(node)
+    assert not path.exists()
+    restarted = restart(drives_with, node, path)
+    assert not restarted.checks and not any(restarted.zeroed)
+
+
+def test_a_drive_that_answers_again_keeps_its_zero_unless_it_lost_power(drives_with, tmp_path):
+    path = tmp_path / 'drive_zero.yaml'
+    node = zeroed_with_state(drives_with, path)
+    ready(node)
+    can_id = node.map.drives[0].can_id
+    for power_cycled in (False, True):
+        unplugged = node.bus.drives.pop(can_id)
+        for _ in range(node.max_unanswered + 3):
+            advance(node)
+        assert node.lost[0] and not node.zeroed[0] and not node.authorized
+        if power_cycled:
+            unplugged.power_cycle(5007)
+        node.bus.drives[can_id] = unplugged
+        for _ in range(3):
+            advance(node)
+        assert not node.lost[0] and node.zeroed[0] is not power_cycled
+        assert node.held[0] is None and not node.checks
 
 
 def test_zeroing_waits_until_teleop_stops_streaming_to_an_arm_that_lost_its_zero(node):
@@ -523,6 +947,8 @@ def test_a_stop_the_interface_refuses_is_sent_again_until_it_goes_out(node, monk
     advance(node)
     base = node.bus.drives[1]
     assert base.target is not None
+    up = node.direction[0]
+    assert up
     send, refusing = node.bus.send, [True]
 
     def full(can_id, data):
@@ -541,7 +967,9 @@ def test_a_stop_the_interface_refuses_is_sent_again_until_it_goes_out(node, monk
     assert not node.authorized
     refusing[0] = False
     advance(node)
-    assert not node.stopping and base.target is None and base.rpm == 0.0
+    # The hold is taken where the drive was once its stop went out, so it never pulls back.
+    assert not node.stopping and base.target == node.held[0] and base.rpm == 0.0
+    assert (node.held[0] - base.axis) * up >= 0
     node.on_enabled(Bool(data=True))
     assert node.authorized
 
@@ -798,7 +1226,7 @@ def test_following_error_is_reported_and_clears_on_a_current_pose_command(node, 
 
     node.on_command(command(
         node,
-        velocities={joint: 0.0 for joint in node.map.joints},
+        velocities=dict.fromkeys(node.map.joints, 0.0),
         joint_1=math.radians(6.0)))
     clock[0] += 0.1
     node.report()
@@ -860,7 +1288,7 @@ def test_stalled_simulated_drive_is_reported_within_detection_window_and_recover
                              clock[0], servo.enabled, servo.target, servo.rpm)
     assert stalled, states
     assert stalled[0][1] == DiagnosticStatus.ERROR
-    assert stalled[0][0] - fault_started <= 2.0 + REPORT_PERIOD_S
+    assert stalled[0][0] - fault_started <= 2.0 + REPORT_PERIOD_S + 1e-6
     assert float(stalled[0][3]['target_encoder_error_deg']) == pytest.approx(3.0, abs=0.01)
     assert float(stalled[0][3]['reply_age_sec']) <= REPORT_PERIOD_S
     assert servo.axis == pytest.approx(0.0)
@@ -907,7 +1335,8 @@ def test_not_responding_simulated_drive_is_stale_within_one_report_period_and_re
     node.report()
     row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
     values = {value.key: value.value for value in row.values}
-    assert clock[0] - fault_started <= REPORT_PERIOD_S
+    # The clock is a float sum of tick periods, which can overshoot by a rounding error.
+    assert clock[0] - fault_started <= REPORT_PERIOD_S + 1e-6
     assert row.level == DiagnosticStatus.STALE
     assert values['state'] == DriveHealthState.NOT_RESPONDING.value
     assert 'target_encoder_error_deg' in values and 'reply_age_sec' in values
@@ -1046,17 +1475,20 @@ def test_zero_speed_f5_stops_six_drives_and_negative_targets_rearm(node):
     node.on_command(command(node, velocities=dict.fromkeys(POSE, 0.0), **measured))
     advance(node)
     assert node.authorized
-    assert all(drive.enabled and drive.target is None and drive.rpm == 0.0
-               for drive in node.bus.drives.values())
+    servos = [node.bus.drives[drive.can_id] for drive in node.map.drives]
+    # Each drive stops, then runs on only to its hold, the nearby end of its move.
+    assert all(servo.enabled and servo.target == held and abs(held - servo.axis) <= 60
+               for servo, held in zip(servos, node.held))
     assert all(sent_frame(node, index) == (mks_can.ABSOLUTE_AXIS, bytes(6))
                for index in range(len(node.map.drives)))
-    held = [drive.axis for drive in node.bus.drives.values()]
     advance(node, 0.6)
-    assert [drive.axis for drive in node.bus.drives.values()] == held
+    assert [servo.axis for servo in servos] == node.held
     assert_stopped(node)
 
     node.on_enabled(Bool(data=False))
     node.on_enabled(Bool(data=True))
+    # Its hold reached, the next quiet encoder step lets each drive move again.
+    advance(node)
     reverse = dict.fromkeys(POSE, -0.4)
     reverse.update(joint_5=0.1, tool_grip=0.2)
     rates = dict.fromkeys(POSE, -0.2)
@@ -1124,8 +1556,398 @@ def test_a_cartesian_tilt_into_a_joint_limit_keeps_the_drives_enabled(node, para
     assert node.commanded['joint_4'] == pytest.approx(node.limits['joint_4'][0], abs=1e-9)
 
 
+@pytest.fixture
+def bench(monkeypatch, parameters, bench_profile):
+    monkeypatch.setenv('ROS_AUTOMATIC_DISCOVERY_RANGE', 'OFF')
+    context = rclpy.Context()
+    rclpy.init(context=context)
+    configured = {**parameters('arm_drives.yaml', 'sim_arm_drives'),
+                  'arm_profile': bench_profile}
+    node = SimArmDrives(context=context, parameter_overrides=[
+        Parameter(name, value=value) for name, value in configured.items()])
+    yield node
+    node.destroy_node()
+    rclpy.try_shutdown(context=context)
+
+
+def test_an_arm_without_a_shoulder_drive_publishes_the_shoulder_where_it_is_fixed(
+        bench, monkeypatch):
+    states = []
+    monkeypatch.setattr(bench.state_publisher, 'publish', states.append)
+    assert [drive.can_id for drive in bench.map.drives] == [1, 3, 4, 5]
+    assert sorted(bench.bus.drives) == [1, 3, 4, 5]
+    ready(bench)
+    published = dict(zip(states[-1].name, states[-1].position))
+    assert set(published) == {'joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5',
+                              'tool_grip'}
+    assert published['joint_2'] == 0.0 and published['tool_grip'] == 0.0
+
+
+def test_a_command_must_hold_a_locked_joint_where_it_is(bench):
+    ready(bench)
+    bench.on_command(command(bench, joint_1=0.5, joint_2=0.0, tool_grip=0.0))
+    advance(bench)
+    assert bench.authorized and bench.rejected == 0
+    assert set(bench.commanded) == set(bench.map.joints)
+    assert bench.bus.drives[1].target is not None
+    bench.on_command(command(bench, joint_1=0.5, joint_2=0.1, tool_grip=0.0))
+    assert not bench.authorized and bench.stop_reason == 'joint_2 is locked at 0 rad'
+    ready(bench)
+    # Leaving a locked joint out is as incomplete as leaving out a driven one.
+    bench.on_command(command(bench, joint_1=0.5, tool_grip=0.0))
+    assert not bench.authorized and bench.stop_reason.startswith('incomplete')
+
+
+def test_a_profile_that_leaves_a_joint_unaccounted_for_stops_the_node(
+        monkeypatch, parameters, tmp_path):
+    monkeypatch.setenv('ROS_AUTOMATIC_DISCOVERY_RANGE', 'OFF')
+    profile = tmp_path / 'arm_profile.yaml'
+    profile.write_text('fitted_drives: [base_yaw, elbow, wrist_left, wrist_right]\n',
+                       encoding='utf-8')
+    configured = {**parameters('arm_drives.yaml', 'sim_arm_drives'),
+                  'arm_profile': str(profile)}
+    context = rclpy.Context()
+    rclpy.init(context=context)
+    try:
+        with pytest.raises(ValueError, match='joint_2'):
+            SimArmDrives(context=context, parameter_overrides=[
+                Parameter(name, value=value) for name, value in configured.items()])
+    finally:
+        rclpy.try_shutdown(context=context)
+
+
+def test_teleop_drives_an_arm_with_a_locked_shoulder_without_a_stop(
+        bench, parameters, monkeypatch):
+    states = []
+    monkeypatch.setattr(bench.state_publisher, 'publish', states.append)
+    ready(bench)
+    arm = ArmKinematics.from_urdf(URDF)
+    teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
+                       joint_limits(URDF, arm.joints), arm, locked=bench.locked)
+
+    def measured():
+        return dict(zip(states[-1].name, states[-1].position))
+    teleop.enable(measured(), [0.0] * len(AXES))
+    assert teleop.enabled, teleop.note
+    # The Cartesian groups solve the shoulder too, so there are none for this arm.
+    assert [group.name for group in teleop.groups] == ['base', 'upper']
+    # The base group's sticks ask for the base, the shoulder and the elbow at once. The
+    # shoulder cannot move, which is not a limit, so the controller has nothing to rumble about.
+    axes = [0.0] * len(AXES)
+    for axis in ('left_x', 'left_y', 'right_y'):
+        axes[AXES.index(axis)] = 1.0
+    for _ in range(60):
+        teleop.update(axes, [0] * len(BUTTONS), measured(), bench.period)
+        targets = teleop.command_targets
+        bench.on_enabled(Bool(data=True))
+        bench.on_command(JointState(
+            name=list(targets), position=list(targets.values()),
+            velocity=[teleop.velocities[joint] for joint in targets]))
+        advance(bench)
+        assert bench.authorized, bench.stop_reason
+        assert teleop.blocked == []
+    assert bench.rejected == 0
+    assert abs(measured()['joint_1']) > 0.1 and measured()['joint_2'] == 0.0
+    assert abs(measured()['joint_3']) > 0.1
+
+
+def without_drive(drives_with, can_id, **changes):
+    """Make a node whose drive is not on the bus, as when it is faulty or not yet fitted."""
+    node = drives_with(zero_on_start=False, **changes)
+    node.bus.drives.pop(can_id)
+    # Whatever it answered while the node was being made is not heard.
+    node.bus.replies = deque(reply for reply in node.bus.replies if reply[0] != can_id)
+    return node
+
+
+def arm_up(node):
+    advance(node)
+    node.on_description(String(data=URDF))
+    node.on_enabled(Bool(data=False))
+    node.on_enabled(Bool(data=True))
+    assert node.authorized, node.stop_reason
+
+
+def published_joint_control(node, monkeypatch):
+    messages = []
+    monkeypatch.setattr(node.joint_control_publisher, 'publish', messages.append)
+    return messages
+
+
+def rows(message):
+    return {row.name: ({item.key: item.value for item in row.values}, row.message)
+            for row in message.status}
+
+
+def test_a_joint_is_switched_off_only_while_the_arm_is_stopped(node):
+    ready(node)
+    ok, message = node.set_joint_enabled('joint_3', False)
+    assert not ok and 'disable teleop' in message and not node.disabled
+    node.on_enabled(Bool(data=False))
+    node.on_command(command(node))
+    ok, message = node.set_joint_enabled('joint_3', False)
+    assert not ok and 'still arriving' in message
+    node.command_time -= QUIET_BEFORE_ZERO_S
+    assert node.set_joint_enabled('joint_3', False) == (True, 'joint_3 is disabled')
+    assert node.disabled == {'joint_3'}
+    assert node.set_joint_enabled('joint_3', True) == (True, 'joint_3 is enabled')
+    assert node.disabled == set()
+
+
+def test_a_joint_with_no_drive_cannot_be_switched(bench):
+    ok, message = bench.set_joint_enabled('joint_2', True)
+    assert not ok and 'no drive' in message
+    assert not bench.set_joint_enabled('not_a_joint', False)[0]
+    assert bench.disabled == set()
+
+
+def test_a_disabled_joint_gets_no_target_and_the_others_keep_moving(node):
+    assert node.set_joint_enabled('joint_1', False)[0]
+    ready(node)
+    node.on_command(command(node, joint_2=0.1))
+    advance(node)
+    advance(node)
+    assert node.authorized and node.rejected == 0
+    assert node.bus.drives[2].target is not None
+    assert node.bus.drives[1].target is None
+
+
+@pytest.mark.parametrize('moved, accepted', [(0.005, True), (0.5, False)])
+def test_a_command_must_hold_a_disabled_joint_at_its_anchor(node, moved, accepted):
+    assert node.set_joint_enabled('joint_1', False)[0]
+    ready(node)
+    node.on_command(command(node, joint_1=moved, joint_2=0.1))
+    assert node.authorized == accepted
+    if accepted:
+        # Count jitter between teleop's reading and ours is absorbed, and sent back exactly.
+        assert node.commanded['joint_1'] == 0.0 and node.velocities['joint_1'] == 0.0
+    else:
+        assert node.stop_reason == 'joint_1 is disabled' and node.rejected == 1
+
+
+def test_one_wrist_joint_disabled_keeps_both_wrist_drives_following(node):
+    assert node.set_joint_enabled('joint_4', False)[0]
+    assert node.idle == set()
+    ready(node)
+    node.on_command(command(node, joint_5=0.2))
+    advance(node)
+    advance(node)
+    assert node.bus.drives[4].target is not None and node.bus.drives[5].target is not None
+    node.on_command(command(node, joint_4=0.2))
+    assert not node.authorized and node.stop_reason == 'joint_4 is disabled'
+    node.command_time -= QUIET_BEFORE_ZERO_S
+    assert node.set_joint_enabled('joint_5', False)[0] and node.idle == {3, 4}
+
+
+def test_a_disabled_drive_that_stops_answering_does_not_stop_the_arm(node, monkeypatch):
+    assert node.set_joint_enabled('joint_1', False)[0]
+    ready(node)
+    states = []
+    monkeypatch.setattr(node.state_publisher, 'publish', states.append)
+    node.bus.drives.pop(1)
+    node.heard[0] -= 10.0
+    for _ in range(node.max_unanswered + 5):
+        advance(node)
+    assert node.lost[0] and not node.zeroed[0]
+    assert node.authorized, node.stop_reason
+    node.on_command(command(node, joint_2=0.1))
+    advance(node)
+    assert node.authorized and node.bus.drives[2].target is not None
+    # Every joint is still reported, the disabled one where it was.
+    published = dict(zip(states[-1].name, states[-1].position))
+    assert set(published) == set(node.map.joints) and published['joint_1'] == 0.0
+
+
+def test_a_disabled_drive_that_never_answered_does_not_keep_the_arm_off(drives_with):
+    node = without_drive(drives_with, 1)
+    advance(node)
+    node.on_description(String(data=URDF))
+    # The base drive is not answering, so it cannot be zeroed, and the arm needs it.
+    assert not node.on_zero(Trigger.Request(), Trigger.Response()).success
+    advance(node)
+    node.on_enabled(Bool(data=False))
+    node.on_enabled(Bool(data=True))
+    assert not node.authorized
+    assert node.set_joint_enabled('joint_1', False)[0]
+    assert node.on_zero(Trigger.Request(), Trigger.Response()).success
+    advance(node)
+    node.on_enabled(Bool(data=False))
+    node.on_enabled(Bool(data=True))
+    assert node.authorized, node.stop_reason
+
+
+def test_the_zero_service_succeeds_without_a_disabled_drive_and_saves_the_others(
+        drives_with, tmp_path):
+    path = tmp_path / 'drive_zero.yaml'
+    node = without_drive(drives_with, 1, zero_state=str(path))
+    advance(node)
+    assert node.set_joint_enabled('joint_1', False)[0]
+    response = node.on_zero(Trigger.Request(), Trigger.Response())
+    assert response.success and 'base_yaw' in response.message
+    for _ in range(3):
+        advance(node)
+    saved = yaml.safe_load(path.read_text(encoding='utf-8'))['drives']
+    assert 'base_yaw' not in saved and len(saved) == len(node.map.drives) - 1
+    # A drive that is not disabled still has to answer.
+    node.set_joint_enabled('joint_1', True)
+    response = node.on_zero(Trigger.Request(), Trigger.Response())
+    assert not response.success and 'base_yaw' in response.message
+
+
+def test_a_drive_that_comes_back_after_its_joint_is_enabled_must_be_zeroed(drives_with):
+    node = without_drive(drives_with, 1)
+    advance(node)
+    assert node.set_joint_enabled('joint_1', False)[0]
+    assert node.on_zero(Trigger.Request(), Trigger.Response()).success
+    advance(node)
+    arm_up(node)
+    node.on_enabled(Bool(data=False))
+    node.command_time -= QUIET_BEFORE_ZERO_S
+    node.bus.drives[1] = SimulatedServo(1)
+    assert node.set_joint_enabled('joint_1', True)[0]
+    # The drive was never set up: the node asks again once its reply timeout has passed.
+    node.setup_time[0] = -math.inf
+    advance(node)
+    node.on_enabled(Bool(data=False))
+    node.on_enabled(Bool(data=True))
+    assert not node.authorized and not node.zeroed[0]
+    assert node.on_zero(Trigger.Request(), Trigger.Response()).success
+    advance(node)
+    node.on_enabled(Bool(data=False))
+    node.on_enabled(Bool(data=True))
+    assert node.authorized, node.stop_reason
+
+
+def test_a_hand_moved_disabled_joint_does_not_slow_the_other_drives(node, monkeypatch):
+    assert node.set_joint_enabled('joint_1', False)[0]
+    ready(node)
+    node.bus.drives[1].axis = 20000.0
+    seen = []
+    synchronized = node.map.synchronized
+
+    def record(positions, counts, *args):
+        seen.append(list(counts))
+        return synchronized(positions, counts, *args)
+    monkeypatch.setattr(node.map, 'synchronized', record)
+    node.on_command(command(node, joint_2=0.1))
+    advance(node)
+    assert seen and seen[-1][0] == node.map.to_counts(node.commanded)[0]
+
+
+def test_a_hand_moved_disabled_joint_is_not_a_following_error(node):
+    assert node.set_joint_enabled('joint_1', False)[0]
+    ready(node)
+    node.on_command(command(node, joint_2=0.1))
+    advance(node)
+    node.on_enabled(Bool(data=False))
+    for _ in range(3):
+        advance(node)
+    node.bus.drives[1].axis = 5.0 * node.following_error
+    for _ in range(2 * node.following_ticks):
+        advance(node)
+    assert node.behind[0] == 0 and not node.stopping
+    assert node.stop_reason == 'Teleop disabled'
+
+
+def test_the_drive_rows_of_a_disabled_joint_never_report_an_error(node, monkeypatch):
+    diagnostics = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', diagnostics.append)
+    assert node.set_joint_enabled('joint_1', False)[0]
+    ready(node)
+    node.bus.drives.pop(1)
+    node.heard[0] -= 10.0
+    for _ in range(node.max_unanswered + 5):
+        advance(node)
+    node.report()
+    row = next(item for item in diagnostics[-1].status if item.name == 'drive.base_yaw')
+    assert row.level == DiagnosticStatus.WARN and 'disabled' in row.message
+    assert not any(item.level == DiagnosticStatus.ERROR for item in diagnostics[-1].status
+                   if item.name.startswith('drive.'))
+
+
+def test_the_joint_states_are_published_latched_and_on_every_change(node, monkeypatch):
+    messages = published_joint_control(node, monkeypatch)
+    assert node.joint_control_publisher.qos_profile.durability == (
+        rclpy.qos.DurabilityPolicy.TRANSIENT_LOCAL)
+    assert node.set_joint_enabled('joint_3', False)[0]
+    assert len(messages) == 1
+    found = rows(messages[-1])
+    assert list(found) == ['joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5', 'tool_grip']
+    values, text = found['joint_3']
+    assert values['state'] == 'disabled' and values['drives'] == 'elbow'
+    assert text.startswith('disabled: held at') and math.isfinite(float(values['angle']))
+    assert {name: found[name][0]['state'] for name in found if name != 'joint_3'} == {
+        name: 'enabled' for name in found if name != 'joint_3'}
+    assert found['joint_4'][0]['drives'] == 'wrist_left,wrist_right'
+    # A refused change publishes nothing new, and the report repeats the state.
+    ready(node)
+    assert not node.set_joint_enabled('joint_1', False)[0]
+    assert len(messages) == 1
+    node.report()
+    assert len(messages) == 2 and rows(messages[-1])['joint_3'][0]['state'] == 'disabled'
+
+
+def test_a_joint_with_no_drive_is_reported_as_such_and_has_no_service(bench, monkeypatch):
+    messages = published_joint_control(bench, monkeypatch)
+    bench.report()
+    found = rows(messages[-1])
+    assert found['joint_2'][0]['state'] == 'no_drive' and found['joint_2'][0]['angle'] == '0.0'
+    assert found['joint_2'][1].startswith('no drive fitted: locked at')
+    assert found['tool_grip'][0]['state'] == 'no_drive'
+    assert found['joint_1'][0]['state'] == 'enabled'
+    assert sorted(bench.joint_services) == ['joint_1', 'joint_3', 'joint_4', 'joint_5']
+
+
+def test_the_set_enabled_service_changes_a_joint_and_says_why_it_cannot(node):
+    request = SetBool.Request(data=False)
+    response = node.on_set_enabled('joint_3', request, SetBool.Response())
+    assert response.success and node.disabled == {'joint_3'}
+    ready(node)
+    response = node.on_set_enabled('joint_3', SetBool.Request(data=True), SetBool.Response())
+    assert not response.success and 'disable teleop' in response.message
+    assert node.disabled == {'joint_3'}
+
+
+def test_teleop_drives_an_arm_with_a_disabled_base_without_a_stop(
+        node, parameters, monkeypatch):
+    states = []
+    monkeypatch.setattr(node.state_publisher, 'publish', states.append)
+    assert node.set_joint_enabled('joint_1', False)[0]
+    ready(node)
+    arm = ArmKinematics.from_urdf(URDF)
+    teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
+                       joint_limits(URDF, arm.joints), arm)
+
+    def measured():
+        return dict(zip(states[-1].name, states[-1].position))
+    teleop.set_disabled(node.disabled, measured())
+    teleop.enable(measured(), [0.0] * len(AXES))
+    assert teleop.enabled, teleop.note
+    axes = [0.0] * len(AXES)
+    for axis in ('left_x', 'left_y', 'right_y'):
+        axes[AXES.index(axis)] = 1.0
+    for _ in range(60):
+        teleop.update(axes, [0] * len(BUTTONS), measured(), node.period)
+        targets = teleop.command_targets
+        node.on_enabled(Bool(data=True))
+        node.on_command(JointState(
+            name=list(targets), position=list(targets.values()),
+            velocity=[teleop.velocities[joint] for joint in targets]))
+        advance(node)
+        assert node.authorized, node.stop_reason
+        assert teleop.blocked == []
+    assert node.rejected == 0 and node.bus.drives[1].target is None
+    assert measured()['joint_1'] == 0.0 and abs(measured()['joint_2']) > 0.1
+
+
+@pytest.fixture
+def short_shutdown_grace(monkeypatch):
+    monkeypatch.setattr(ros_shutdown, 'SHUTDOWN_GRACE_S', 0.05)
+
+
 @pytest.mark.parametrize('module, class_name', SHUTDOWN_NODES)
-def test_shutdown_only_ignores_an_invalid_shutdown_context(module, class_name, monkeypatch):
+def test_shutdown_only_ignores_an_invalid_shutdown_context(
+        module, class_name, monkeypatch, short_shutdown_grace):
     factory = MagicMock()
     spin = MagicMock(side_effect=RCLError('the given context is not valid'))
     monkeypatch.setattr(module, class_name, factory)
@@ -1147,7 +1969,8 @@ def test_shutdown_only_ignores_an_invalid_shutdown_context(module, class_name, m
 
 
 @pytest.mark.parametrize('module, class_name', SHUTDOWN_NODES)
-def test_binding_error_only_ignored_after_context_shutdown(module, class_name, monkeypatch):
+def test_binding_error_only_ignored_after_context_shutdown(
+        module, class_name, monkeypatch, short_shutdown_grace):
     factory = MagicMock()
     error = RuntimeError("Unable to convert call argument '0' to Python object")
     spin = MagicMock(side_effect=error)
@@ -1171,7 +1994,8 @@ def test_binding_error_only_ignored_after_context_shutdown(module, class_name, m
 
 @pytest.mark.parametrize('module, class_name', [
     (camera_module, 'CameraFollower'), (joint_demo_module, 'JointDemo')])
-def test_tf_time_error_only_ignored_after_context_shutdown(module, class_name, monkeypatch):
+def test_tf_time_error_only_ignored_after_context_shutdown(
+        module, class_name, monkeypatch, short_shutdown_grace):
     factory = MagicMock()
     error = TypeError('time must have sec and nanosec, or nanoseconds.')
     spin = MagicMock(side_effect=error)
@@ -1191,3 +2015,95 @@ def test_tf_time_error_only_ignored_after_context_shutdown(module, class_name, m
         module.main()
     assert spin.call_count == 3
     assert factory.return_value.destroy_node.call_count == 3
+
+
+@pytest.mark.parametrize('error', [
+    RCLError('the given context is not valid'),
+    RuntimeError("Unable to convert call argument '0' to Python object")])
+@pytest.mark.parametrize('module, class_name', SHUTDOWN_NODES)
+def test_shutdown_error_waits_for_the_signal_thread_to_shut_rclpy_down(
+        module, class_name, error, monkeypatch):
+    # rclpy's SIGINT thread wakes spin before it shuts the context down.
+    factory = MagicMock()
+    running = iter([True, True, True])
+    monkeypatch.setattr(module, class_name, factory)
+    monkeypatch.setattr(module.rclpy, 'init', MagicMock())
+    monkeypatch.setattr(module.rclpy, 'try_shutdown', MagicMock())
+    monkeypatch.setattr(module.rclpy, 'spin', MagicMock(side_effect=error))
+    monkeypatch.setattr(module.rclpy, 'ok', lambda: next(running, False))
+    module.main()
+    assert next(running, None) is None
+    assert factory.return_value.destroy_node.call_count == 1
+
+
+def stopped_drive_states(node, monkeypatch, speed_deg_s, seconds=5.0):
+    """Hold the base drive still while teleop tells it to move, and return its health states."""
+    ready(node)
+    servo = node.bus.drives[node.map.drives[0].can_id]
+    clock = [max(node.heard) + 0.1]
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: clock[0])
+    velocities = {**dict.fromkeys(node.map.joints, 0.0), 'joint_1': math.radians(speed_deg_s)}
+    node.on_command(command(node, velocities=velocities, joint_1=math.radians(3.0)))
+    node.report()
+    servo.set_test_fault('stalled')
+    states = []
+    for tick in range(1, round(seconds / node.period) + 1):
+        clock[0] += node.period
+        node.on_enabled(Bool(data=True))
+        node.on_command(command(node, velocities=velocities, joint_1=math.radians(3.0)))
+        node.last_tick = clock[0] - node.period
+        node.tick()
+        if tick % round(REPORT_PERIOD_S / node.period) == 0:
+            node.report()
+            states.append(node.drive_health_states[0])
+    return states
+
+
+@pytest.mark.parametrize('speed', [1.0, 5.0, 30.0])
+def test_a_stopped_drive_told_to_move_at_a_walking_pace_or_more_is_called_stalled(
+        node, monkeypatch, speed):
+    states = stopped_drive_states(node, monkeypatch, speed)
+    assert DriveHealthState.STALLED in states
+
+
+@pytest.mark.parametrize('speed', [0.05, 0.2, 0.5])
+def test_a_drive_told_to_move_only_slowly_is_not_called_stalled(node, monkeypatch, speed):
+    # It would cover less than the stall distance in the stall window even if it moved exactly
+    # as told, so standing still tells nothing.
+    states = stopped_drive_states(node, monkeypatch, speed)
+    assert DriveHealthState.STALLED not in states
+    assert states and all(state is DriveHealthState.OK for state in states)
+
+
+def test_the_slow_swing_of_demo_mode_never_makes_a_drive_look_stalled(
+        node, monkeypatch, parameters):
+    demo = config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')).demo
+    joints = [joint for joint in node.map.joints if joint in demo.joints]
+    wander = demo_wander(demo, joints)
+    ready(node)
+    clock = [max(node.heard) + 0.1]
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: clock[0])
+    seen = set()
+    before = dict(wander.positions())
+    for tick in range(1, round(40.0 / node.period) + 1):
+        clock[0] += node.period
+        wander.advance(node.period, 1.0)
+        now = wander.positions()
+        velocities = {joint: (now[joint] - before[joint]) / node.period for joint in joints}
+        before = now
+        node.on_enabled(Bool(data=True))
+        node.on_command(command(node, velocities=velocities, **now))
+        node.last_tick = clock[0] - node.period
+        node.tick()
+        if tick % round(REPORT_PERIOD_S / node.period) == 0:
+            node.report()
+            seen.update(state for state in node.drive_health_states if state is not None)
+    assert node.authorized
+    assert seen == {DriveHealthState.OK}
+
+
+def demo_wander(demo, joints):
+    """Return a Wander for demo's swings on the given joints, centred on the zero pose."""
+    swings = {joint: (amplitude, cycles, phase) for joint, amplitude, cycles, phase
+              in zip(demo.joints, demo.amplitudes, demo.cycles, demo.phases) if joint in joints}
+    return Wander(dict.fromkeys(swings, 0.0), swings, demo.loop, demo.ramp)

@@ -13,6 +13,7 @@ from waybionic_teleop import mks_can
     (mks_can.absolute_axis(1, 0, 0, 4), 'F5000004000000FA'),
     (mks_can.absolute_axis(1, 0, 0, 0), 'F5000000000000F6'),
     (mks_can.read_encoder(1), '3132'),
+    (mks_can.read_position_error(3), '393C'),
     (mks_can.set_mode(1), '820588'),
     (mks_can.enable(1), 'F301F5'),
     (mks_can.emergency_stop(1), 'F7F8'),
@@ -50,6 +51,28 @@ def test_encoder_reply_decodes_negative_values():
 ])
 def test_encoder_reply_preserves_the_signed_int48_limits(raw, expected):
     assert mks_can.encoder_value(bytes.fromhex(raw)) == expected
+
+
+@pytest.mark.parametrize('raw, expected', [
+    ('00000000', 0),
+    ('0000C800', 51200),
+    ('FFFF3800', -51200),
+    ('80000000', -(1 << 31)),
+    ('7FFFFFFF', (1 << 31) - 1),
+])
+def test_position_error_preserves_the_signed_int32_value(raw, expected):
+    code, arguments = mks_can.parse(
+        3, mks_can.frame(3, mks_can.READ_POSITION_ERROR, bytes.fromhex(raw)))
+    assert code == mks_can.READ_POSITION_ERROR
+    assert mks_can.position_error_value(arguments) == expected
+    if abs(expected) == 51200:
+        assert expected * 360 / mks_can.ERROR_COUNTS_PER_REV == (360 if expected > 0 else -360)
+
+
+@pytest.mark.parametrize('length', [0, 1, 2, 3, 5, 6])
+def test_position_error_rejects_a_truncated_or_wrong_length_reply(length):
+    with pytest.raises(ValueError, match='four bytes'):
+        mks_can.position_error_value(bytes(length))
 
 
 @pytest.mark.parametrize('can_id, data', [

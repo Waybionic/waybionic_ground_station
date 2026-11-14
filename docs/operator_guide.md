@@ -90,10 +90,10 @@ before starting the SDL bridge.
 | Start (Xbox Menu button, three lines) | Enable or disable; the arm starts disabled |
 | B | Stop and hold the current pose |
 | Y | Switch group: base (joints 1-3), upper (joints 2-5), Cartesian (tool tip) or incision |
-| Base group: left stick | Base yaw (left/right) and shoulder (up/down) |
-| Base group: right stick up/down | Elbow |
-| Upper group: left stick | Shoulder (left/right) and elbow (up/down) |
-| Upper group: right stick | Wrist roll (left/right) and wrist pitch (up/down) |
+| Base group: left stick | Base yaw (left/right; right turns joint 1 positive, counter-clockwise from above) and shoulder (up/down) |
+| Base group: right stick up/down | Elbow (up lifts the elbow, joint 3 negative) |
+| Upper group: left stick | Shoulder (left/right) and elbow (up/down; up lifts the elbow, joint 3 negative, as in the base group) |
+| Upper group: right stick | Wrist roll (left/right; right turns joint 5 positive, counter-clockwise from above at the zero pose) and wrist pitch (up/down; up turns joint 4 negative) |
 | Cartesian group: left stick | Tool tip left/right and forward/back, in straight lines |
 | Cartesian group: right stick | Tool roll (left/right) and tool tip up/down |
 | Cartesian group: LB (hold) | Move along one axis only: the stick direction pushed furthest |
@@ -101,6 +101,9 @@ before starting the SDL bridge.
 | Incision group: left stick up/down | Insert or withdraw the tool along its own axis |
 | Incision group: right stick up/down | Tilt the tool about the incision point |
 | Incision group: right stick left/right | Tool roll |
+| Chicken head mode: left stick up/down | Tilt the tool about the held tip (the D-pad left/right tilt it too) |
+| Chicken head mode: right stick left/right | Tool roll |
+| Demo mode: sticks | Nothing: the demo moves the arm (RT / LT still work the tool) |
 | RT / LT | Close / open the placeholder end effector |
 | D-pad up/down | Speed: 10, 25, 50 or 100% of 60 deg/s, or of 50 mm/s and 30 deg/s of tilt in the Cartesian and incision groups |
 | A (hold) | Return to the zero pose (not in the incision group) |
@@ -175,6 +178,72 @@ incision. With five joints, the tool can only tilt in the arm's vertical plane.
   the point moves onto the axis instead of the arm moving. Further away, the group
   stops rather than pull the tool back: press Y, withdraw the tool in another group,
   then select the incision group again.
+
+**Chicken head mode** holds the tool tip at one spot while the rest of the arm moves around
+it, as a chicken keeps its head still. Press Start first, then tick **Chicken head mode** in
+the Motion modes panel (right-hand dock, under Arm setup). The same switch is the
+`/arm/chicken_head/set_enabled` service (`std_srvs/SetBool`), and its state is on the latched
+`/arm/chicken_head` topic. The arm moves every joint in a straight line to the head spot, at
+the current speed level, which takes a few seconds, and then holds it there. The default spot
+is 30 cm in front of the base and 55 cm up, with the tool pointing forward (`chicken_head` in
+`xbox_teleop.yaml`). Once the panel says *holding*, centre the sticks: the left stick tilts the
+tool and the right stick rolls it. The shoulder, elbow and wrist swing as far as the tilt needs,
+and in simulation the tip stays within half a millimetre of the spot.
+
+- The panel refuses, and says why, when teleop is not enabled, when a joint is locked or
+  switched off (the mode needs J1 to J5), when the tool is inserted through the incision
+  point, or when the head spot is out of reach of the arm's joint limits.
+- The mode ends, and the arm holds where it is, when you untick the box, press B, press Y
+  (which also selects the next group) or A, stop teleop with Start, or the controller drops
+  out.
+- Something in the way, such as the table or the base, stops the approach. After 1.5 s the
+  panel says *blocked* and names the joint. A tilt that reaches a joint limit stops there and
+  names the joint, and the tip stays held.
+- The approach moves all five joints at once, so on a real arm try it first at a low speed
+  with the stop within reach.
+
+**Demo mode** moves the arm around by itself, slowly and smoothly, to show it off or to look it
+over. Press Start first, then tick **Demo mode** in the Motion modes panel. The same switch is the
+`/arm/demo/set_enabled` service (`std_srvs/SetBool`), and its state is on the latched `/arm/demo`
+topic (`off`, `running`, `stopping` or `unavailable`). Each joint swings about the pose the arm was
+in when you ticked the box, at its own pace, so the motion does not repeat for two minutes. The
+swing grows over 12 seconds, and when you untick the box it shrinks over as long, which brings the
+arm back to exactly the pose it started from (the panel says *returning*). Ticking the box again
+while it returns carries on from there. With the settings in `xbox_teleop.yaml` (`demo`), no joint
+is commanded to go faster than 7 deg/s or to speed up or slow down by more than 3 deg/s each
+second, and the tool tip stays under 8 cm/s. Through the simulated drives the arm follows that path
+to within 0.2 degrees.
+
+![The Motion modes panel while demo mode runs](images/motion_modes_demo_running.png)
+
+Only one mode runs at a time, and the panel says why a mode is refused. While demo mode runs,
+chicken head is refused; before Start has been pressed, demo mode is:
+
+![Chicken head refused while demo mode runs](images/motion_modes_chicken_head_refused.png)
+
+![Demo mode refused until Start is pressed, with the Arm setup panel above the Motion modes panel](images/motion_modes_refused_before_start.png)
+
+- It is not the other two demos. `autoplay:=true` (the self-running demo, above) plays a scripted
+  controller, presses Start itself and runs only on simulated drives. `demo_mode:=true` sweeps each
+  joint once to check the TF, also in simulation only. Demo mode needs your Start press and is
+  checked like any other motion, so it can run on the real arm.
+- The sticks do nothing, and D-pad down slows it to half and then a fifth of its pace, including the
+  start and the return. D-pad up never speeds it up.
+- B, Start, Y, A or losing the controller end it at once and hold the arm where it is, as they do
+  for any motion. Unticking the box is the gentle way out.
+- The arm stays 10 degrees clear of its joint limits. A joint that is locked or switched off stays
+  still, and one with less than 3 degrees of room does too. If a link would reach the table or the
+  base at the extremes of the swing, the whole swing is made smaller, and if no size fits the panel
+  says what is in the way and the mode does not start. If a step runs into something anyway, the
+  mode ends, the arm holds, the controller rumbles and the panel says why until you start it again.
+- It is refused, with the reason, until teleop is enabled, while chicken head mode is on (and the
+  other way round), and while the tool is through the incision point. If you untick it while still
+  holding a stick, the sticks have to be centred before they move the arm.
+- The swing of each joint, its pace, the time to grow and shrink and the speed limit are in the
+  `demo` section of `xbox_teleop.yaml`. Settings that would let a joint go faster than
+  `max_speed_deg_s` are refused when teleop starts.
+- On the real arm it moves by itself: keep the emergency stop within reach, and press D-pad down
+  twice before the first run to see it at a fifth of its pace.
 
 ### Joint limits and collision checks
 
@@ -255,7 +324,8 @@ again whenever the controller has been left alone for 30 seconds. The arm lifts,
 draws a square and a vertical line with the tool tip, and tilts the tool about its
 tip, with the path and a caption in RViz. Touching any button, stick or trigger
 stops the demo and leaves teleop disabled; press Start to drive the arm yourself.
-The demo runs only with simulated drives.
+The demo runs only with simulated drives. To see the real arm move around by itself, use
+[Demo mode](#how-teleop-behaves) instead.
 
 - **Windows:** double-click `scripts\windows-demo.cmd`. It starts Docker Desktop if
   needed, opens the controller bridge in its own window if Python 3 is installed,
@@ -331,12 +401,12 @@ bridge needs `python3-opencv`.
 
 The controller plugs into the computer, not the Arduino. The computer runs teleop,
 the Cartesian moves, the joint limits and collision checks, the RViz twin and the
-monitor, then sends MKS frames through the carrier board: a UNO R4 WiFi with a
-TJA1051T transceiver running `waybionic_can/arduino/carrier_bridge`. The carrier
-only passes frames between USB and the CAN bus, and reports its own status.
+monitor, then sends MKS frames through the carrier board: a UNO R4 with an MCP2515 CAN
+module running `waybionic_can/arduino/carrier_bridge_mcp2515`. The carrier only passes
+frames between USB and the CAN bus, and reports its own status.
 
 ```text
-controller -> computer (ROS 2) -> USB, 1 Mbaud -> carrier -> CAN, 1 Mbit/s -> 5 MKS drives
+controller -> computer (ROS 2) -> USB -> carrier -> CAN, 500 kbit/s -> 5 MKS drives
 ```
 
 `waybionic_teleop/config/arm_drives.yaml` maps the joints to the drives: CAN IDs 1
@@ -354,8 +424,9 @@ unloaded, and keep the E-stop within reach.
 
 The computer running ROS needs the carrier or a USB CAN adapter. Docker Desktop on
 Windows and macOS can't reach USB devices, so use native ROS on macOS
-([RoboStack](../BuildInstructions.md#macos-native-ros-with-robostack)) or Linux, or
-Docker on Linux with `--network host` for a SocketCAN adapter.
+([RoboStack](../BuildInstructions.md#macos-native-ros-with-robostack)), the
+[carrier relay on Windows](#on-windows) or Linux, or Docker on Linux with
+`--network host` for a SocketCAN adapter.
 
 ### On a Mac
 
@@ -364,7 +435,10 @@ then run these from the repository root.
 
 1. **Flash the carrier** once, and again after carrier firmware changes. Plug in only
    the carrier, so its port is the only `/dev/cu.usbmodem*`, or set
-   `WAYBIONIC_CARRIER=/dev/cu.usbmodem...`.
+   `WAYBIONIC_CARRIER=/dev/cu.usbmodem...`. This uploads `carrier_bridge_mcp2515`,
+   for the arm's MCP2515 module; `./scripts/macos.sh flash carrier_bridge` is only for
+   a carrier using the R4's own CAN with a TJA1051T. The wrong sketch leaves every
+   drive silent.
 
    ```bash
    brew install arduino-cli
@@ -372,14 +446,12 @@ then run these from the repository root.
    ```
 
 2. **Set up each drive once,** alone on the bus: give it its CAN ID (they all ship
-   as 1), then switch it to 1 Mbit/s. The carrier keeps its first bit rate until it
-   resets, so replug it, connect every drive, and check they all answer.
+   as 1). Leave them at the factory 500 kbit/s, the most the arm's MCP2515 carrier
+   runs. Then connect every drive and check they all answer.
 
    ```bash
    ./scripts/macos.sh drives set-id 1 3            # for example the elbow
-   ./scripts/macos.sh drives set-bitrate 3 1000000
-   # after every drive is switched: replug the carrier
-   ./scripts/macos.sh drives --bitrate 1000000 scan
+   ./scripts/macos.sh drives scan --ids 1 2 3 4 5
    ```
 
 3. **Start the ground station.** With `tool` removed from `drives` in
@@ -398,10 +470,44 @@ then run these from the repository root.
    ./scripts/macos.sh run ros2 service call /sim_arm_drives/zero std_srvs/srv/Trigger
    ```
 
+   `arm` saves the zero in `~/.waybionic/drive_zero.yaml`. While the drives stay
+   powered, the next `arm` keeps it, so the arm needs no zero pose and no service
+   call: wait for `Every drive kept its zero`, then press Start. After the drives lose
+   power, zero again. See [Zeroing and stops](#zeroing-and-stops).
+
 5. **Check each joint** at the slowest speed in the `upper` group. If a drive turns
    the wrong way, negate its `factors` in `arm_drives.yaml` and rebuild. Then move
    each joint a known angle, such as 10 degrees in RViz, and measure it on the arm; a
    different angle means its `gear_ratio` is wrong.
+
+### Starting by double-click (Mac)
+
+After the [macOS setup](../BuildInstructions.md#macos-native-ros-with-robostack), install
+the app once from the repository root:
+
+```bash
+./scripts/macos.sh app
+```
+
+This puts **WayBionic Ground Station** in `~/Applications`; drag it to the Dock. The
+copy in `packaging/macos/` also opens in place. Then, to start the arm:
+
+1. Plug in the carrier, the controller (USB or Bluetooth) and power the drives.
+2. Double-click the app. The first time, it offers to run the setup in Terminal, which
+   takes 30 to 60 minutes; open the app again when that finishes.
+3. If the carrier is not plugged in, a dialog says so: plug it in and choose *Try again*,
+   or choose *Without the arm* to run the simulation. With several USB serial devices
+   connected, it asks which one is the carrier.
+4. It then starts the station exactly as `./scripts/macos.sh arm` does (the arm profile
+   and the saved zero included), with RViz filling the screen. The Arm setup panel there
+   walks through what is left: the controller, the zero pose, Start.
+
+Closing the RViz window, or quitting the app from the Dock, stops the station the way
+Ctrl+C does, so each drive gets its stop first. The station's output goes to
+`~/Library/Logs/WayBionic/` (the last 10 sessions are kept), and if it stops unexpectedly
+the app offers to open the log. The app is not signed: if you download the repository as
+a zip instead of cloning it, macOS asks you to confirm opening it once (right-click, then
+Open).
 
 ### Remote operator
 
@@ -421,6 +527,67 @@ On the Mac, listen on the network:
 
 The receiver takes controller packets from any computer that can reach its port, so
 do this only on a private network.
+
+### On Windows
+
+Docker Desktop can't open COM ports, so a small program on Windows, `carrier_relay`,
+passes the carrier's port through `127.0.0.1:47320`, and the drive node in the container
+connects to it as `socket://host.docker.internal:47320`. Besides
+[Docker Desktop with WSLg](../BuildInstructions.md#windows-wslg), as for the other Windows
+demos, it needs Python 3 on Windows and pyserial:
+
+```powershell
+python -m pip install pyserial
+```
+
+Flash the carrier first, as in step 1 of [On a Mac](#on-a-mac) (from a Mac, or with the
+Arduino IDE).
+
+**In one step:** plug in only the carrier, connect an Xbox controller and double-click
+`scripts\windows-arm.cmd`. It starts Docker Desktop, the carrier bridge and the controller
+bridge, then the ground station with `waybionic_teleop/config/arm_profile_bench.yaml`
+(J1 to J5 driven, no tool). The first start builds the image, which takes a while. The Arm
+setup panel in RViz then walks through what is left: put the arm in its zero pose, press
+**Zero the arm**, then press Start on the controller. The zero is not kept between runs on
+Windows, so do this every time. Closing RViz, or Ctrl+C in the script's window, stops the
+ground station first, so each drive gets its stop, then the bridges.
+
+**Step by step,** from the repository root. The bridge serves one connection at a time, so
+let each command finish before the next. If `docker` is not recognized, see
+[its troubleshooting](../BuildInstructions.md#docker-is-not-recognized-on-windows).
+
+1. Start the bridge in its own PowerShell window and leave it running. It looks for the
+   Arduino's COM port each time it opens the carrier, so plugging the carrier in after it
+   starts, or replugging it under another COM number, is fine; with several Arduinos plugged
+   in, pass `--port COM5`. Wait for `Carrier open; waiting for the ground station`: the
+   drive node stops at start-up if nothing is listening.
+
+   ```powershell
+   cd waybionic_teleop
+   python -m waybionic_teleop.carrier_relay
+   ```
+
+2. Scan the drives from a second window:
+
+   ```powershell
+   docker compose run --rm --build wslg-arm ros2 run waybionic_teleop mks_setup --channel socket://host.docker.internal:47320 scan --ids 1 2 3 4 5
+   ```
+
+3. Start the controller bridge in a third window, then the ground station:
+
+   ```powershell
+   cd waybionic_teleop
+   python -m waybionic_teleop.xinput_bridge
+   ```
+
+   ```powershell
+   docker compose run --rm --build --service-ports wslg-arm
+   ```
+
+Stopping the bridge or unplugging the carrier closes the connection, so the drive node
+loses the carrier as it does when the USB cable is pulled on a Mac: every drive stops and
+the arm must be zeroed again. The bridge listens only on `127.0.0.1`; keep it local,
+because anything that connects to it can drive the arm.
 
 ### On Linux
 
@@ -454,7 +621,8 @@ and zero as below. CI runs `waybionic_teleop/test/test_can_drives.py` over `vcan
 
 The encoders count from where the drives were powered on, so the host publishes no
 joint states and moves nothing until the arm is zeroed. Put the arm in the zero pose
-(the pose RViz shows before anything moves), leave teleop disabled, and run:
+(the pose RViz shows before anything moves), leave teleop disabled, and press **Zero the
+arm** in the Arm setup panel (see [Start-up guide](#start-up-guide)), or run:
 
 ```bash
 ros2 service call /sim_arm_drives/zero std_srvs/srv/Trigger
@@ -464,13 +632,43 @@ Then press Start. Real drives take commands through the same gate as the simulat
 ones. Every drive stops, and the arm must be zeroed again, when:
 
 - a drive stops answering, for example because the E-stop cut its power or the
-  carrier was unplugged;
+  carrier was unplugged (unless the zero is saved and the drive kept it, as below);
 - a drive's encoder count jumps further than `max_rpm` allows between two readings,
   as after a brief power loss;
 - a drive reports a failed move (as when its stall protection releases the motor)
   or an end-limit stop;
 - a drive stays more than `following_error_counts` from its target for
   `following_error_ticks` ticks. Both are provisional values in `arm_drives.yaml`.
+
+**A saved zero.** With `drive_zero_state:=<file>` (`./scripts/macos.sh arm` uses
+`~/.waybionic/drive_zero.yaml`), each zero is saved to the file once every drive has
+reported it. A restart of the station, or a drive that answers again after it went
+quiet, keeps the zero of each drive that shows it didn't lose power since. MKS firmware
+V1.0.9 reports that in two reads, checked on the bench on all four drives:
+
+- The zero status (3Bh) says whether the drive was zeroed since power-on. Power-on
+  clears it, and the host's setup frames don't.
+- The raw encoder (35h) counts from power-on, and a zero leaves it alone. So it minus
+  the zeroed count (31h) stays the same from one zero until the drive loses power. A
+  zero made elsewhere, such as by `mks_setup`, changes it.
+
+A drive whose status shows no zero, or whose offset is more than 16 counts from the
+saved one, isn't zeroed, and the log says why. A new zero, a failed move and a
+following error delete the file.
+
+A drive that turns more than `following_error_counts` after its stop, for
+`following_error_ticks` ticks, also stops every drive, with teleop enabled or not. That
+drive gets another stop. The arm keeps its zero, since that drive's encoder still counts
+true.
+
+When the stick reverses a joint, its drive stops and settles (typically 17 ms, at most
+about 40 ms on the bench) before it turns back. MKS firmware V1.0.9 keeps a target sent
+while the drive is reversing, and now and then one sent mid-stroke, and runs back to it, up
+to 12°, at the next stop. So right behind every stop of a running move, including a
+Start or B press, the drive also gets a 60 rpm move to where it's to stay. That's the end
+of its last move, at most two ticks of travel ahead. The move is sent again every tick
+for 0.25 s. On the bench this kept every stop within 0.1° of base travel. See
+[F5h on firmware V1.0.9](../waybionic_can/arduino/README.md#f5h-on-firmware-v109).
 
 Once the carrier's E-stop sense is wired, pressing the E-stop also stops every drive
 at once, and Start is refused until it's released. If the joint commands stop for
@@ -482,6 +680,133 @@ move, stop or setup frame again on the next tick, and a refused zero while the z
 service waits. A refused stop frame is sent again on every tick, and Start is
 refused until it has gone out. After any stop, disable teleop and press Start
 again.
+
+### Start-up guide
+
+The **Arm setup** panel (top of RViz's right-hand dock) lists what is left to do before the
+arm can be operated, one thing at a time. The `setup_guide` node builds the list from the
+same diagnostics the station already publishes, and also says each change in the terminal.
+
+| Step | Done when | If it isn't |
+| --- | --- | --- |
+| Carrier | the carrier reports on USB and its E-stop is not pressed | plug in its USB-C cable; if it is plugged in but silent, replug it or flash it |
+| Drives | every drive that is switched on answers and passes its health check | the panel names the drive and what is wrong: no answer (with its CAN ID, so check its power and wiring, or switch its joint off, below), a failed move, or the health check, such as `following error: 6.3 deg off its target` |
+| Controller | `/joy` input is arriving | connect an Xbox controller (USB or Bluetooth) and press a button |
+| Zero | every drive that is switched on is zeroed or kept its saved zero | put the arm in its zero pose and press **Zero the arm** (it asks you to confirm) |
+| Ready | teleop is enabled | press Start (the Menu button) on the controller |
+
+The controller needs no other step: the guide shows it as connected once input arrives. Once
+every step is done, including Start, and the arm has stayed ready for four seconds, the panel
+closes so the other panels get its room. It opens again when something needs you: a step
+before Ready is to do or blocked, such as the controller dropping out, a drive losing its zero
+or the carrier being unplugged, or Ready is blocked because the drives stopped the arm. A step
+that is only being checked does not open it, and neither does stopping teleop (B or Start),
+which leaves only Start to press. The panel's close button, or Panels > SetupPanel, shows or
+hides it by hand, and it is not hidden again until the arm next becomes ready.
+
+If the guide itself is not running, the panel says so. A station started without the arm, such
+as the plain `wslg` viewer, has no guide: the arm launchers (`scripts\windows-arm.cmd`,
+`./scripts/macos.sh arm`) start it with `teleop:=true`. Nothing in the panel moves the arm.
+
+### Switching joints off
+
+The **Joint control** panel, below Arm setup, has a checkbox for each joint (J1 to J5 and the
+tool). Unchecking one switches that joint off:
+
+- The drive stays powered and holds where it is. It is not released, so the joint does not
+  fall or move by itself.
+- The sticks and triggers that were mapped to it do nothing, so the controller no longer
+  vibrates when you push a stick that needs a joint you don't want. The Cartesian and
+  incision groups need every joint, so they are left out of the group cycle while any joint
+  is off or unfitted.
+- A drive whose joints are all off may be faulty or missing: it no longer stops the arm,
+  keeps the zero service from succeeding or keeps the arm from being enabled. The two wrist
+  drives move both wrist joints together, so switching off only J4 or only J5 still needs both
+  drives, which then hold that joint; switch off both to ignore a wrist drive.
+
+A change is only taken while teleop is stopped and no joint command has arrived for a second,
+as for zeroing. Otherwise the panel shows why, and the box stays as it was. Turning a joint
+back on needs its drive answering and zeroed before the arm can be enabled again, so after
+fitting or repairing a drive, put the arm in the zero pose and zero it.
+
+The state is not saved: after a restart every fitted joint is on. A joint that has no drive
+at all, such as the tool on the bench arm, is shown as *no drive* and cannot be switched
+here. It comes from the arm profile (`~/.waybionic/arm_profile.yaml` on a Mac,
+`waybionic_teleop/config/arm_profile_bench.yaml` for the Windows launcher):
+
+```yaml
+# Bench arm: J1 to J5 have a drive (CAN IDs 1 to 5), and there is no tool.
+fitted_drives: [base_yaw, shoulder, elbow, wrist_left, wrist_right]
+locked_joints: {tool_grip: 0.0}
+```
+
+To fit another drive later, give it its CAN ID (`./scripts/macos.sh drives set-id 1 6` with
+only that drive on the bus), add it to `fitted_drives`, delete its joint from
+`locked_joints`, restart the station and zero. Its joint then has a checkbox like the
+others. A drive that isn't wired is left out of `fitted_drives` and its joints are locked, as
+the shoulder's were before it was wired: `locked_joints: {joint_2: 0.0, tool_grip: 0.0}`.
+
+Without the panel, from a terminal:
+
+```bash
+ros2 service call /arm/joint_3/set_enabled std_srvs/srv/SetBool "{data: false}"
+ros2 topic echo /arm/joint_control
+```
+
+### Powered hand-guiding
+
+Powered hand-guiding is not enabled yet. A stopped drive holds position; disabling
+teleop does not release it or turn a push into a movement command.
+
+The intended workflow is an explicitly selected Hand Guide mode: a deliberate push
+starts bounded assistance, then release and stillness for a provisional two seconds
+capture the new holding position. This changes the holding target, not the calibrated
+zero. Stop must leave the mode disarmed rather than let another push restart it.
+
+The existing-hardware approach is being evaluated with passive encoder recordings
+before adding assistance. Encoder displacement and position error are not force
+measurements: gravity, friction, settling and externally applied pressure can all
+affect them. Initial base-pressure recordings showed a small, direction-dependent
+response that did not consistently separate from untouched encoder jitter.
+
+The drive's `0.00err` display is motor-shaft angular error, not by itself a fault code.
+CAN command `39h` reads signed 32-bit position error: 51200 units per motor turn
+(not the encoder's 16384 counts per turn). To read it without changing motor settings,
+first stop the ground station so only one process owns the carrier, then run:
+
+```bash
+./scripts/macos.sh drives read-error 3
+```
+
+This reads the elbow (CAN ID 3). It reports motor degrees, not joint degrees or force;
+the display and CAN readback should be compared before using the signal for hand-guiding.
+Motor-generated tracking error must not be mistaken for continued hand pressure.
+
+An elbow press-hold-release recording received all 1424 requested `39h` replies.
+Using the manual's scale, it captured brief excursions of +1.73 and -4.25 motor
+degrees, with near-zero error between them and after release. The operator also
+observed `Err` returning toward zero while still pressing. Thus zero error does not
+prove pressure was released, and an opposite-sign transient must not automatically
+trigger assistance in the opposite direction. These observations do not validate an
+active hand-guiding controller.
+
+For the configured MKS `SR_vFOC` mode, the V1.0.9 manual describes `Ma` as the maximum
+operating current, and its configuration readback is not measured load current.
+`Hold Ma` does not apply in vFOC mode (manual sections 3.2-3.4 and 5.1.10).
+Reducing current or changing drive PID gains is not a validated hand-guiding shortcut,
+particularly for joints supporting the arm's weight.
+
+Gravity compensation like Seeed's reBot-DevArm (a torque feed-forward from the arm's
+model, so the arm floats under the hand) needs torque-controlled actuators. The MKS
+drives accept only position and speed commands and report no current or torque, so
+it is not possible on this arm without different motors or a force/torque sensor.
+
+Bench test of a sensorless workaround, base yaw (CAN ID 1, no gravity load), firmware
+V1.0.9, factory vFOC gains Kp=220, Ki=100, Kd=270, Kv=320 on every drive: writing Ki=0
+or Ki=1 with `96h` returns "set success", but `00 96 00` still reads Ki=100, also after
+disabling and re-enabling the drive. Held pushes decayed back to near-zero `39h` error
+within 1-3 seconds with and without the write, so the position error cannot stand in
+for a torque sensor. The drives were restored to Ki=100 and read back.
 
 ### Engineering monitor
 
@@ -495,7 +820,7 @@ With `teleop:=true`, the diagnostics panel shows live rows:
 | `can.carrier` | The carrier's USB link (reopened every second if unplugged), E-stop and supply (once wired), CAN controller errors, and frames the carrier refused |
 | `can.bus` | Frames per second and bus load |
 | `drive.*` | Each drive's reply state and encoder, and its health: `OK`, `FOLLOWING_ERROR`, `STALLED`, `NOT_RESPONDING` or `DISABLED`, with its following error and reply age |
-| `arm.*` | Each joint against its target, and whether the arm is zeroed |
+| `arm.*` | Each joint against its target, and whether the arm is zeroed or its saved zero is being checked |
 
 To try each drive fault in simulation, see
 [recording drive health sessions](../waybionic_rviz_plugins/README.md#task-7-record-simulated-arm-drive-health-sessions)

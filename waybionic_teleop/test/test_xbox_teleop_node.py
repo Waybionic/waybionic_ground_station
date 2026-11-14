@@ -4,13 +4,15 @@ import math
 from pathlib import Path
 import time
 
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 import pytest
 import rclpy
 from rclpy.parameter import Parameter
 from sensor_msgs.msg import JointState, Joy
 from std_msgs.msg import Bool, String
+from std_srvs.srv import SetBool
 
-from waybionic_teleop import xbox_teleop_node
+from waybionic_teleop import joint_control, xbox_teleop_node
 from waybionic_teleop.gamepad import AXES, BUTTONS
 from waybionic_teleop.sim_arm_drives_node import SimArmDrives
 from waybionic_teleop.xbox_teleop_node import XboxTeleop
@@ -96,11 +98,11 @@ def test_a_host_pause_disables_even_if_controller_packets_look_fresh(node, monke
 def test_a_late_tick_moves_the_targets_at_most_two_periods(node):
     ready(node)
     for _ in range(20):
-        tick(node, left_x=1.0)
+        tick(node, left_x=-1.0)
     speed = node.teleop.velocities['joint_1']
     assert speed == pytest.approx(node.teleop.speed)
     before = node.teleop.targets['joint_1']
-    tick(node, left_x=1.0, elapsed=0.1)
+    tick(node, left_x=-1.0, elapsed=0.1)
     assert node.teleop.targets['joint_1'] - before == pytest.approx(
         2 * node.config.period * speed)
 
@@ -125,7 +127,7 @@ def test_a_silent_controller_disables_and_holds_the_measured_pose(node, monkeypa
     step(joy())
     step(joy('start'))
     for _ in range(10):
-        step(joy(left_x=1.0))
+        step(joy(left_x=-1.0))
     assert node.teleop.enabled and node.teleop.velocities['joint_1'] > 0
     last_input = clock.now
     # The drives trail the moving target.
@@ -193,6 +195,23 @@ def test_the_rate_timeout_and_collision_settings_must_be_valid(monkeypatch, para
         rclpy.try_shutdown(context=context)
 
 
+def test_the_arm_profile_pins_its_locked_joints(monkeypatch, parameters, bench_profile):
+    monkeypatch.setenv('ROS_AUTOMATIC_DISCOVERY_RANGE', 'OFF')
+    context = rclpy.Context()
+    rclpy.init(context=context)
+    params = {**parameters('xbox_teleop.yaml', 'xbox_teleop'), 'arm_profile': bench_profile}
+    node = XboxTeleop(context=context, parameter_overrides=[
+        Parameter(name, value=value) for name, value in params.items()])
+    try:
+        node.load(String(data=URDF))
+        assert node.teleop.limits['joint_2'] == (0.0, 0.0)
+        assert node.teleop.limits['tool_grip'] == (0.0, 0.0)
+        assert node.teleop.limits['joint_1'][0] < node.teleop.limits['joint_1'][1]
+    finally:
+        node.destroy_node()
+        rclpy.try_shutdown(context=context)
+
+
 def test_a_stick_wavering_at_a_limit_rumbles_at_most_once_a_second(node, monkeypatch):
     clock = Clock()
     monkeypatch.setattr(xbox_teleop_node, 'time', clock)
@@ -217,7 +236,7 @@ def test_a_stick_wavering_at_a_limit_rumbles_at_most_once_a_second(node, monkeyp
     # The base group's right stick pushes the elbow into its limit, past the deadzone every
     # other tick, so the arm is blocked and released 60 times a second.
     for index in range(round(2.5 / period)):
-        step(right_y=0.2 if index % 2 == 0 else 0.0)
+        step(right_y=-0.2 if index % 2 == 0 else 0.0)
     starts = [at for at, intensity in rumbles if intensity > 0]
     assert starts[0] == first
     assert len(starts) == 3
@@ -265,3 +284,245 @@ def test_a_drive_stop_while_enabled_is_named_and_rumbles_once(node, monkeypatch,
         assert node.summary(True).endswith('DISABLED\nPRESS-MENU')
     finally:
         drives.destroy_node()
+
+
+def joint_control_report(*disabled):
+    names = ['joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5', 'tool_grip']
+    return DiagnosticArray(status=[
+        joint_control.joint_status(
+            joint, joint_control.DISABLED if joint in disabled else joint_control.ENABLED,
+            [], 0.0, 'disabled' if joint in disabled else 'enabled')
+        for joint in names])
+
+
+def test_a_joint_switched_off_while_enabled_holds_the_arm(node, monkeypatch):
+    enabled, commands = [], []
+    monkeypatch.setattr(node.enable_publisher, 'publish', enabled.append)
+    monkeypatch.setattr(node.command_publisher, 'publish', commands.append)
+    ready(node)
+    # A report that changes nothing leaves the arm enabled.
+    node.on_joint_control(joint_control_report())
+    assert node.teleop.enabled
+    node.measured['joint_3'] = 0.3
+    node.on_joint_control(joint_control_report('joint_3'))
+    assert not node.teleop.enabled and node.teleop.disabled == {'joint_3'}
+    assert 'Joint enable changed' in node.teleop.note
+    assert enabled[-1].data is False and not any(commands[-1].velocity)
+    assert dict(zip(commands[-1].name, commands[-1].position))['joint_3'] == pytest.approx(0.3)
+    # Start holds it where it is, and its stick does nothing.
+    tick(node)
+    tick(node, 'start')
+    for _ in range(20):
+        tick(node, right_y=-1.0)
+    assert node.teleop.enabled and node.teleop.targets['joint_3'] == pytest.approx(0.3)
+    assert node.teleop.blocked == []
+
+
+def test_a_joint_reported_off_before_the_description_still_applies(node):
+    node.on_joint_control(joint_control_report('joint_3'))
+    assert node.teleop is None
+    node.load(String(data=URDF))
+    assert node.teleop.disabled == {'joint_3'}
+    # The same report again, as the drive node repeats it, changes nothing.
+    node.on_joint_control(joint_control_report('joint_3'))
+    assert node.teleop.disabled == {'joint_3'}
+    node.on_joint_control(joint_control_report())
+    assert node.teleop.disabled == set()
+
+
+def test_the_state_row_names_the_joints_that_are_off(node, monkeypatch):
+    diagnostics = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', diagnostics.append)
+    node.load(String(data=URDF))
+    node.on_joint_control(joint_control_report('joint_3', 'joint_1'))
+    node.report()
+    row = next(item for item in diagnostics[-1].status if item.name == 'teleop.state')
+    assert row.message.startswith('Joints off: joint_1, joint_3; ')
+
+
+def head_rows(published):
+    """Return {state: message} for the chicken head rows the node has published."""
+    return {next(item.value for item in message.status[0].values if item.key == 'state'):
+            message.status[0].message for message in published}
+
+
+def test_the_head_service_switches_the_mode_and_publishes_its_state(node, monkeypatch):
+    published = []
+    monkeypatch.setattr(node.head_publisher, 'publish', published.append)
+    ready(node)
+    response = node.on_head(SetBool.Request(data=True), SetBool.Response())
+    assert response.success and 'moving' in response.message
+    assert node.teleop.head_status()[0] == 'approach'
+    assert 'approach' in head_rows(published)
+    response = node.on_head(SetBool.Request(data=False), SetBool.Response())
+    assert response.success and node.teleop.head_status()[0] == 'off'
+    assert 'off' in head_rows(published)
+
+
+def test_the_head_service_says_why_it_cannot_start(node, monkeypatch):
+    published = []
+    monkeypatch.setattr(node.head_publisher, 'publish', published.append)
+    node.load(String(data=URDF))
+    response = node.on_head(SetBool.Request(data=True), SetBool.Response())
+    assert not response.success and 'Start' in response.message
+    assert node.teleop.head_status()[0] == 'off'
+    assert published and published[-1].status[0].level == DiagnosticStatus.OK
+
+
+def test_the_head_service_without_a_robot_description_says_so(node, monkeypatch):
+    published = []
+    monkeypatch.setattr(node.head_publisher, 'publish', published.append)
+    response = node.on_head(SetBool.Request(data=True), SetBool.Response())
+    assert not response.success and 'robot_description' in response.message
+    assert 'unavailable' in head_rows(published)
+    assert published[-1].status[0].level == DiagnosticStatus.WARN
+
+
+def test_the_head_state_is_reported_with_the_other_rows(node, monkeypatch):
+    published = []
+    monkeypatch.setattr(node.head_publisher, 'publish', published.append)
+    ready(node)
+    node.report()
+    assert head_rows(published) == {'off': ''}
+
+
+def test_the_label_and_diagnostics_show_chicken_head(node, monkeypatch):
+    rows = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', rows.append)
+    ready(node)
+    node.on_head(SetBool.Request(data=True), SetBool.Response())
+    assert node.summary(True).startswith('HEAD\n')
+    node.report()
+    by_name = {row.name: row for row in rows[-1].status}
+    assert by_name['teleop.group'].values[0].value == 'chicken head'
+    assert 'tip' in by_name['teleop.group'].message
+    assert 'deg/s' in by_name['teleop.speed'].message
+
+
+def test_stopping_teleop_ends_the_mode_and_the_row_follows(node, monkeypatch):
+    published = []
+    monkeypatch.setattr(node.head_publisher, 'publish', published.append)
+    ready(node)
+    node.on_head(SetBool.Request(data=True), SetBool.Response())
+    tick(node, 'b')
+    assert not node.teleop.enabled
+    node.report()
+    assert list(head_rows(published[-1:])) == ['off']
+
+
+def demo_rows(published):
+    """Return {state: message} for the demo rows the node has published."""
+    return {next(item.value for item in message.status[0].values if item.key == 'state'):
+            message.status[0].message for message in published}
+
+
+def test_the_demo_service_switches_the_mode_and_publishes_its_state(node, monkeypatch):
+    published = []
+    monkeypatch.setattr(node.demo_publisher, 'publish', published.append)
+    ready(node)
+    response = node.on_demo(SetBool.Request(data=True), SetBool.Response())
+    assert response.success and 'slowly' in response.message
+    assert node.teleop.demo_status()[0] == 'running'
+    assert 'running' in demo_rows(published)
+    response = node.on_demo(SetBool.Request(data=False), SetBool.Response())
+    assert response.success and 'stopping' in response.message
+    assert node.teleop.demo_status()[0] == 'stopping'
+    assert 'stopping' in demo_rows(published)
+
+
+def test_the_demo_service_says_why_it_cannot_start(node, monkeypatch):
+    published = []
+    monkeypatch.setattr(node.demo_publisher, 'publish', published.append)
+    node.load(String(data=URDF))
+    response = node.on_demo(SetBool.Request(data=True), SetBool.Response())
+    assert not response.success and 'Start' in response.message
+    assert node.teleop.demo_status()[0] == 'off'
+    assert published and published[-1].status[0].level == DiagnosticStatus.OK
+
+
+def test_the_demo_service_without_a_robot_description_says_so(node, monkeypatch):
+    published = []
+    monkeypatch.setattr(node.demo_publisher, 'publish', published.append)
+    response = node.on_demo(SetBool.Request(data=True), SetBool.Response())
+    assert not response.success and 'robot_description' in response.message
+    assert 'unavailable' in demo_rows(published)
+    assert published[-1].status[0].level == DiagnosticStatus.WARN
+
+
+def test_the_demo_state_is_reported_with_the_other_rows(node, monkeypatch):
+    published = []
+    monkeypatch.setattr(node.demo_publisher, 'publish', published.append)
+    ready(node)
+    node.report()
+    assert demo_rows(published) == {'off': ''}
+
+
+def test_the_demo_row_is_a_warning_only_when_there_is_something_to_warn_about():
+    from waybionic_teleop import demo_mode
+    levels = {(state, bool(message)): demo_mode.demo_message(state, message).status[0].level
+              for state, message in [('off', ''), ('off', 'Demo stopped: blocked by x'),
+                                     ('running', 'Moving'), ('stopping', 'Returning'),
+                                     ('unavailable', 'No model')]}
+    assert levels == {('off', False): DiagnosticStatus.OK, ('off', True): DiagnosticStatus.WARN,
+                      ('running', True): DiagnosticStatus.OK,
+                      ('stopping', True): DiagnosticStatus.OK,
+                      ('unavailable', True): DiagnosticStatus.WARN}
+
+
+def test_the_label_and_diagnostics_show_demo_mode(node, monkeypatch):
+    rows = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', rows.append)
+    ready(node)
+    node.on_demo(SetBool.Request(data=True), SetBool.Response())
+    assert node.summary(True).startswith('DEMO\n')
+    node.report()
+    by_name = {row.name: row for row in rows[-1].status}
+    assert by_name['teleop.group'].values[0].value == 'demo'
+    assert 'slowly' in by_name['teleop.group'].message
+    assert 'deg/s max' in by_name['teleop.speed'].message
+    assert 'does not speed it up' in by_name['teleop.speed'].message
+    assert 'moving slowly' in by_name['teleop.state'].message
+    node.teleop.note = ''
+    node.report()
+    state = next(row for row in rows[-1].status if row.name == 'teleop.state')
+    assert 'leaves demo mode' in state.message
+
+
+def test_the_node_streams_the_demo_to_the_drives_slowly_and_smoothly(node, monkeypatch):
+    commands = []
+    monkeypatch.setattr(node.command_publisher, 'publish', commands.append)
+    ready(node)
+    start = dict(node.teleop.targets)
+    node.on_demo(SetBool.Request(data=True), SetBool.Response())
+    for _ in range(round(30.0 / node.config.period)):
+        tick(node, elapsed=node.config.period)
+    last = dict(zip(commands[-1].name, commands[-1].position))
+    assert any(abs(last[joint] - start[joint]) > 0.01 for joint in node.teleop.kinematics.joints)
+    cap = node.config.demo.max_speed
+    assert max(abs(speed) for command in commands for speed in command.velocity) <= cap + 1e-9
+    assert node.teleop.enabled and node.teleop.demo is not None
+
+
+def test_stopping_teleop_ends_demo_mode_and_the_row_follows(node, monkeypatch):
+    published = []
+    monkeypatch.setattr(node.demo_publisher, 'publish', published.append)
+    ready(node)
+    node.on_demo(SetBool.Request(data=True), SetBool.Response())
+    tick(node, 'b')
+    assert not node.teleop.enabled and node.teleop.demo is None
+    node.report()
+    assert list(demo_rows(published[-1:])) == ['off']
+
+
+def test_losing_the_controller_ends_demo_mode_and_holds_the_arm(node, monkeypatch):
+    commands = []
+    monkeypatch.setattr(node.command_publisher, 'publish', commands.append)
+    ready(node)
+    node.on_demo(SetBool.Request(data=True), SetBool.Response())
+    for _ in range(120):
+        tick(node, elapsed=node.config.period)
+    assert node.teleop.demo is not None
+    node.joy_time = time.monotonic() - node.timeout - 0.1
+    node.tick()
+    assert not node.teleop.enabled and node.teleop.demo is None
+    assert not any(commands[-1].velocity)

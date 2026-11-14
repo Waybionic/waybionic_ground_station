@@ -323,3 +323,39 @@ def test_a_new_incision_point_clears_only_the_incision_warning(teleop):
     run(teleop, 0.1)
     assert teleop.incision is not None
     assert teleop.warning and teleop.note == 'Controller lost; press Start (Menu) to enable'
+
+
+def test_switching_a_joint_off_with_the_tool_through_the_incision_keeps_the_group(teleop):
+    run(teleop, 1.0, left_y=1.0)
+    run(teleop, 0.3)
+    first, inserted = teleop.incision, dict(teleop.targets)
+    assert teleop.set_disabled({'joint_5'}, inserted)
+    # Leaving the group would let the other groups, and going home, drag the tool sideways
+    # inside the incision, as Y and A are refused for.
+    assert not teleop.enabled and teleop.active_group.name == 'incision'
+    assert teleop.incision == first and teleop.warning and 'switch it back on' in teleop.note
+    press(teleop, 'start')
+    assert not teleop.enabled and 'switch it back on' in teleop.note
+    run(teleop, 0.5, 'a')
+    assert teleop.targets == inserted
+    # With the joint back on, the group moves again.
+    assert teleop.set_disabled(set(), inserted)
+    press(teleop, 'start')
+    assert teleop.enabled and teleop.active_group.name == 'incision'
+    assert teleop.incision == pytest.approx(first, abs=1e-12)
+
+
+def test_a_tool_that_is_out_of_the_incision_lets_the_group_go_and_is_remembered(teleop, arm):
+    run(teleop, 1.0, left_y=1.0)
+    run(teleop, 0.3)
+    first = teleop.incision
+    # While teleop is off the tool ends up beside the incision point, still deep.
+    beside = shifted(arm, teleop.targets, 0.02)
+    teleop.disable(beside, 'moved')
+    assert teleop.set_disabled({'joint_5'}, beside)
+    assert teleop.active_group.name == 'base' and not teleop.withdrawn
+    teleop.set_disabled(set(), beside)
+    # Choosing the incision group again must not take the tool tip for the new incision point.
+    for _ in range(len(teleop.groups) - 1):
+        press(teleop, 'y')
+    assert teleop.active_group.name == 'incision' and teleop.incision == first

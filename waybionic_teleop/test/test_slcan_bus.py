@@ -2,13 +2,19 @@
 
 import os
 import shutil
+import socket
 import subprocess
+import threading
 import time
 
 import pytest
+import serial
 
-from waybionic_teleop import carrier, mks_can, slcan_bus
+from waybionic_teleop import carrier, carrier_relay, mks_can, slcan_bus
 from waybionic_teleop.slcan_bus import SlcanBus
+
+# The carrier's answer to V, which comes before the answers to C, Sn and O.
+VERSION = b'V0100\r'
 
 
 class FakeSerial:
@@ -45,6 +51,11 @@ class FakeSerial:
 def clock(monkeypatch):
     now = [1000.0]
     monkeypatch.setattr(slcan_bus.time, 'monotonic', lambda: now[0])
+
+    def sleep(seconds):
+        now[0] += seconds
+
+    monkeypatch.setattr(slcan_bus.time, 'sleep', sleep)
     return now
 
 
@@ -62,7 +73,7 @@ def bus(clock, ports):
 
 
 def test_it_opens_the_bridge_at_the_bit_rate_then_writes_a_tick_in_one_go(bus, ports):
-    assert ports[0].writes == [b'C\rS8\rO\r']
+    assert ports[0].writes == [b'V\rC\rS8\rO\r']
     assert bus.send(1, mks_can.read_encoder(1)) and bus.send(2, mks_can.read_encoder(2))
     assert len(ports[0].writes) == 1
     assert bus.receive() is None
@@ -71,7 +82,7 @@ def test_it_opens_the_bridge_at_the_bit_rate_then_writes_a_tick_in_one_go(bus, p
 
 
 def test_replies_are_parsed_across_reads(bus, ports):
-    ports[0].inbox += b'\r\r\rt0013F5'
+    ports[0].inbox += VERSION + b'\r\r\rt0013F5'
     assert bus.receive() is None
     ports[0].inbox += b'01F7\rt7F080005000000000000\r'
     assert bus.receive() == (1, bytes.fromhex('F501F7'))
@@ -85,15 +96,29 @@ def test_a_refusal_is_matched_to_the_frame_it_answers(bus, ports):
     for frame in frames:
         bus.send(*frame)
     assert bus.receive() is None
-    # C, S8, O; frame 1 taken; frame 2 refused, a drive's reply in between; frame 3 taken.
-    ports[0].inbox += b'\r\r\r\r\at00183100000000000032\r\r\r'
+    # V, C, S8, O; frame 1 taken; frame 2 refused, a drive's reply in between; frame 3 taken.
+    ports[0].inbox += VERSION + b'\r\r\r\r\at00183100000000000032\r\r\r'
     assert bus.receive() == (1, bytes.fromhex('3100000000000032'))
     assert bus.take_refused() == [frames[1]] and bus.take_refused() == []
     assert bus.refused == 1 and bus.errors == 0
 
 
+def test_answers_left_from_the_last_session_are_not_pinned_on_new_lines(bus, ports):
+    # The last program closed the port as the carrier answered its last lines: their ends, a
+    # BELL for a frame cut off by its C, a drive's reply and a status frame come out first.
+    ports[0].inbox += b'00000032\r\a\r\rt00183100000000000032\rt7F080F00000000010011\r'
+    bus.send(1, mks_can.read_encoder(1))
+    assert bus.receive() is None
+    ports[0].inbox += VERSION + b'\r\r\r\r'
+    assert bus.receive() is None
+    assert bus.errors == 0 and bus.problem == '' and bus.unanswered == 0
+    assert bus.take_refused() == [] and bus.refused == 0
+    ports[0].inbox += b't00183100000000000033\r'
+    assert bus.receive() == (1, bytes.fromhex('3100000000000033'))
+
+
 def test_a_refused_open_is_an_error_that_says_why(bus, ports):
-    ports[0].inbox += b'\r\r\a'
+    ports[0].inbox += VERSION + b'\r\r\a'
     bus.send(1, mks_can.read_encoder(1))
     assert bus.receive() is None
     assert bus.errors == 1 and '1000000 bit/s' in bus.problem
@@ -104,7 +129,7 @@ def test_a_refused_open_is_an_error_that_says_why(bus, ports):
 
 
 def test_a_closed_carrier_that_still_answers_is_opened_again(bus, ports, clock):
-    ports[0].inbox += b'\r\r\r'
+    ports[0].inbox += VERSION + b'\r\r\r'
     for _ in range(3):
         clock[0] += slcan_bus.SILENCE_S / 2
         bus.send(1, mks_can.read_encoder(1))
@@ -112,7 +137,7 @@ def test_a_closed_carrier_that_still_answers_is_opened_again(bus, ports, clock):
         # A carrier that reset answers every line, but passes on no frames until it is opened.
         ports[0].inbox += b'\a\r'
         bus.step(0.0)
-    assert ports[0].writes[-1] == b'C\rS8\rO\r'
+    assert ports[0].writes[-1] == b'V\rC\rS8\rO\r'
 
 
 def test_an_unplugged_carrier_is_reopened_and_set_up_again(bus, ports, clock):
@@ -125,7 +150,7 @@ def test_an_unplugged_carrier_is_reopened_and_set_up_again(bus, ports, clock):
     assert len(ports) == 1
     clock[0] += slcan_bus.REOPEN_EVERY_S
     bus.step(0.0)
-    assert bus.connected and bus.reopens == 1 and ports[1].writes == [b'C\rS8\rO\r']
+    assert bus.connected and bus.reopens == 1 and ports[1].writes == [b'V\rC\rS8\rO\r']
 
 
 def test_a_carrier_that_went_quiet_is_opened_again(bus, ports, clock):
@@ -136,11 +161,11 @@ def test_a_carrier_that_went_quiet_is_opened_again(bus, ports, clock):
     assert len(ports[0].writes) == 1
     clock[0] += slcan_bus.SILENCE_S
     bus.step(0.0)
-    assert ports[0].writes[-1] == b'C\rS8\rO\r'
+    assert ports[0].writes[-1] == b'V\rC\rS8\rO\r'
 
 
 def test_no_more_frames_are_unanswered_than_the_carrier_can_queue(bus, ports):
-    ports[0].inbox += b'\r\r\r'
+    ports[0].inbox += VERSION + b'\r\r\r'
     bus.receive()
     frames = [(can_id, mks_can.read_encoder(can_id))
               for can_id in range(1, slcan_bus.CARRIER_QUEUE + 3)]
@@ -170,7 +195,7 @@ def test_a_carrier_that_stops_answering_lines_is_opened_again(bus, ports, clock)
     assert bus.unanswered == 0 and bus.take_refused() == [(1, mks_can.read_encoder(1))] * 3
     clock[0] += slcan_bus.REOPEN_EVERY_S
     bus.step(0.0)
-    assert bus.connected and ports[1].writes == [b'C\rS8\rO\r']
+    assert bus.connected and ports[1].writes == [b'V\rC\rS8\rO\r']
 
 
 def test_the_carrier_status_frame_decodes():
@@ -183,6 +208,57 @@ def test_the_carrier_status_frame_decodes():
         carrier.parse_status(bytes(7))
 
 
+def test_shutdown_waits_for_the_close_acknowledgement_before_releasing_usb(bus, ports):
+    ports[0].inbox += VERSION + b'\r\r\r'
+    bus.receive()
+    ports[0].inbox += b't7F080100000000000000\r\r'
+    bus.shutdown()
+    assert ports[0].writes[-1] == b'C\r'
+    assert ports[0].closed and not bus.connected
+    assert not ports[0].inbox and bus.unanswered == 0
+    assert bus.errors == 0 and bus.problem == ''
+    writes = list(ports[0].writes)
+    bus.shutdown()
+    assert ports[0].writes == writes
+
+
+def test_shutdown_times_out_and_reports_an_unacknowledged_close(bus, ports, clock, capfd):
+    ports[0].inbox += VERSION + b'\r\r\r'
+    bus.receive()
+    start = clock[0]
+    bus.shutdown()
+    assert ports[0].closed and not bus.connected
+    assert slcan_bus.CLOSE_TIMEOUT_S <= clock[0] - start <= slcan_bus.CLOSE_TIMEOUT_S + 0.002
+    assert bus.errors == 1 and 'acknowledge close' in bus.problem
+    assert 'acknowledge close' in capfd.readouterr().err
+
+
+@pytest.mark.parametrize('unplugged', [False, True])
+def test_shutdown_reports_a_refusal_or_disconnect_and_still_releases_usb(
+        bus, ports, unplugged, capfd):
+    ports[0].inbox += VERSION + b'\r\r\r'
+    bus.receive()
+    ports[0].unplugged = unplugged
+    ports[0].inbox += b'\a'
+    bus.shutdown()
+    assert ports[0].closed and not bus.connected
+    assert bus.errors == 1
+    assert 'close' in capfd.readouterr().err.lower()
+
+
+def test_an_interrupted_close_still_releases_usb(bus, ports, monkeypatch):
+    ports[0].inbox += VERSION + b'\r\r\r'
+    bus.receive()
+
+    def interrupted_read():
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(bus, '_read', interrupted_read)
+    with pytest.raises(KeyboardInterrupt):
+        bus.shutdown()
+    assert ports[0].closed and not bus.connected
+
+
 def slcan_sim():
     try:
         from ament_index_python.packages import get_package_prefix
@@ -193,31 +269,115 @@ def slcan_sim():
     return path if path and os.access(path, os.X_OK) else None
 
 
+def check_the_simulated_carrier_answers(bus):
+    frames = []
+
+    def wait_for(done, seconds=2.0):
+        deadline = time.monotonic() + seconds
+        while not done() and time.monotonic() < deadline:
+            bus.step(0.0)
+            frame = bus.receive()
+            if frame is None:
+                time.sleep(0.002)
+            else:
+                frames.append(frame)
+        return done()
+
+    assert wait_for(lambda: any(can_id == carrier.STATUS_ID for can_id, _ in frames))
+    bus.send(1, mks_can.read_encoder(1))
+    assert wait_for(lambda: (1, bytes.fromhex('3100000000000032')) in frames)
+    assert bus.errors == 0
+    bus.shutdown()
+
+
 @pytest.mark.skipif(slcan_sim() is None, reason='waybionic_can slcan_sim is not built')
 def test_the_simulated_carrier_answers_through_the_real_bridge_code():
     sim = subprocess.Popen([slcan_sim(), '--ids', '1', '--move-ms', '100'],
                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     try:
         port = sim.stdout.readline().strip()
-        bus = SlcanBus(port, 500000)
-        frames = []
-
-        def wait_for(done, seconds=2.0):
-            deadline = time.monotonic() + seconds
-            while not done() and time.monotonic() < deadline:
-                bus.step(0.0)
-                frame = bus.receive()
-                if frame is None:
-                    time.sleep(0.002)
-                else:
-                    frames.append(frame)
-            return done()
-
-        assert wait_for(lambda: any(can_id == carrier.STATUS_ID for can_id, _ in frames))
-        bus.send(1, mks_can.read_encoder(1))
-        assert wait_for(lambda: (1, bytes.fromhex('3100000000000032')) in frames)
-        assert bus.errors == 0
-        bus.shutdown()
+        # A pty ignores the baud rate, and macOS refuses a custom rate such as 1000000 on one.
+        check_the_simulated_carrier_answers(SlcanBus(port, 500000, baudrate=115200))
     finally:
         sim.terminate()
         sim.wait()
+
+
+@pytest.mark.skipif(slcan_sim() is None, reason='waybionic_can slcan_sim is not built')
+def test_the_simulated_carrier_answers_through_a_carrier_relay():
+    # The Windows path: the relay carries the carrier's port over TCP to the drive node.
+    sim = subprocess.Popen([slcan_sim(), '--ids', '1', '--move-ms', '100'],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    stop = threading.Event()
+    try:
+        port = sim.stdout.readline().strip()
+        with socket.create_server(('127.0.0.1', 0)) as probe:
+            tcp_port = probe.getsockname()[1]
+        relay = threading.Thread(target=carrier_relay.serve, daemon=True, args=(
+            lambda: serial.Serial(port, 115200, timeout=carrier_relay.POLL_S),
+            '127.0.0.1', tcp_port, stop, lambda message: None))
+        relay.start()
+        deadline = time.monotonic() + 3.0
+        while True:
+            try:
+                bus = SlcanBus(f'socket://127.0.0.1:{tcp_port}', 500000, baudrate=115200)
+                break
+            except serial.SerialException:
+                assert time.monotonic() < deadline, 'the relay never listened'
+                time.sleep(0.02)
+        check_the_simulated_carrier_answers(bus)
+    finally:
+        stop.set()
+        relay.join(3.0)
+        sim.terminate()
+        sim.wait()
+
+
+@pytest.fixture
+def relay_end():
+    """Listen as a carrier relay does, yielding (server, url) for a socket:// port."""
+    server = socket.create_server(('127.0.0.1', 0))
+    server.settimeout(2.0)
+    yield server, f'socket://127.0.0.1:{server.getsockname()[1]}'
+    server.close()
+
+
+def test_a_burst_of_frames_through_a_relay_is_read_in_one_pass(relay_end):
+    # pyserial's socket port reports at most one byte waiting, so a read of what is waiting
+    # would take a control tick for every byte and leave the replies far behind.
+    server, url = relay_end
+    bus = SlcanBus(url, 500000, baudrate=115200)
+    peer, _ = server.accept()
+    try:
+        peer.sendall(VERSION + b'\r\r\r')
+        for _ in range(200):
+            bus.receive()
+            if not bus.syncing:
+                break
+            time.sleep(0.001)
+        assert not bus.syncing
+        peer.sendall(b't0013F501F7\r' * 100)
+        time.sleep(0.05)
+        frames = []
+        while (frame := bus.receive()) is not None:
+            frames.append(frame)
+        assert frames == [(1, bytes.fromhex('F501F7'))] * 100
+        assert bus.errors == 0
+    finally:
+        peer.close()
+        bus.shutdown()
+
+
+def test_a_relay_that_stops_reading_fails_the_write_instead_of_stalling_the_loop(relay_end):
+    server, url = relay_end
+    link = slcan_bus.open_link(url, 115200)
+    peer, _ = server.accept()
+    started = time.monotonic()
+    try:
+        with pytest.raises(serial.SerialException):
+            while time.monotonic() - started < 10.0:
+                link.write(b'x' * 65536)
+        assert time.monotonic() - started < 2.0
+    finally:
+        peer.close()
+        link.close()

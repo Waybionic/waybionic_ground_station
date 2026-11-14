@@ -29,7 +29,9 @@ class CarrierPort:
             raise OSError(6, 'Device not configured')
         self.writes.append(bytes(data))
         for line in bytes(data).split(b'\r')[:-1] if self.answering else ():
-            if line[:1] != b't':
+            if line == b'V':
+                self.inbox += b'V0100\r'
+            elif line[:1] != b't':
                 # A command, or the empty line after a frame.
                 self.inbox += b'\r'
             elif line in self.refuse:
@@ -47,6 +49,20 @@ def usb_carrier():
     return CarrierPort
 
 
+# The bench arm: the shoulder motor is not wired and the shoulder is fixed upright; no tool.
+BENCH_PROFILE = """\
+fitted_drives: [base_yaw, elbow, wrist_left, wrist_right]
+locked_joints: {joint_2: 0.0, tool_grip: 0.0}
+"""
+
+
+@pytest.fixture
+def bench_profile(tmp_path):
+    path = tmp_path / 'arm_profile.yaml'
+    path.write_text(BENCH_PROFILE, encoding='utf-8')
+    return str(path)
+
+
 def flatten(values, prefix=''):
     flat = {}
     for key, value in values.items():
@@ -57,7 +73,7 @@ def flatten(values, prefix=''):
     return flat
 
 
-@pytest.fixture
+@pytest.fixture(scope='session')
 def parameters():
     def load(file_name, node_name):
         with open(CONFIG / file_name, encoding='utf-8') as stream:

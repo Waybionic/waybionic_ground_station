@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Build and Test with Docker Compose
         run: docker compose --progress plain build test
@@ -32,7 +32,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Build and Test with Docker Compose
         run: docker compose --progress plain build test
@@ -49,7 +49,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # No registry cache: a published layer must come from this build, not from :jazzy.
       - name: Build and Test with Docker Compose
@@ -85,7 +85,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Build and Test with Docker Compose
         run: docker compose --progress plain build --no-cache test

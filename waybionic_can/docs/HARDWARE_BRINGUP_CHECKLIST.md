@@ -28,13 +28,15 @@ With only the UNO R4 WiFi connected over USB:
 
 ```bash
 brew install arduino-cli
-./scripts/macos.sh flash
+./scripts/macos.sh flash carrier_bridge
 ```
 
-Expected: the helper finds one `/dev/cu.usbmodem*`, compiles `carrier_bridge`, uploads it, and
-prints `Flashed carrier_bridge to ...`. If several ports exist, set
-`WAYBIONIC_CARRIER=/dev/cu.usbmodem...`. The firmware uses **1,000,000 baud on USB serial**.
-That is independent of the selected **1,000,000 bit/s CAN bus** rate.
+Expected: the helper compiles `carrier_bridge`, finds the upload port with
+`scripts/carrier_usb.py upload-port` (which hands USB back to the WiFi bridge when the running
+carrier firmware has it), uploads, and prints `Flashed carrier_bridge`. If several UNO R4
+boards are plugged in, set `WAYBIONIC_CARRIER=/dev/cu.usbmodem...`. The firmware uses the
+RA4M1's native USB, so the serial baud rate has no effect (1200 baud only asks it to hand USB
+back for an upload). That is independent of the selected **1,000,000 bit/s CAN bus** rate.
 
 Before changing drive settings, connect one factory drive at 500 kbit/s and run:
 
@@ -165,7 +167,7 @@ carrier's status frame is host-only ID `0x7F0`; it is not transmitted on CAN.
 Date / repository commit:
 Operators / lead present:
 Carrier port / firmware result:
-USB serial baud: 1000000
+USB serial: native USB (baud rate ignored)
 CAN bitrate: 1000000 bit/s
 Termination / powered-off resistance:
 Supply setting / current limit:
