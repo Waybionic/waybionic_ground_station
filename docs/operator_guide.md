@@ -262,6 +262,14 @@ joint from the upright pose and checking the exact meshes
 Don't power the motors until Mechanical confirms each joint's signed travel from
 upright zero on the built arm, including any cable or gear stop.
 
+Then check each limit with the arm powered, before the real arm runs with them. Set the
+lowest speed (D-pad down twice), keep the emergency stop within reach, and move one joint
+at a time toward each limit: stop about 5 degrees short of it, then creep up to it. Stop at
+once if a part touches, a cable pulls tight or a drive reports a following error. Where the
+real arm has less room than the table says, write the angle down and lower that limit
+before the arm is used. Yaw and roll are 360 degrees because nothing models the cabling:
+check that the cables allow a full turn each way.
+
 Every group stops a move where any part of the arm would go below the table or into
 the arm's own base and shoulder.
 
