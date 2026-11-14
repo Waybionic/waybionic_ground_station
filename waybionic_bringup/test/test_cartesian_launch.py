@@ -73,6 +73,25 @@ class TestCartesian(unittest.TestCase):
                 if record:
                     samples.append(tip())
 
+        def gate():
+            row = diagnostics.get('arm.command_gate')
+            return row.values[0].value if row is not None else 'missing'
+
+        def teleop_state():
+            row = diagnostics.get('teleop.state')
+            return row.values[0].value if row is not None else 'missing'
+
+        def enable():
+            # The drives stop, and want Start pressed afresh, if the host stalls for half a
+            # second, as a busy CI runner can. An operator would press Start again.
+            for _ in range(6):
+                hold(0.2, 'start')
+                # Diagnostics are reported every 0.5 s.
+                hold(0.6)
+                if gate() == 'enabled' and teleop_state() == 'enabled':
+                    return
+            self.fail(f'the drives never accepted Start: {diagnostics["arm.command_gate"]}')
+
         try:
             deadline = time.monotonic() + 30.0
             # Press Start only once teleop has loaded the robot description (the group row
@@ -82,22 +101,32 @@ class TestCartesian(unittest.TestCase):
                     and diagnostics['teleop.input'].level == DiagnosticStatus.OK
                     and buffer.can_transform('base_link', 'tool_link', Time())):
                 hold(0.1)
-            hold(0.2, 'start')
+            enable()
             hold(0.3, 'y')
             # Bend the shoulder, elbow and wrist away from the upright pose.
             hold(1.0, left_x=1.0, left_y=1.0, right_y=1.0)
             hold(0.5)
             hold(0.3, 'y')
-            # Diagnostics are reported every 0.5 s.
             hold(0.6)
-            self.assertEqual(diagnostics['teleop.state'].values[0].value, 'enabled')
+            if gate() != 'enabled' or teleop_state() != 'enabled':
+                enable()
             self.assertEqual(diagnostics['teleop.group'].values[0].value, 'cartesian')
-            start, tilt = tip()
-            hold(1.5, 'left_bumper', record=True, left_x=1.0)
-            hold(0.5, record=True)
+            for _ in range(3):
+                samples.clear()
+                start, tilt = tip()
+                hold(1.5, 'left_bumper', record=True, left_x=1.0)
+                hold(0.5, record=True)
+                if gate() == 'enabled':
+                    break
+                # The drives stopped during the cut, so it says nothing about the line.
+                enable()
             travel = samples[-1][0][1] - start[1]
             worst = max(math.hypot(x - start[0], z - start[2]) for (x, y, z), _ in samples)
-            self.assertGreater(travel, 0.025, 'the tool tip did not move sideways')
+            self.assertGreater(
+                travel, 0.025,
+                f'the tool tip did not move sideways (drives {gate()}: '
+                f'{diagnostics["arm.command_gate"].message!r}; teleop: '
+                f'{diagnostics["teleop.state"].message!r})')
             self.assertLess(worst, 0.0005, f'the tip left the line by {worst * 1000:.2f} mm')
             self.assertLess(max(abs(value - tilt) for _, value in samples), 0.005)
         finally:

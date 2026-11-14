@@ -2,7 +2,8 @@
 Drive the arm from an Xbox controller: /joy in, /joint_commands out.
 
 Mapping and limits come from config/xbox_teleop.yaml and the robot_description joint limits;
-a joint the arm profile (``arm_profile``) locks stays at its angle. The logic lives in
+a joint the arm profile (``arm_profile``) locks stays at its angle, and so does one the drive
+node reports switched off on ``arm/joint_control``. The logic lives in
 :mod:`waybionic_teleop.teleop`. The node also reports its state on /diagnostics and draws a
 placeholder end effector and a status label in RViz.
 """
@@ -19,6 +20,7 @@ from sensor_msgs.msg import JointState, Joy, JoyFeedback
 from std_msgs.msg import Bool, String
 from visualization_msgs.msg import Marker, MarkerArray
 
+from waybionic_teleop import joint_control
 from waybionic_teleop.arm_profile import load_profile
 from waybionic_teleop.collision import ArmCollision
 from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS
@@ -70,6 +72,8 @@ class XboxTeleop(Node):
         self.table_height = float(params.get('table_height', 0.0))
         self.clearance = float(params.get('collision_clearance', 0.01))
         self.locked = load_profile(params.get('arm_profile', '')).locked_joints
+        # Joints the drive node says are switched off, even before there is a teleop to tell.
+        self.disabled = set()
         self.teleop = None
         self.problem = 'Waiting for robot_description'
         self.joy = None
@@ -82,6 +86,8 @@ class XboxTeleop(Node):
         self.create_subscription(String, 'robot_description', self.load, latched)
         self.create_subscription(Joy, 'joy', self.on_joy, 10)
         self.create_subscription(JointState, 'joint_states', self.on_joint_states, 10)
+        self.create_subscription(DiagnosticArray, joint_control.TOPIC, self.on_joint_control,
+                                 latched)
         self.command_publisher = self.create_publisher(JointState, 'joint_commands', 10)
         self.enable_publisher = self.create_publisher(Bool, 'teleop_enabled', latched)
         # game_controller_node rumbles a local controller; joy_udp_receiver passes it on.
@@ -135,6 +141,7 @@ class XboxTeleop(Node):
             self.get_logger().error(f'Teleop disabled: {error}')
             return
         self.problem = ''
+        self.apply_disabled()
         self.get_logger().info('Xbox teleop ready (press Start to enable): ' + '; '.join(
             f'{group.name}: {group.describe()}' for group in self.teleop.groups))
 
@@ -152,6 +159,22 @@ class XboxTeleop(Node):
             return
         self.joy, self.joy_time = message, time.monotonic()
         self.joy_count += 1
+
+    def on_joint_control(self, message):
+        self.disabled = joint_control.disabled_joints(message)
+        self.apply_disabled()
+
+    def apply_disabled(self):
+        if self.teleop is None:
+            return
+        was_enabled = self.teleop.enabled
+        changed = self.teleop.set_disabled(
+            self.disabled, self.recent_measurement(time.monotonic()))
+        if changed and was_enabled:
+            # Hold the arm where it is until the operator presses Start again.
+            self.publish_enabled(False)
+            self.publish_command()
+            self.get_logger().warning('Joint enable changed: teleop disabled, arm held')
 
     def on_joint_states(self, message):
         now = time.monotonic()
@@ -318,6 +341,8 @@ class XboxTeleop(Node):
                         'Y switches once the tool is withdrawn')
             note = teleop.note or ('At limit: ' + ', '.join(teleop.blocked) if teleop.blocked
                                    else ('LB moves along one axis; ' if cartesian else '') + hint)
+            if teleop.disabled:
+                note = f'Joints off: {", ".join(sorted(teleop.disabled))}; {note}'
             speed = (f'{1000.0 * teleop.linear_speed:.1f} mm/s' if group.mode != 'joint'
                      else f'{math.degrees(teleop.speed):.0f} deg/s')
             low, high = self.config.tool_limits

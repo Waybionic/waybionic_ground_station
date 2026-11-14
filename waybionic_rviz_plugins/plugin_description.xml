@@ -9,6 +9,26 @@
   </class>
 
   <class
+    name="waybionic_rviz_plugins/SetupPanel"
+    type="waybionic_rviz_plugins::SetupPanel"
+    base_class_type="rviz_common::Panel">
+    <description>
+      Start-up steps for the arm: carrier, drives, controller, zero and ready, with a Zero
+      button that asks the drive node to zero. This panel sends no motion commands.
+    </description>
+  </class>
+
+  <class
+    name="waybionic_rviz_plugins/JointControlPanel"
+    type="waybionic_rviz_plugins::JointControlPanel"
+    base_class_type="rviz_common::Panel">
+    <description>
+      Switch arm joints on or off. The drive node holds a joint that is off; this panel
+      sends no motion commands.
+    </description>
+  </class>
+
+  <class
     name="waybionic_rviz_plugins/MotionTestPanel"
     type="waybionic_rviz_plugins::MotionTestPanel"
     base_class_type="rviz_common::Panel">

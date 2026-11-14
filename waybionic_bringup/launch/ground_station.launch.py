@@ -5,10 +5,11 @@ from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
 from launch.actions import (
-    DeclareLaunchArgument, IncludeLaunchDescription, LogInfo, OpaqueFunction,
+    DeclareLaunchArgument, EmitEvent, IncludeLaunchDescription, LogInfo, OpaqueFunction,
     RegisterEventHandler)
 from launch.conditions import IfCondition
-from launch.event_handlers import OnShutdown
+from launch.event_handlers import OnProcessExit, OnShutdown
+from launch.events import Shutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import (
     AndSubstitution, Command, EqualsSubstitution, IfElseSubstitution, LaunchConfiguration,
@@ -26,6 +27,7 @@ BOOLEAN_CHOICES = ['true', 'false', 'True', 'False', '1', '0']
 BOOLEAN_OPTIONS = {
     'launch_rviz': 'true',
     'rviz_maximized': 'true',
+    'exit_with_rviz': 'false',
     'use_joint_state_publisher_gui': 'true',
     'use_diagnostics': 'true',
     'use_mock_diagnostics': 'true',
@@ -131,7 +133,7 @@ def _launch_rviz(context):
     live_diagnostics = OrSubstitution(
         OrSubstitution(LaunchConfiguration('demo_mode'), LaunchConfiguration('teleop')),
         LaunchConfiguration('camera'))
-    return [Node(
+    rviz = Node(
         package='waybionic_rviz_plugins' if maximized else 'rviz2',
         executable='ground_station_rviz' if maximized else 'rviz2',
         name='rviz2', output='screen',
@@ -144,7 +146,14 @@ def _launch_rviz(context):
                 NotSubstitution(live_diagnostics))},
             {'diagnostics_topic': LaunchConfiguration('diagnostics_topic')}
         ]
-    )]
+    )
+    actions = [rviz]
+    if IfCondition(LaunchConfiguration('exit_with_rviz')).evaluate(context):
+        # Closing the window ends the session, so no node is left holding the carrier.
+        actions.append(RegisterEventHandler(OnProcessExit(
+            target_action=rviz,
+            on_exit=[EmitEvent(event=Shutdown(reason='RViz was closed'))])))
+    return actions
 
 
 def generate_launch_description():
@@ -265,6 +274,10 @@ def generate_launch_description():
         'rviz_maximized', default_value='true', choices=BOOLEAN_CHOICES,
         description='Fill the screen with RViz while keeping its panels and controls visible')
 
+    exit_with_rviz_arg = DeclareLaunchArgument(
+        'exit_with_rviz', default_value='false', choices=BOOLEAN_CHOICES,
+        description='Shut every node down when the RViz window is closed')
+
     rviz_config_arg = DeclareLaunchArgument(
         'rvizconfig', default_value=default_rviz_config_path,
         description='Absolute path to rviz config file')
@@ -330,6 +343,12 @@ def generate_launch_description():
         output='screen', condition=IfCondition(teleop),
         parameters=[os.path.join(teleop_config_dir, 'xbox_teleop.yaml'), diagnostics_topic,
                     arm_profile, sim_time]
+    )
+
+    # Tells the operator what to do next to start the arm (see waybionic_teleop/setup_guide.py).
+    setup_guide_node = Node(
+        package='waybionic_teleop', executable='setup_guide', name='setup_guide',
+        condition=IfCondition(teleop), parameters=[diagnostics_topic, sim_time]
     )
 
     drives_node = Node(
@@ -404,8 +423,9 @@ def generate_launch_description():
         joy_source_arg, autoplay_arg,
         joy_udp_bind_arg, joy_udp_port_arg, follow_camera_arg, use_sim_time_arg, camera_arg,
         camera_bind_arg, camera_log_arg,
-        launch_rviz_arg, rviz_maximized_arg, rviz_config_arg, file_check,
+        launch_rviz_arg, rviz_maximized_arg, exit_with_rviz_arg, rviz_config_arg, file_check,
         rsp_node, jsp_gui_node, joint_demo_node,
-        joy_node, joy_udp_node, autoplay_node, teleop_node, drives_node, camera_follower_node,
+        joy_node, joy_udp_node, autoplay_node, teleop_node, drives_node, setup_guide_node,
+        camera_follower_node,
         temp_diag_pub_node, camera_launch, rviz_node
     ])

@@ -1,5 +1,7 @@
 """An arm profile says which drives one arm has and holds still the joints it lacks."""
 
+from pathlib import Path
+
 import pytest
 
 from waybionic_teleop.arm_profile import (
@@ -23,6 +25,15 @@ def test_the_bench_profile_runs_four_drives_and_holds_the_shoulder(parameters, b
     fitted = fit_drive_parameters(params, profile)
     assert fitted['drives'] == ['base_yaw', 'elbow', 'wrist_left', 'wrist_right']
     assert params['drives'][1] == 'shoulder'
+
+
+def test_the_shipped_bench_profile_fits_the_arm_as_built(parameters):
+    # The Windows launcher passes this file, so it has to stay valid for the arm map.
+    shipped = Path(__file__).resolve().parent.parent / 'config' / 'arm_profile_bench.yaml'
+    profile = load_profile(shipped)
+    assert profile.locked_joints == {'tool_grip': 0.0}
+    fitted = fit_drive_parameters(parameters('arm_drives.yaml', 'sim_arm_drives'), profile)
+    assert fitted['drives'] == ['base_yaw', 'shoulder', 'elbow', 'wrist_left', 'wrist_right']
 
 
 @pytest.mark.parametrize('data, message', [

@@ -50,6 +50,22 @@ CARRIER_QUEUE = 16
 ANSWER_TIMEOUT_S = 0.5
 BELL = 0x07
 CR = 0x0D
+# One read takes whatever has arrived, up to this much. A socket:// port, which is how a carrier
+# relay presents the carrier, only ever reports one byte waiting, so asking for that many would
+# take a read, and a control tick, for every byte.
+READ_CHUNK = 4096
+
+
+def open_link(port, baudrate):
+    """Open the carrier's serial port, or a relay's socket:// URL, so no read or write blocks."""
+    link = serial.serial_for_url(port, baudrate=baudrate, timeout=0,
+                                 write_timeout=WRITE_TIMEOUT_S)
+    # A socket:// port ignores write_timeout and would hold the control loop for five seconds
+    # while the relay is not reading.
+    relay = getattr(link, '_socket', None)
+    if relay is not None:
+        relay.settimeout(WRITE_TIMEOUT_S)
+    return link
 
 
 def parse_line(line):
@@ -74,9 +90,7 @@ class SlcanBus:
         if bitrate not in BITRATE_CODES:
             raise ValueError(f'the carrier runs CAN at {sorted(BITRATE_CODES)} bit/s')
         self.port, self.bitrate = port, bitrate
-        self.open_port = open_port or (
-            lambda: serial.serial_for_url(port, baudrate=baudrate, timeout=0,
-                                          write_timeout=WRITE_TIMEOUT_S))
+        self.open_port = open_port or (lambda: open_link(port, baudrate))
         self.frames = self.bits = self.errors = self.refused = self.reopens = 0
         self.problem = ''
         self.outgoing, self.incoming, self.replies = bytearray(), bytearray(), deque()
@@ -208,7 +222,7 @@ class SlcanBus:
         if self.serial is None:
             return
         try:
-            chunk = self.serial.read(self.serial.in_waiting or 1)
+            chunk = self.serial.read(READ_CHUNK)
         except (serial.SerialException, OSError) as error:
             self._lost(error)
             return

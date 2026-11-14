@@ -15,6 +15,7 @@ find_package(Qt5 REQUIRED COMPONENTS Widgets)
 find_package(rclcpp REQUIRED)
 find_package(rviz_common REQUIRED)
 find_package(rviz_default_plugins REQUIRED)
+find_package(std_srvs REQUIRED)
 
 set(THIS_PACKAGE_INCLUDE_DEPENDS
   diagnostic_msgs
@@ -22,17 +23,26 @@ set(THIS_PACKAGE_INCLUDE_DEPENDS
   rclcpp
   rviz_common
   rviz_default_plugins
+  std_srvs
 )
 
 add_library(${PROJECT_NAME} SHARED
   include/waybionic_rviz_plugins/diagnostics_source.hpp
   include/waybionic_rviz_plugins/diagnostics_panel.hpp
+  include/waybionic_rviz_plugins/joint_control_model.hpp
+  include/waybionic_rviz_plugins/joint_control_panel.hpp
   include/waybionic_rviz_plugins/motion_test_panel.hpp
   include/waybionic_rviz_plugins/ros_diagnostics_source.hpp
+  include/waybionic_rviz_plugins/setup_model.hpp
+  include/waybionic_rviz_plugins/setup_panel.hpp
   src/diagnostics_panel.cpp
+  src/joint_control_model.cpp
+  src/joint_control_panel.cpp
   src/mock_diagnostics_source.cpp
   src/ros_diagnostics_source.cpp
   src/motion_test_panel.cpp
+  src/setup_model.cpp
+  src/setup_panel.cpp
 )
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
@@ -133,6 +143,31 @@ if(BUILD_TESTING)
       diagnostic_msgs
       rclcpp
     )
+  endif()
+
+  # The joint control model parses messages without Qt or RViz, so it is built on its own.
+  ament_add_gtest(test_joint_control_model
+    test/test_joint_control_model.cpp
+    src/joint_control_model.cpp
+    TIMEOUT 60
+  )
+  if(TARGET test_joint_control_model)
+    target_include_directories(test_joint_control_model PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    ament_target_dependencies(test_joint_control_model diagnostic_msgs)
+  endif()
+
+  ament_add_gtest(test_setup_model
+    test/test_setup_model.cpp
+    src/setup_model.cpp
+    TIMEOUT 60
+  )
+  if(TARGET test_setup_model)
+    target_include_directories(test_setup_model PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    ament_target_dependencies(test_setup_model diagnostic_msgs)
   endif()
 endif()
 

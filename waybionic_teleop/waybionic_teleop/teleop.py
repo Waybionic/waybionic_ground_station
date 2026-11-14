@@ -16,6 +16,8 @@ INSERTED = 1e-9
 INCISION_LOST = ('The tool is off the incision point; press Y, withdraw it in another group, '
                  'then choose the incision group again')
 INCISION_HELD = 'The tool is inserted; withdraw it to the incision point before pressing Y'
+INCISION_JOINT_OFF = ('A joint is switched off with the tool through the incision point; switch '
+                      'it back on in Joint control to withdraw the tool')
 
 
 def clamp(value, low, high):
@@ -146,11 +148,11 @@ class ArmTeleop:
         self.kinematics = kinematics
         self.collision = collision
         # Without kinematics for this arm, the Cartesian and incision groups are left out.
-        self.groups = [group for group in config.groups
-                       if group.mode not in MOVES or kinematics is not None]
-        if not self.groups:
+        self.configured_groups = [group for group in config.groups
+                                  if group.mode not in MOVES or kinematics is not None]
+        if not self.configured_groups:
             raise ValueError('no joint-space group or compatible Cartesian kinematics')
-        for group in self.groups:
+        for group in self.configured_groups:
             if group.mode in MOVES and (
                     tuple(group.joints) != kinematics.joints
                     or any(joint not in limits for joint in kinematics.joints)):
@@ -162,6 +164,10 @@ class ArmTeleop:
                        if joint in self.limits}
         for joint, angle in self.locked.items():
             self.limits[joint] = (angle, angle)
+        # Joints the operator switched off: each holds the angle it had when teleop was enabled.
+        self.disabled = set()
+        self.disabled_angles = {}
+        self.groups = self.usable_groups()
         self.enabled = False
         self.group = 0
         self.level = config.speed_level
@@ -187,6 +193,60 @@ class ArmTeleop:
     @property
     def active_group(self):
         return self.groups[self.group]
+
+    def movable(self, joint):
+        """Return whether the sticks can move this joint: it is neither locked nor disabled."""
+        return joint not in self.locked and joint not in self.disabled
+
+    def group_usable(self, group):
+        """Return whether a group has something to move: a Cartesian solve needs every joint."""
+        if group.mode in MOVES:
+            return all(self.movable(joint) for joint in group.joints)
+        return any(self.movable(joint) for joint in group.joints)
+
+    def usable_groups(self, keep=None):
+        """Return the groups with something to move, and keep, which is not left for one."""
+        return [group for group in self.configured_groups
+                if group is keep or self.group_usable(group)] or [self.configured_groups[0]]
+
+    def inserted(self):
+        """Return whether the tool is through the incision point, which groups may not leave."""
+        if self.active_group.mode != 'incision' or self.incision is None or not self.targets:
+            return False
+        miss, depth = self.incision_offset(self.targets)
+        return miss <= INCISION_TOLERANCE and depth > INSERTED
+
+    def set_disabled(self, joints, measured):
+        """
+        Switch off exactly these joints; return True if that changed anything.
+
+        A disabled joint never moves, so the arm can run without a joint whose drive is faulty
+        or missing. While enabled, teleop stops where the arm is: the next Start enables the
+        remaining joints from the measured pose.
+        """
+        joints = {joint for joint in joints if joint in self.limits and joint not in self.locked}
+        if joints == self.disabled:
+            return False
+        if self.enabled:
+            self.disable(measured, 'Joint enable changed; press Start (Xbox Menu button) to '
+                         'enable')
+        previous = self.active_group
+        # The other groups, and going home, could drag the tool sideways in the incision, which
+        # Y and A are refused for, so a tool that is through it stays in its group, unable to move
+        # until the joint is switched back on.
+        keep = previous if self.inserted() else None
+        self.disabled = joints
+        self.disabled_angles = {joint: angle for joint, angle in self.disabled_angles.items()
+                                if joint in joints}
+        self.groups = self.usable_groups(keep)
+        self.group = next((index for index, group in enumerate(self.groups)
+                           if group.name == previous.name), 0)
+        if self.active_group is not previous and previous.mode == 'incision' and (
+                self.incision is not None):
+            self.withdrawn = self.incision_offset(self.targets)[1] <= INSERTED
+        if keep is not None and not self.group_usable(keep):
+            self.note, self.warning = INCISION_JOINT_OFF, True
+        return True
 
     @property
     def speed(self):
@@ -228,12 +288,11 @@ class ArmTeleop:
     def change_group(self):
         """Select the next group, unless the tool is inserted through the incision point."""
         if self.active_group.mode == 'incision' and self.incision is not None:
-            miss, depth = self.incision_offset(self.targets)
-            if miss <= INCISION_TOLERANCE and depth > INSERTED:
+            if self.inserted():
                 # The other groups, and going home, could drag the tool sideways in the incision.
                 self.note, self.warning = INCISION_HELD, True
                 return
-            self.withdrawn = depth <= INSERTED
+            self.withdrawn = self.incision_offset(self.targets)[1] <= INSERTED
         self.group = (self.group + 1) % len(self.groups)
         self.stop_cartesian()
         self.velocities = dict.fromkeys(self.limits, 0.0)
@@ -261,6 +320,13 @@ class ArmTeleop:
         if missing:
             self.note, self.warning = 'Waiting for joint states: ' + ', '.join(missing), True
             return
+        if not any(self.movable(joint) for joint in self.limits):
+            self.note = 'No joint is enabled; switch one on in the Joint control panel'
+            self.warning = True
+            return
+        if not self.group_usable(self.active_group):
+            self.note, self.warning = INCISION_JOINT_OFF, True
+            return
         if self.motion_input_held(axes):
             # A stuck or held input must never start moving the arm the moment it is enabled.
             self.note = 'Center the sticks and release the triggers and buttons, then press Start'
@@ -268,6 +334,7 @@ class ArmTeleop:
             return
         # Start from the measured pose so enabling never makes the arm jump.
         self.targets = {joint: measured[joint] for joint in self.limits}
+        self.disabled_angles = {joint: measured[joint] for joint in self.disabled}
         self.command_targets = dict(self.targets)
         self.velocities = dict.fromkeys(self.limits, 0.0)
         self.pin_locked()
@@ -289,7 +356,7 @@ class ArmTeleop:
 
     def pin_locked(self):
         # A solve may leave a locked joint a rounding error off its angle; send it unchanged.
-        for joint, angle in self.locked.items():
+        for joint, angle in {**self.disabled_angles, **self.locked}.items():
             self.targets[joint] = self.command_targets[joint] = angle
             self.velocities[joint] = 0.0
 
@@ -307,7 +374,7 @@ class ArmTeleop:
         if homing and not incision:
             self.stop_cartesian()
             for joint, (lower, upper) in self.limits.items():
-                if joint != config.tool_joint:
+                if joint != config.tool_joint and self.movable(joint):
                     error = clamp(0.0, lower, upper) - self.targets[joint]
                     desired[joint] = clamp(config.home_gain * error, -self.speed, self.speed)
         elif self.active_group.mode == 'cartesian':
@@ -319,9 +386,14 @@ class ArmTeleop:
         else:
             group = self.active_group
             for joint, axis, scale in zip(group.joints, group.axes, group.scales):
-                desired[joint] += scale * self.stick(axes, axis) * self.speed
-        desired[config.tool_joint] = config.tool_speed * (
-            self.trigger(axes, config.tool_close_axis) - self.trigger(axes, config.tool_open_axis))
+                # A joint that cannot move is not a limit to hit, so its stick does nothing.
+                if self.movable(joint):
+                    desired[joint] += scale * self.stick(axes, axis) * self.speed
+        desired[config.tool_joint] = 0.0
+        if self.movable(config.tool_joint):
+            desired[config.tool_joint] = config.tool_speed * (
+                self.trigger(axes, config.tool_close_axis)
+                - self.trigger(axes, config.tool_open_axis))
         step = config.max_accel * dt
         for joint, goal in desired.items():
             velocity = self.velocities[joint]
