@@ -18,7 +18,6 @@ import math
 import xml.etree.ElementTree as ET
 
 import rclpy
-from rclpy._rclpy_pybind11 import RCLError
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
@@ -27,6 +26,7 @@ from std_msgs.msg import String
 
 from waybionic_teleop.collision import ArmCollision
 from waybionic_teleop.kinematics import joint_limits
+from waybionic_teleop.ros_shutdown import is_shutdown_error
 
 MOVING = ('revolute', 'continuous', 'prismatic')
 # Robot names of the models drawn without collision shapes: the old arm and the placeholder. A
@@ -132,14 +132,8 @@ def main():
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
-    except RCLError as error:
-        # SIGINT can shut down the context before spin recreates its wait set.
-        if rclpy.ok() or 'the given context is not valid' not in str(error):
-            raise
     except RuntimeError as error:
-        # Jazzy may surface this binding error when SIGINT invalidates a subscription.
-        if (rclpy.ok() or not str(error).startswith(
-                "Unable to convert call argument '0' to Python object")):
+        if not is_shutdown_error(error):
             raise
     finally:
         node.destroy_node()
