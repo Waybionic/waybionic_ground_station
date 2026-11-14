@@ -324,8 +324,8 @@ def outside(tip, box):
 
 @pytest.mark.parametrize('pose, box, axes', [
     (LEANT, FRONT_LOW, {'left_y': 1.0}),  # Leaning further: further out on both faces
-    (LEANT_RIGHT, FRONT_RIGHT, {'left_x': 1.0}),  # Yaw left: back in on y, further out on x
-    (LEANT_RIGHT, FRONT_RIGHT, {'left_x': -1.0}),  # Yaw right: back in on x, further out on y
+    (LEANT_RIGHT, FRONT_RIGHT, {'left_x': -1.0}),  # Yaw left: back in on y, further out on x
+    (LEANT_RIGHT, FRONT_RIGHT, {'left_x': 1.0}),  # Yaw right: back in on x, further out on y
 ])
 def test_outside_two_faces_a_joint_move_out_through_either_is_refused(
         params, arm, pose, box, axes):
@@ -362,7 +362,7 @@ def test_a_joint_move_back_in_that_would_leave_a_third_face_stops_on_it(params, 
     start = outside(arm.forward(LEANT)[0], box)
     # Leaning back recovers x and z, but yawing left at the same time pushes y out. The whole
     # step shrinks, so the arm stops on the y wall and the recovery waits with it.
-    run(teleop, 1.0, left_x=1.0, left_y=-1.0)
+    run(teleop, 1.0, left_x=-1.0, left_y=-1.0)
     tip, _ = arm.forward(teleop.targets)
     now = outside(tip, box)
     assert tip[1] * 1000.0 == pytest.approx(35.0, abs=1e-3)
