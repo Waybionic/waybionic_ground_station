@@ -9,7 +9,25 @@ This is a student research prototype, not a medical device. Everything runs in
 simulation unless you choose the real drives, and powered tests need a lead
 present.
 
-## Quick start
+## Run the real arm
+
+Download the latest bundle from the
+[Releases](https://github.com/Waybionic/waybionic_ground_station/releases) page, unzip it
+and double-click the launcher. Plug in the carrier board and the controller first.
+
+| Platform | Download | Then |
+| --- | --- | --- |
+| Windows 11 | `waybionic-ground-station-windows-<version>.zip` | Start Docker Desktop, then double-click `Start WayBionic Arm.cmd`. Docker Desktop is the only prerequisite; Python is included. |
+| macOS (Apple Silicon) | `waybionic-ground-station-macos-<version>.zip` | Double-click `Install WayBionic.command`, then open **WayBionic Ground Station** from Applications. The first start sets up the environment (30 to 60 minutes, once). |
+
+RViz opens with an Arm setup panel that says what to do next: put the arm in its zero
+pose, zero it, then press Start on the controller. Check a download against `SHA256SUMS`
+or with `gh attestation verify <file> --repo Waybionic/waybionic_ground_station`.
+Powered tests need a lead present. [docs/handover.md](docs/handover.md) says what has
+been shown to work and what to check before relying on it, and
+[docs/RELEASING.md](docs/RELEASING.md) says how to publish a release.
+
+## Build and test (developers)
 
 [Install Docker](BuildInstructions.md#1-install-docker), then build the workspace
 and run its tests:
@@ -36,6 +54,8 @@ Then open the arm in RViz:
 | --- | --- |
 | [BuildInstructions.md](BuildInstructions.md) | Installing, building, testing and opening RViz on Windows, macOS and Linux |
 | [Operator guide](docs/operator_guide.md) | Controllers, the self-running demo, the doctor-view camera and the real arm |
+| [Handover](docs/handover.md) | What has been shown to work on the arm, what to check next, and the hardware facts |
+| [Releasing](docs/RELEASING.md) | Cutting a release: the bundles, the image, the checks and the one-time setup |
 | [Launch options](waybionic_bringup/README.md) | Every argument of `ground_station.launch.py` |
 | [Diagnostics](waybionic_rviz_plugins/README.md) | The engineering monitor panel |
 | [CAN and the carrier board](waybionic_can/README.md) | The MKS protocol, the carrier firmware and CAN simulation |
@@ -55,7 +75,8 @@ Then open the arm in RViz:
 | `waybionic_control`, `waybionic_diagnostics` | The earlier CAN-FD host and the diagnostics command-line tool |
 | `waybionic_hardware`, `waybionic_motion_test` | The old four-servo arm's Arduino bridge and motion tests |
 | `firmware/tool_board` | Firmware for the biomedical tool's motor board |
-| `scripts` | `macos.sh`, `linux-gui.sh`, `windows-demo.cmd` and the CAD tools |
+| `scripts` | `macos.sh`, `linux-gui.sh`, the Windows launchers and the CAD tools |
+| `packaging` | The Mac app, and what builds the Windows and macOS release bundles |
 | `docker`, `compose.yaml`, `.devcontainer` | The container image, its services and the VS Code Dev Container |
 
 ## Contributing
