@@ -2,6 +2,9 @@
 # controller bridge and the ground station. Docker Desktop cannot open COM ports, so the
 # carrier bridge relays the carrier's port to 127.0.0.1:47320 and the drive node connects to it.
 # Run windows-arm.cmd, or: powershell -ExecutionPolicy Bypass -File scripts\windows-arm.ps1
+# The bridge finds the carrier's COM port itself. With several Arduinos or USB serial devices
+# plugged in, name it: windows-arm.cmd COM5 (or set WAYBIONIC_CARRIER=COM5).
+param([string]$Port = $env:WAYBIONIC_CARRIER)
 
 $root = Split-Path -Parent $PSScriptRoot
 $teleop = Join-Path $root 'waybionic_teleop'
@@ -64,11 +67,19 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
+# The bridge also writes what it says here, so that this script can show it if the bridge fails.
+$bridgeLog = Join-Path $env:TEMP 'waybionic-carrier-bridge.log'
+Remove-Item $bridgeLog -ErrorAction SilentlyContinue
+$bridgeArguments = @('-m', 'waybionic_teleop.carrier_relay', '--log-file', $bridgeLog)
+if ($Port) {
+    $bridgeArguments += @('--port', $Port)
+}
+
 $carrier = $null
 $controller = $null
 try {
     $carrier = Start-Process -FilePath $python.Source -PassThru -WorkingDirectory $teleop `
-        -ArgumentList ($pythonArguments + @('-m', 'waybionic_teleop.carrier_relay'))
+        -ArgumentList ($pythonArguments + $bridgeArguments)
 
     Write-Host ('Waiting for the carrier (up to a minute): plug it in if you have not; the ' +
         'bridge window says what it sees...')
@@ -79,8 +90,14 @@ try {
             -ErrorAction SilentlyContinue
     } until ($listening -or $carrier.HasExited -or (Get-Date) -gt $deadline)
     if (-not $listening) {
-        Write-Error ('The carrier bridge is not ready. Plug in only the carrier, or run ' +
-            'python -m waybionic_teleop.carrier_relay from waybionic_teleop to see why.')
+        Write-Host 'The carrier bridge said:' -ForegroundColor Yellow
+        if (Test-Path $bridgeLog) {
+            Get-Content $bridgeLog -Tail 6 | ForEach-Object { Write-Host "  $_" }
+        } else {
+            Write-Host '  (nothing)'
+        }
+        Write-Error ('The carrier bridge is not ready. Plug in only the carrier, or name its ' +
+            'port: scripts\windows-arm.cmd COM5')
         exit 1
     }
 

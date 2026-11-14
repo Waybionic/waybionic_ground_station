@@ -114,28 +114,28 @@ def test_port_in_use_exits_with_a_message():
         taken.close()
 
 
+ARDUINO, CLONE = carrier_relay.ARDUINO_VID, 0x1A86
+
+
 class ComPorts:
-    """The COM ports Windows lists, which a test changes as the carrier is plugged in."""
+    """The COM ports Windows lists, as (name, USB vendor ID) pairs a test plugs in and out."""
 
     def __init__(self, *devices):
         self.devices, self.opened = list(devices), []
 
-    def arduino(self, device):
-        return SimpleNamespace(device=device, vid=carrier_relay.ARDUINO_VID)
-
     def listed(self):
-        return [self.arduino(device) if device.startswith('COM') else
-                SimpleNamespace(device=device, vid=0x1A86) for device in self.devices]
+        return [SimpleNamespace(device=name, vid=vid, pid=0x0069 if vid == ARDUINO else 0x7523,
+                                description=f'device on {name}') for name, vid in self.devices]
 
     def open_serial(self, name, baudrate, timeout):
         self.opened.append((name, baudrate))
         return name
 
 
-def opener(ports, port=None):
+def opener(ports, port=None, messages=None):
     return carrier_relay.carrier_opener(
         port, 1000000, open_serial=ports.open_serial, list_com_ports=ports.listed,
-        log=lambda message: None)
+        log=(messages if messages is not None else []).append)
 
 
 def test_a_carrier_plugged_in_after_the_relay_started_is_found():
@@ -143,29 +143,51 @@ def test_a_carrier_plugged_in_after_the_relay_started_is_found():
     open_carrier = opener(ports)
     with pytest.raises(serial.SerialException, match='no Arduino COM port found.*plug in'):
         open_carrier()
-    ports.devices.append('COM5')
+    ports.devices.append(('COM5', ARDUINO))
     assert open_carrier() == 'COM5'
     assert ports.opened == [('COM5', 1000000)]
 
 
 def test_a_replugged_carrier_is_found_under_its_new_com_number():
-    ports = ComPorts('COM5')
+    ports = ComPorts(('COM5', ARDUINO))
     open_carrier = opener(ports)
     assert open_carrier() == 'COM5'
-    ports.devices[:] = ['COM7']
+    ports.devices[:] = [('COM7', ARDUINO)]
     assert open_carrier() == 'COM7'
 
 
-def test_other_serial_devices_are_not_mistaken_for_the_carrier():
-    ports = ComPorts('/dev/ttyUSB0')
-    with pytest.raises(serial.SerialException, match='no Arduino COM port found'):
+def test_an_arduino_is_preferred_to_other_usb_serial_devices():
+    ports = ComPorts(('COM3', CLONE), ('COM5', ARDUINO))
+    assert opener(ports)() == 'COM5'
+
+
+def test_the_relay_does_not_guess_between_several_arduinos():
+    ports = ComPorts(('COM3', ARDUINO), ('COM5', ARDUINO))
+    with pytest.raises(serial.SerialException, match=r'COM3, COM5.*--port'):
         opener(ports)()
     assert ports.opened == []
 
 
-def test_the_relay_does_not_guess_between_several_arduinos():
-    ports = ComPorts('COM3', 'COM5')
-    with pytest.raises(serial.SerialException, match=r'COM3, COM5.*--port'):
+def test_a_lone_usb_serial_device_of_another_make_is_used_and_said_so():
+    # A clone board has its own USB-serial chip, so it does not show Arduino's vendor ID.
+    ports, messages = ComPorts(('COM7', CLONE)), []
+    assert opener(ports, messages=messages)() == 'COM7'
+    assert any('COM7' in message and 'only USB serial port' in message and '--port' in message
+               for message in messages)
+
+
+def test_several_usb_serial_devices_without_an_arduino_are_not_guessed_between():
+    ports = ComPorts(('COM3', CLONE), ('COM7', CLONE))
+    with pytest.raises(serial.SerialException,
+                       match=r'several USB serial ports.*COM3.*COM7.*--port'):
+        opener(ports)()
+    assert ports.opened == []
+
+
+def test_ports_that_are_not_usb_are_never_taken_for_the_carrier():
+    # COM1 and Bluetooth ports have no USB vendor ID.
+    ports = ComPorts(('COM1', None), ('COM4', None))
+    with pytest.raises(serial.SerialException, match=r'no Arduino COM port found.*COM1.*COM4'):
         opener(ports)()
     assert ports.opened == []
 
@@ -173,6 +195,23 @@ def test_the_relay_does_not_guess_between_several_arduinos():
 def test_a_port_that_is_given_is_opened_without_looking_for_it():
     ports = ComPorts()
     assert opener(ports, port='COM9')() == 'COM9'
+
+
+def test_what_the_relay_says_is_also_written_to_a_file(tmp_path, capsys):
+    path = tmp_path / 'bridge.log'
+    log = carrier_relay.make_log(str(path))
+    log('Carrier unavailable, retrying every second: no Arduino COM port found')
+    log('Carrier on COM5')
+    assert path.read_text(encoding='utf-8').splitlines() == [
+        'Carrier unavailable, retrying every second: no Arduino COM port found',
+        'Carrier on COM5']
+    assert 'Carrier on COM5' in capsys.readouterr().out
+
+
+def test_a_log_file_that_cannot_be_written_does_not_stop_the_relay(tmp_path, capsys):
+    log = carrier_relay.make_log(str(tmp_path / 'missing' / 'bridge.log'))
+    log('Carrier on COM5')
+    assert 'Carrier on COM5' in capsys.readouterr().out
 
 
 def test_the_relay_starts_listening_once_the_carrier_is_plugged_in():
@@ -193,7 +232,7 @@ def test_the_relay_starts_listening_once_the_carrier_is_plugged_in():
         with pytest.raises(OSError):
             socket.create_connection(('127.0.0.1', tcp_port), timeout=0.5)
         assert any('plug in the carrier' in message for message in messages)
-        ports.devices.append('COM5')
+        ports.devices.append(('COM5', ARDUINO))
         deadline = time.monotonic() + 4.0
         while True:
             try:
@@ -203,8 +242,12 @@ def test_the_relay_starts_listening_once_the_carrier_is_plugged_in():
                 assert time.monotonic() < deadline, 'the relay never listened'
                 time.sleep(0.05)
         client.settimeout(2.0)
-        client.sendall(b't00121234\r')
-        assert client.recv(64) == b't00121234\r'
+        frame = b't00121234\r'
+        client.sendall(frame)
+        echoed = b''
+        while len(echoed) < len(frame):
+            echoed += client.recv(64)
+        assert echoed == frame
         client.close()
         assert 'Carrier on COM5' in messages
     finally:
