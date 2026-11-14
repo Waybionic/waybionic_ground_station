@@ -451,14 +451,20 @@ setup panel in RViz then walks through what is left: put the arm in its zero pos
 Windows, so do this every time. Closing RViz, or Ctrl+C in the script's window, stops the
 ground station first, so each drive gets its stop, then the bridges.
 
+The bridge finds the carrier itself: the only Arduino, or failing that the only USB serial
+port, since a clone board's USB-serial chip does not show Arduino's vendor ID. If it can't,
+the script waits up to a minute, then prints what the bridge said (for example, which COM ports
+Windows lists) instead of just failing. With several Arduinos or USB serial devices plugged in,
+name the carrier's port: `scripts\windows-arm.cmd COM5`.
+
 **Step by step,** from the repository root. The bridge serves one connection at a time, so
 let each command finish before the next. If `docker` is not recognized, see
 [its troubleshooting](../BuildInstructions.md#docker-is-not-recognized-on-windows).
 
 1. Start the bridge in its own PowerShell window and leave it running. It looks for the
    Arduino's COM port each time it opens the carrier, so plugging the carrier in after it
-   starts, or replugging it under another COM number, is fine; with several Arduinos plugged
-   in, pass `--port COM5`. Wait for `Carrier open; waiting for the ground station`: the
+   starts, or replugging it under another COM number, is fine; with several Arduinos or USB
+   serial devices plugged in, pass `--port COM5`. Wait for `Carrier open; waiting for the ground station`: the
    drive node stops at start-up if nothing is listening.
 
    ```powershell
