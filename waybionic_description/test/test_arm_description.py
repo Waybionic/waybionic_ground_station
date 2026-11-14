@@ -1,6 +1,7 @@
 """Check the generated WayBionic arm description and its COLLADA meshes."""
 
 import ast
+import math
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
@@ -36,6 +37,37 @@ def test_joint_chain_matches_mechanical_fk(robot):
         assert float(limit.get('lower')) < 0.0 < float(limit.get('upper'))
 
 
+def test_joint_limits_are_where_the_cad_parts_touch(robot):
+    # From the upright pose (scripts/cad/exact_limits.py), the straight arm meets the ground under
+    # the base at 109.65 degrees of shoulder, the forearm the shoulder's motor mount at 148.93 of
+    # elbow, and the tool mount the forearm's cap at 94.67 of wrist pitch, at the closest roll.
+    # Nothing meets over a full turn of base yaw or wrist roll.
+    joints = {joint.get('name'): joint for joint in robot.findall('joint')}
+    for name, degrees in (('joint_1', 360.0), ('joint_2', 109.65), ('joint_3', 148.93),
+                          ('joint_4', 94.67), ('joint_5', 360.0)):
+        limit = joints[name].find('limit')
+        assert math.degrees(float(limit.get('upper'))) == pytest.approx(degrees, abs=1e-4)
+        assert math.degrees(float(limit.get('lower'))) == pytest.approx(-degrees, abs=1e-4)
+
+
+def test_moving_links_carry_the_hull_of_their_parts(robot):
+    hulls = {hull.get('link'): [float(value) for value in hull.get('points').split()]
+             for hull in robot.findall('waybionic_hull')}
+    assert sorted(hulls) == sorted([
+        'upper_arm_link', 'forearm_link', 'wrist_pitch_link', 'wrist_left_gear_link',
+        'wrist_right_gear_link', 'wrist_roll_link'])
+    for link, values in hulls.items():
+        assert len(values) % 3 == 0 and len(values) >= 12
+        shapes = [collision_shape(collision)
+                  for collision in robot.find(f"link[@name='{link}']").findall('collision')]
+        # In the link's own frame: the shapes hold the parts, so they hold the hull too, to
+        # within the 1 mm the visual meshes' tessellation leaves.
+        for point in zip(values[0::3], values[1::3], values[2::3]):
+            assert any(inside(point, center, [h + 0.001 for h in half],
+                              None if radius is None else radius + 0.001, axis)
+                       for center, half, radius, axis in shapes), (link, point)
+
+
 def test_differential_side_gears_follow_wrist_roll(robot):
     gears = {joint.get('name'): joint for joint in robot.findall('joint')
              if joint.find('mimic') is not None}
@@ -69,23 +101,103 @@ def test_link_meshes_are_valid_z_up_collada(robot):
             assert 0 <= min(indices) and max(indices) < vertices
 
 
-def test_every_mesh_is_inside_its_collision_box(robot):
+def test_every_mesh_vertex_is_inside_a_collision_shape_of_its_link(robot):
     for link in robot.findall('link'):
         if link.get('name') == 'tool_link':
             continue
-        boxes = link.findall('collision')
-        assert len(boxes) == 1, link.get('name')
-        center = [float(value) for value in boxes[0].find('origin').get('xyz').split()]
-        size = [float(value) for value in boxes[0].find('geometry/box').get('size').split()]
-        assert boxes[0].find('origin').get('rpy') == '0 0 0'
+        shapes = [collision_shape(collision) for collision in link.findall('collision')]
+        assert shapes, link.get('name')
         uri = link.find('visual/geometry/mesh').get('filename')
         mesh = ET.parse(PACKAGE / uri[len('package://waybionic_description/'):]).getroot()
         values = [float(value) for value in mesh.find(f'.//{COLLADA}float_array').text.split()]
-        for axis in range(3):
-            points = values[axis::3]
-            # The box is written to 0.1 mm.
-            assert center[axis] - size[axis] / 2 <= min(points) + 1e-4
-            assert max(points) <= center[axis] + size[axis] / 2 + 1e-4
+        for point in zip(values[0::3], values[1::3], values[2::3]):
+            assert any(inside(point, *shape) for shape in shapes), (link.get('name'), point)
+
+
+def collision_shape(collision):
+    """Return (centre, half sizes, radius, axis); a box has radius and axis None."""
+    assert collision.get('name')
+    center = [float(value) for value in collision.find('origin').get('xyz').split()]
+    roll, pitch, yaw = (float(value) for value in collision.find('origin').get('rpy').split())
+    box = collision.find('geometry/box')
+    if box is not None:
+        assert (roll, pitch, yaw) == (0.0, 0.0, 0.0), collision.get('name')
+        return center, [float(value) / 2 for value in box.get('size').split()], None, None
+    cylinder = collision.find('geometry/cylinder')
+    # Where the origin's rotation turns the cylinder's z axis; it must be one of the link's axes.
+    direction = (math.cos(roll) * math.sin(pitch), -math.sin(roll),
+                 math.cos(roll) * math.cos(pitch))
+    axis = max(range(3), key=lambda a: abs(direction[a]))
+    assert yaw == 0.0, collision.get('name')
+    assert abs(direction[axis]) == pytest.approx(1.0, abs=1e-6), collision.get('name')
+    radius = float(cylinder.get('radius'))
+    half = [radius] * 3
+    half[axis] = float(cylinder.get('length')) / 2
+    return center, half, radius, axis
+
+
+def inside(point, center, half, radius, axis):
+    """Check whether point is within the shape, which is written to 0.01 mm."""
+    if not all(abs(p - c) <= h + 2e-5 for p, c, h in zip(point, center, half)):
+        return False
+    if radius is None:
+        return True
+    across = [a for a in range(3) if a != axis]
+    return math.dist([point[a] for a in across], [center[a] for a in across]) <= radius + 2e-5
+
+
+def test_round_parts_are_cylinders_about_a_joint_axis(robot):
+    axes = {}
+    for joint in robot.findall('joint'):
+        if joint.find('axis') is None:
+            continue
+        assert joint.find('origin').get('rpy') == '0 0 0'
+        direction = [float(value) for value in joint.find('axis').get('xyz').split()]
+        axis = max(range(3), key=lambda a: abs(direction[a]))
+        origin = [float(value) for value in joint.find('origin').get('xyz').split()]
+        axes.setdefault(joint.find('child').get('link'), []).append(([0.0] * 3, axis))
+        axes.setdefault(joint.find('parent').get('link'), []).append((origin, axis))
+    cylinders = {}
+    for link in robot.findall('link'):
+        for collision in link.findall('collision'):
+            center, _, radius, axis = collision_shape(collision)
+            if radius is None:
+                continue
+            assert any(axis == along and all(abs(center[a] - point[a]) < 1e-5
+                                             for a in range(3) if a != along)
+                       for point, along in axes[link.get('name')]), collision.get('name')
+            cylinders[collision.get('name').split('/')[-1]] = (radius, 'xyz'[axis])
+    # Yaw turns the arm about the base's z axis and wrist roll the tool mount about its own; the
+    # wrist's differential housing is round below the pitch axis, its y axis.
+    assert cylinders['BaseHousingLid-Shahmeen-Aug8-1'] == (pytest.approx(0.1, abs=1e-3), 'z')
+    assert cylinders['base-housing-Shahmeen-aug1-c-clamp-1'] == (pytest.approx(0.1, abs=1e-3), 'z')
+    assert cylinders['Bridget - base V6-1'] == (pytest.approx(0.0352, abs=1e-3), 'z')
+    assert cylinders['DifferentialHousing-1'] == (pytest.approx(0.04, abs=1e-3), 'y')
+    housing = [collision_shape(collision) for collision
+               in robot.find("link[@name='wrist_pitch_link']").findall('collision')]
+    boxes = [(center, half) for center, half, radius, _ in housing if radius is None]
+    assert len(housing) == 2 and len(boxes) == 1
+    # Its top, narrower than the round part, has a box above the pitch axis.
+    (center, half), = boxes
+    assert center[2] - half[2] > 0.0 and half[0] < cylinders['DifferentialHousing-1'][0]
+
+
+def test_elbow_fold_tables_cover_the_shoulder_range(robot):
+    joints = {joint.get('name'): joint for joint in robot.findall('joint')}
+    folds = {fold.get('obstacle'): fold for fold in robot.findall('waybionic_fold')}
+    assert sorted(folds) == ['base_link', 'shoulder_link']
+    for fold in folds.values():
+        assert fold.get('link') == 'forearm_link'
+        assert joints[fold.get('joint')].find('child').get('link') == 'forearm_link'
+        shoulder = joints[fold.get('across')].find('limit')
+        start, step = float(fold.get('start')), float(fold.get('step'))
+        upper = [float(value) for value in fold.get('upper').split()]
+        lower = [float(value) for value in fold.get('lower').split()]
+        assert len(upper) == len(lower) >= 2 and step > 0.0
+        assert start == pytest.approx(math.degrees(float(shoulder.get('lower'))), abs=1e-3)
+        assert start + step * (len(upper) - 1) == pytest.approx(
+            math.degrees(float(shoulder.get('upper'))), abs=1e-3)
+        assert all(low < 0.0 < high for low, high in zip(lower, upper))
 
 
 def test_the_tool_box_encloses_the_placeholder_jaws(robot):

@@ -19,7 +19,12 @@
 
 Joint axes come from the named mates below. Joint zero is the upright pose used
 by the mechanical team's fk.py (links along +Z, pitch about +Y); the saved CAD
-pose is reported as joint values. Limits are provisional until hardware sets them.
+pose is reported as joint values. Each part gets its own collision box, so the
+teleop collision checks follow the parts rather than one box per link. A part
+that is round about a joint axis through its link, such as the base's lid or the
+tool mount on the wrist roll, gets a cylinder instead, which fits it equally well
+however the joint turns. So does a part's round side beyond a joint axis, such as
+the lower half of the wrist's differential housing, with a box for the rest.
 """
 
 import argparse
@@ -27,11 +32,14 @@ import array
 import json
 import math
 from pathlib import Path
+from xml.sax.saxutils import quoteattr
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 URDF_PATH = REPOSITORY / 'waybionic_description' / 'urdf' / 'waybionic_arm.urdf'
 MESH_DIRECTORY = REPOSITORY / 'waybionic_description' / 'meshes' / 'arm'
 MESH_URI = 'package://waybionic_description/meshes/arm/'
+# Written by scripts/cad/exact_limits.py --hulls: each moving link's convex hull.
+HULLS_PATH = Path(__file__).resolve().with_name('link_hulls.json')
 
 # Top-level components, including everything below them, for each rigid link.
 LINKS = {
@@ -53,18 +61,62 @@ LINKS = {
 }
 
 # name, parent, child, axis mate, origin plane mate, SolidWorks rotor, limits in degrees.
+# Each limit is where a joint, turning from the upright pose, first brings two CAD parts
+# together or the arm down to the ground under the base (scripts/cad/exact_limits.py): the
+# straight arm meets the ground at 109.65 degrees of shoulder, the forearm the shoulder's motor
+# mount at 148.93 of elbow, and the tool mount the cap on the forearm at 94.67 of wrist pitch,
+# at the roll that turns its facets closest to the cap.
+# Nothing meets over a full turn of base yaw or wrist roll, so they turn a full turn either way.
+# In other poses the forearm's folds (ELBOW_FOLDS) and the ground stop the arm in teleop.
 JOINTS = (
     ('joint_1', 'base_link', 'shoulder_link', 'Concentric124', 'Coincident70',
-     'outer_ring_sweep_loose-1', (-180.0, 180.0)),
+     'outer_ring_sweep_loose-1', (-360.0, 360.0)),
     ('joint_2', 'shoulder_link', 'upper_arm_link', 'Concentric112', 'Coincident57',
-     'outer-ring-Nema23-1', (-90.0, 90.0)),
+     'outer-ring-Nema23-1', (-109.65, 109.65)),
     ('joint_3', 'upper_arm_link', 'forearm_link', 'Concentric127', 'Coincident71',
-     'outer_ring_sweep_loose-2', (-90.0, 90.0)),
+     'outer_ring_sweep_loose-2', (-148.93, 148.93)),
     ('joint_4', 'forearm_link', 'wrist_pitch_link', 'Concentric139', None,
-     'DifferentialHousing-1', (-90.0, 90.0)),
+     'DifferentialHousing-1', (-94.67, 94.67)),
     ('joint_5', 'wrist_pitch_link', 'wrist_roll_link', 'Concentric143', None,
-     'straight bevel pinion_iso-3', (-90.0, 90.0)),
+     'straight bevel pinion_iso-3', (-360.0, 360.0)),
 )
+# How far the elbow folds before the forearm meets the shoulder, or the base at any yaw, depends
+# on the shoulder angle: for each, shoulder angles from START in steps of STEP degrees, then the
+# elbow's upper and lower limits there, where the parts touch, to 0.1 degree
+# (scripts/cad/joint_clearance.py). The collision shapes are too coarse for these pairs, so the
+# teleop collision check reads these tables instead.
+ELBOW_FOLDS = {
+    'shoulder_link': (
+        -109.65, 4.984090909090909,
+        (148.7, 148.8, 148.8, 148.8, 148.8, 148.9, 148.8, 148.9, 148.9, 148.9, 148.9, 148.9, 148.9,
+         148.9, 148.9, 148.9, 148.9, 148.8, 148.8, 148.8, 148.8, 148.7, 148.7, 148.7, 148.6, 148.5,
+         148.5, 148.4, 148.3, 148.1, 147.5, 146.0, 144.5, 142.8, 141.0, 139.3, 137.6, 136.0, 134.4,
+         132.9, 131.4, 130.1, 128.8, 127.8, 126.9),
+        (-126.8, -127.7, -128.8, -130.2, -131.4, -132.9, -134.3, -135.9, -137.6, -139.3, -141.0,
+         -142.8, -144.5, -146.0, -147.4, -148.1, -148.3, -148.4, -148.5, -148.5, -148.6, -148.7,
+         -148.7, -148.7, -148.8, -148.8, -148.8, -148.9, -148.8, -148.9, -148.9, -148.9, -148.9,
+         -148.9, -148.9, -148.9, -148.9, -148.9, -148.9, -148.9, -148.8, -148.9, -148.8, -148.8,
+         -148.8),
+    ),
+    'base_link': (
+        -109.65, 2.4920454545454547,
+        (180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0,
+         180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 179.8, 179.2, 178.4,
+         177.5, 176.6, 175.6, 174.7, 173.8, 172.8, 171.8, 170.9, 169.9, 169.0, 168.0, 167.0, 166.1,
+         165.1, 164.1, 163.1, 162.1, 161.2, 160.1, 159.2, 158.1, 156.5, 155.5, 153.3, 150.8, 148.6,
+         146.5, 144.6, 142.8, 141.0, 139.3, 137.7, 136.1, 134.6, 133.1, 131.6, 130.1, 128.6, 127.1,
+         125.5, 122.9, 121.3, 119.7, 118.0, 116.3, 114.4, 112.5, 110.6, 108.6, 106.5, 104.3, 102.2,
+         100.1, 97.9, 97.3, 95.0, 92.7, 90.2, 87.7, 85.1, 82.3, 79.4, 76.4),
+        (-76.5, -79.5, -82.3, -85.1, -87.7, -90.2, -92.7, -95.0, -97.3, -97.9, -100.1, -102.2,
+         -104.4, -106.5, -108.6, -110.6, -112.5, -114.4, -116.3, -118.0, -119.7, -121.3, -122.9,
+         -125.5, -127.1, -128.6, -130.1, -131.7, -133.1, -134.6, -136.1, -137.7, -139.3, -141.0,
+         -142.8, -144.6, -146.6, -148.6, -150.8, -153.3, -155.4, -156.5, -158.2, -159.2, -160.1,
+         -161.1, -162.1, -163.1, -164.1, -165.1, -166.0, -167.0, -168.0, -169.0, -169.9, -170.9,
+         -171.8, -172.8, -173.7, -174.7, -175.6, -176.5, -177.5, -178.4, -179.2, -179.8, -180.0,
+         -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0,
+         -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0, -180.0),
+    ),
+}
 DESCRIPTIONS = {
     'joint_1': 'base yaw', 'joint_2': 'shoulder pitch', 'joint_3': 'elbow pitch',
     'joint_4': 'wrist pitch (differential housing)', 'joint_5': 'wrist roll (output bevel)',
@@ -77,6 +129,11 @@ BEVELS = ('straight bevel pinion_iso-2', 'straight bevel pinion_iso-3', 'straigh
 # Threaded screws and the enclosed cycloidal discs dominate the triangle count.
 COARSE_PARTS = ('m3-', 'discs-sweep', 'loose_disc')
 COARSE_GRID = 0.0012
+# A part, or its side beyond a joint axis, is round about the axis when its circle about it fits
+# in the part's box to within this, allowing for the vertex grid and small flats.
+ROUND_TOLERANCE = 0.001
+# URDF cylinders run along z; these turn one onto a link's x, y or z axis.
+CYLINDER_RPY = ((0.0, math.pi / 2, 0.0), (-math.pi / 2, 0.0, 0.0), (0.0, 0.0, 0.0))
 
 # SolidWorks is Y-up. base_link: X = SolidWorks -Z (arm forward), Y = -X, Z = +Y.
 SOLIDWORKS_TO_BASE = ((0.0, 0.0, -1.0), (-1.0, 0.0, 0.0), (0.0, 1.0, 0.0))
@@ -473,9 +530,10 @@ class Model:
 
 
 def quantized_link_mesh(model, link, grid):
-    """Triangles per color in link coordinates, snapped to a grid with per-face normals."""
+    """Triangles per color in link coordinates, snapped to a grid, and each part's triangles."""
     export = model.export
     groups = {}
+    parts = {}
     to_link = model.frames[link].inverse() * model.to_base
     stats = {'input': 0, 'output': 0, 'bodies': 0, 'flipped': 0, 'conflicts': 0}
     for name in sorted(model.assigned[link]):
@@ -533,8 +591,9 @@ def quantized_link_mesh(model, link, grid):
                     group['positions'].append(keys[old])
                     group['normals'].append(scale(normals[old], 1.0 / length) if length > 1e-15 else (0.0, 0.0, 1.0))
                 group['triangles'].extend(tuple(remap[k] for k in triangle) for triangle in triangles)
+                parts.setdefault(name, []).extend(tuple(keys[k] for k in triangle) for triangle in triangles)
                 stats['output'] += len(triangles)
-    return groups, stats
+    return groups, stats, parts
 
 
 def write_collada(path, link, groups):
@@ -592,23 +651,125 @@ def write_collada(path, link, groups):
     path.write_text('\n'.join(lines), encoding='utf-8')
 
 
-def collision_box(groups):
-    """Return the centre and size of the box around a link's mesh, in link coordinates."""
-    points = [point for group in groups.values() for point in group['positions']]
-    low = [min(point[axis] for point in points) for axis in range(3)]
-    high = [max(point[axis] for point in points) for axis in range(3)]
-    return [(a + b) / 2 for a, b in zip(low, high)], [b - a for a, b in zip(low, high)]
+def joint_axes(model):
+    """Return {link: [(point, axis index)]}: the joint axes through each link along its axes."""
+    axes = {}
+    for joint in model.joints:
+        r, p, y = joint['rpy']
+        rotation = matmul(rotation_about((0, 0, 1), y), matmul(rotation_about((0, 1, 0), p), rotation_about((1, 0, 0), r)))
+        for link, point, direction in ((joint['child'], (0.0, 0.0, 0.0), joint['axis']),
+                                       (joint['parent'], joint['xyz'], apply(rotation, joint['axis']))):
+            index = max(range(3), key=lambda a: abs(direction[a]))
+            if abs(abs(direction[index]) - 1.0) < 1e-9:
+                axes.setdefault(link, set()).add((tuple(round(value, 9) for value in point), index))
+    return {link: sorted(found) for link, found in axes.items()}
 
 
-def collision_lines(center, size):
+def bounds(points):
+    return [min(p[a] for p in points) for a in range(3)], [max(p[a] for p in points) for a in range(3)]
+
+
+def split(triangles, point, axis, sign, offset):
+    """Return the triangles' corners on the sign side of the plane across axis, offset back past
+    point, and the rest; where an edge crosses the plane, the crossing goes in both."""
+    beyond, rest = set(), set()
+    for triangle in triangles:
+        corners = [(p, sign * (p[axis] - point[axis]) + offset) for p in triangle]
+        for p, depth in corners:
+            (beyond if depth > 0.0 else rest).add(p)
+        for (p, a), (q, b) in zip(corners, corners[1:] + corners[:1]):
+            if (a > 0.0) != (b > 0.0):
+                crossing = tuple(x + a / (a - b) * (y - x) for x, y in zip(p, q))
+                beyond.add(crossing)
+                rest.add(crossing)
+    return list(beyond), list(rest)
+
+
+def part_shapes(parts, axes):
+    """
+    Return [(part, centre, size, radius, axis)] around each part's triangles: a box, with radius
+    None, or a cylinder along the link's axis-th axis. A part round about a joint axis through
+    its link, with the circle inside the part's box, gets a cylinder; so does a part's round
+    side, reaching back past the axis as far as the part still fits the circle, with a box for
+    the rest. A shape is left out when the corners it holds are inside another shape.
+    """
+    shapes = []
+    for name, triangles in sorted(parts.items()):
+        corners = list({p for triangle in triangles for p in triangle})
+        low, high = bounds(corners)
+        best, rest_volume = [(name, low, high, None, 2, corners)], math.inf
+        for point, k in axes:
+            u, v = (a for a in range(3) if a != k)
+            room = min(point[u] - low[u], high[u] - point[u], point[v] - low[v], high[v] - point[v])
+
+            def distance(p):
+                return math.hypot(p[u] - point[u], p[v] - point[v])
+
+            def fits(found, reach):
+                return found[0] and max(map(distance, found[0])) <= reach
+
+            for side in (None, (u, 1.0), (u, -1.0), (v, 1.0), (v, -1.0)):
+                beyond, rest = (corners, []) if side is None else split(triangles, point, *side, 0.0)
+                if side is not None and fits((beyond, rest), room + ROUND_TOLERANCE):
+                    # Move the plane back past the axis, from corner to corner of the rest, while
+                    # the round side grows by no more than half the tolerance.
+                    reach = min(room + ROUND_TOLERANCE, max(map(distance, beyond)) + ROUND_TOLERANCE / 2)
+                    axis, sign = side
+                    offsets = sorted(offset for offset in {sign * (point[axis] - p[axis]) for p in corners}
+                                     if offset > 0.0)
+                    lowest, highest = 0, len(offsets) - 1
+                    while lowest <= highest:
+                        middle = (lowest + highest) // 2
+                        found = split(triangles, point, axis, sign, offsets[middle])
+                        if fits(found, reach):
+                            (beyond, rest), lowest = found, middle + 1
+                        else:
+                            highest = middle - 1
+                if not beyond or (side is not None and not rest):
+                    continue
+                radius = max(map(distance, beyond))
+                volume = math.prod(b - a for a, b in zip(*bounds(rest))) if rest else 0.0
+                if radius <= room + ROUND_TOLERANCE and volume < rest_volume:
+                    cylinder_low = [point[a] - radius for a in range(3)]
+                    cylinder_high = [point[a] + radius for a in range(3)]
+                    cylinder_low[k], cylinder_high[k] = min(p[k] for p in beyond), max(p[k] for p in beyond)
+                    best = [(name, cylinder_low, cylinder_high, radius, k, beyond)]
+                    best += [(name, *bounds(rest), None, 2, rest)] if rest else []
+                    rest_volume = volume
+        shapes += best
+
+    def holds(shape, p):
+        _, low, high, radius, k, _ = shape
+        if not all(low[a] <= p[a] <= high[a] for a in range(3)):
+            return False
+        u, v = (a for a in range(3) if a != k)
+        return radius is None or math.hypot(p[u] - (low[u] + high[u]) / 2, p[v] - (low[v] + high[v]) / 2) <= radius
+
+    # Larger shapes first, so a shape is only left out for one that stays.
+    kept = set()
+    for index in sorted(range(len(shapes)), key=lambda i: -math.prod(b - a for a, b in zip(*shapes[i][1:3]))):
+        if not any(all(holds(shapes[other], p) for p in shapes[index][5]) for other in kept):
+            kept.add(index)
+    return [(name, [(a + b) / 2 for a, b in zip(low, high)], [b - a for a, b in zip(low, high)], radius, k)
+            for index, (name, low, high, radius, k, _) in enumerate(shapes) if index in kept]
+
+
+def collision_lines(name, center, size, radius=None, axis=2):
+    rpy = CYLINDER_RPY[axis] if radius is not None else (0.0, 0.0, 0.0)
+    geometry = (f'<box size="{vector_text(size, 5)}"/>' if radius is None
+                else f'<cylinder radius="{fmt(radius, 5)}" length="{fmt(size[axis], 5)}"/>')
     return [
-        '    <collision>',
-        f'      <origin xyz="{vector_text(center, 4)}" rpy="0 0 0"/>',
-        f'      <geometry><box size="{vector_text(size, 4)}"/></geometry>',
+        f'    <collision name={quoteattr(name)}>',
+        f'      <origin xyz="{vector_text(center, 5)}" rpy="{vector_text(rpy)}"/>',
+        f'      <geometry>{geometry}</geometry>',
         '    </collision>']
 
 
-def write_urdf(model, source, boxes):
+def write_urdf(model, source, shapes):
+    if not HULLS_PATH.exists():
+        raise ValueError(f'{HULLS_PATH.name} is missing; run scripts/cad/exact_limits.py with '
+                         f'--hulls {HULLS_PATH.relative_to(REPOSITORY).as_posix()}')
+    hulls = json.loads(HULLS_PATH.read_text(encoding='utf-8'))
     angles = ', '.join(f'{name}={math.degrees(model.cad_angles[name]):.2f}' for name, *_ in JOINTS)
     lines = [
         '<?xml version="1.0"?>',
@@ -616,7 +777,9 @@ def write_urdf(model, source, boxes):
         '     Do not edit by hand; re-export the SolidWorks assembly and re-run the script.',
         '     Joint zero is the upright pose from the mechanical fk.py (links along +Z,',
         f'     pitch about +Y). Saved CAD pose in degrees {angles}.',
-        '     Limits are provisional; effort and velocity are placeholders for display. -->',
+        '     Joint limits are where CAD parts touch (scripts/cad/exact_limits.py). Each part has a',
+        '     collision box, or a cylinder where it is round about a joint axis, with a box for',
+        '     any side of it that is not. Effort and velocity are placeholders for display. -->',
         '<robot name="waybionic_arm">']
     for link in LINKS:
         lines += [
@@ -624,12 +787,12 @@ def write_urdf(model, source, boxes):
             '    <visual>',
             f'      <geometry><mesh filename="{MESH_URI}{link}.dae"/></geometry>',
             '    </visual>',
-            *collision_lines(*boxes[link]),
+            *[line for shape in shapes[link] for line in collision_lines(*shape)],
             '  </link>']
     lines += [
         '  <link name="tool_link">',
         '    <!-- Placeholder around the RViz jaws until the real tool is modelled. -->',
-        *collision_lines(*TOOL_BOX),
+        *collision_lines('placeholder_jaws', *TOOL_BOX),
         '  </link>']
     for joint in model.joints:
         kind = 'continuous' if joint['mimic'] else 'revolute'
@@ -647,14 +810,37 @@ def write_urdf(model, source, boxes):
         if joint['mimic']:
             lines.append(f'    <mimic joint="{joint["mimic"][0]}" multiplier="{fmt(joint["mimic"][1])}" offset="0"/>')
         lines.append('  </joint>')
+    shoulder = next(limits for name, *_, limits in JOINTS if name == 'joint_2')
+    for start, step, upper, lower in ELBOW_FOLDS.values():
+        if (len(upper) != len(lower) or start != shoulder[0]
+                or abs(start + step * (len(upper) - 1) - shoulder[1]) > 1e-6):
+            raise ValueError('ELBOW_FOLDS must span the shoulder limits; re-run joint_clearance.py')
     lines += [
         '  <joint name="tool_joint" type="fixed">',
         '    <parent link="wrist_roll_link"/>',
         '    <child link="tool_link"/>',
         f'    <origin xyz="0 0 {fmt(model.tool_length)}" rpy="0 0 0"/>',
         '  </joint>',
-        '</robot>',
-        '']
+        '  <!-- Elbow limits in degrees against the shoulder angle, from start every step degrees,',
+        '       where the forearm meets the shoulder or, at any yaw, the base.',
+        '       The teleop collision check reads these; other URDF tools ignore them. -->']
+    for obstacle, (start, step, upper, lower) in ELBOW_FOLDS.items():
+        lines += [
+            f'  <waybionic_fold link="forearm_link" obstacle="{obstacle}" joint="joint_3"'
+            f' across="joint_2" start="{start:.10g}" step="{step:.10g}"',
+            f'      upper="{" ".join(f"{value:g}" for value in upper)}"',
+            f'      lower="{" ".join(f"{value:g}" for value in lower)}"/>']
+    lines += [
+        '  <!-- The convex hull of each moving link\'s CAD parts, x y z in m in the link frame',
+        '       (written by scripts/cad/exact_limits.py). The teleop collision check keeps the',
+        '       lowest of these above the table, the exact lowest point of the real parts. -->']
+    for link, points in hulls.items():
+        values = [f'{value:g}' for point in points for value in point]
+        rows = [' '.join(values[i:i + 36]) for i in range(0, len(values), 36)]
+        lines += [f'  <waybionic_hull link="{link}" points="{rows[0]}',
+                  *[f'      {row}' for row in rows[1:]]]
+        lines[-1] += '"/>'
+    lines += ['</robot>', '']
     URDF_PATH.write_text('\n'.join(lines), encoding='utf-8')
 
 
@@ -792,18 +978,19 @@ def main():
 
     MESH_DIRECTORY.mkdir(parents=True, exist_ok=True)
     total_in = total_out = 0
-    boxes = {}
+    shapes = {}
+    axes = joint_axes(model)
     for link in LINKS:
-        groups, stats = quantized_link_mesh(model, link, arguments.grid)
+        groups, stats, parts = quantized_link_mesh(model, link, arguments.grid)
         path = MESH_DIRECTORY / f'{link}.dae'
         write_collada(path, link, groups)
-        boxes[link] = collision_box(groups)
+        shapes[link] = part_shapes(parts, axes.get(link, []))
         total_in += stats['input']
         total_out += stats['output']
         print(f'  {path.name}: {stats["input"]} -> {stats["output"]} triangles, {len(groups)} colors, '
               f'{path.stat().st_size / 1e6:.2f} MB, {stats["flipped"]}/{stats["bodies"]} bodies flipped, '
               f'{stats["conflicts"]} winding conflicts')
-    write_urdf(model, source, boxes)
+    write_urdf(model, source, shapes)
     print(f'Wrote {URDF_PATH.relative_to(REPOSITORY)} ({total_in} -> {total_out} triangles)')
     return 0
 

@@ -18,7 +18,7 @@ for ground station startup.
 | --- | --- | --- |
 | `launch_rviz` | `true` | Start RViz. |
 | `rviz_maximized` | `true` | Fill the current screen without hiding panels; false uses the layout's window geometry. Unused when RViz is disabled. |
-| `use_joint_state_publisher_gui` | `true` | Start the separate joint-state GUI. |
+| `use_joint_state_publisher_gui` | `true` | Start the separate joint-state GUI. Its sliders go through `joint_state_guard`, which stops the arm where it would hit itself or the ground and moves the sliders back there. |
 | `use_diagnostics` | `true` | Enable the RViz diagnostics panel and permit the demo publisher. |
 | `use_mock_diagnostics` | `true` | Select internal mock data rather than live topics in the panel; demo mode, teleop and the camera always use live topics. |
 | `start_temporary_diagnostics_publisher` | `false` | Start a demo publisher when diagnostics are enabled. |

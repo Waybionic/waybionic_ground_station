@@ -1,25 +1,61 @@
 """
 Keep the arm's links off the table and out of its own base (pure logic, no ROS).
 
-Each link's collision boxes come from the URDF, and every check happens in the base frame.
-The moving links must stay above the table, and the forearm, wrist and tool must stay out of
-the base and shoulder, the parts they can fold into. Adjacent links overlap at their joints,
-so those pairs are never compared.
+Each link's collision shapes come from the URDF, made from its CAD parts: a cylinder for a part
+round about a joint axis, such as the base's lid or the tool mount, a cylinder and a box for a
+part round on one side, such as the wrist's differential housing, and otherwise a box. Every
+check happens in the base frame. The moving links must stay above the table, and the forearm,
+wrist and tool must stay out of the base and shoulder, the parts they can fold into. Against the
+table a link's convex hull (waybionic_hull, the CAD parts' own) gives its exact lowest point;
+links without one use their shapes. Adjacent links overlap at their joints, so those pairs are
+never compared; the joint limits keep them apart. Where the URDF has a fold table for a pair
+(waybionic_fold, measured from the CAD), the table replaces the shapes for it: the elbow may fold
+until the forearm touches the shoulder or the base.
 """
 
 import math
 import xml.etree.ElementTree as ET
+
+import numpy as np
 
 # The fixed base and the yaw stage, and what may never touch them.
 BODY = ('base_link', 'shoulder_link')
 FOLDING = ('forearm_link', 'wrist_pitch_link', 'wrist_left_gear_link', 'wrist_right_gear_link',
            'wrist_roll_link', 'tool_link')
 REQUIRED = BODY + ('upper_arm_link',) + FOLDING
+# A cylinder counts as the prism with this many sides around it, at most 0.5 % wider.
+SIDES = 32
+_WIDER = 1.0 / math.cos(math.pi / SIDES)
+_SIDES = tuple((math.cos(2.0 * math.pi * side / SIDES), math.sin(2.0 * math.pi * side / SIDES))
+               for side in range(SIDES))
+_CORNERS = tuple((math.cos(math.pi * (2 * side + 1) / SIDES),
+                  math.sin(math.pi * (2 * side + 1) / SIDES)) for side in range(SIDES))
+# A fold table may stop this short of its joint's limits, which the URDF rounds.
+SPAN_TOLERANCE_DEG = 0.01
 
 
 def _vector(element, name, default=(0.0, 0.0, 0.0)):
     text = element.get(name) if element is not None else None
-    return tuple(float(value) for value in text.split()) if text else default
+    if not text:
+        return default
+    try:
+        values = tuple(float(value) for value in text.split())
+    except ValueError:
+        values = ()
+    if len(values) != 3 or not all(math.isfinite(value) for value in values):
+        raise ValueError(f'robot_description has {name}="{text}", not three finite numbers')
+    return values
+
+
+def _number(element, name, default=math.nan):
+    """Return the attribute as a float, the default if it is missing, or NaN if it is junk."""
+    text = element.get(name)
+    if text is None:
+        return default
+    try:
+        return float(text)
+    except ValueError:
+        return math.nan
 
 
 def _dot(a, b):
@@ -52,52 +88,161 @@ def _rpy(roll, pitch, yaw):
         _rotation((0.0, 1.0, 0.0), pitch), _rotation((1.0, 0.0, 0.0), roll)))
 
 
-class ArmCollision:
-    """Collision boxes and joint tree read from a URDF."""
+class Fold:
+    """Limits of one joint against another joint's angle, linearly interpolated."""
 
-    def __init__(self, boxes, joints, root, table_z=0.0, clearance=0.01):
-        self.boxes, self.joints, self.root = boxes, joints, root
-        self.table_z, self.clearance = table_z, clearance
+    def __init__(self, element, moved_by, limits):
+        """
+        Read a table; raise ValueError unless it is whole and fits the joint tree.
+
+        moved_by maps each link to the limited revolute joints between it and the root, and
+        limits maps those joints to their (lower, upper) in radians. The table replaces the
+        shapes for its pair, so both its joints must move the link against the obstacle, and
+        it must cover the other joint's whole range.
+        """
+        self.link, self.obstacle = element.get('link'), element.get('obstacle')
+        self.joint, self.across = element.get('joint'), element.get('across')
+        try:
+            self.start, self.step = float(element.get('start')), float(element.get('step'))
+            self.upper = [math.radians(float(v)) for v in element.get('upper').split()]
+            self.lower = [math.radians(float(v)) for v in element.get('lower').split()]
+        except (AttributeError, TypeError, ValueError):
+            raise ValueError('waybionic_fold needs numeric start, step, upper and lower') from None
+        if not (math.isfinite(self.start) and math.isfinite(self.step) and self.step > 0.0
+                and len(self.upper) == len(self.lower) >= 2
+                and all(math.isfinite(value) for value in self.upper + self.lower)):
+            raise ValueError('waybionic_fold needs finite values, a positive step and matching '
+                             'tables')
+        if self.link not in FOLDING or self.obstacle not in BODY:
+            raise ValueError('waybionic_fold must pair a folding link with the base or shoulder')
+        between = moved_by.get(self.link, set()) - moved_by.get(self.obstacle, set())
+        if self.joint == self.across or not {self.joint, self.across} <= between:
+            raise ValueError(f'waybionic_fold for {self.link} and {self.obstacle} needs two '
+                             'different limited joints that move one against the other')
+        lower, upper = (math.degrees(limit) for limit in limits[self.across])
+        end = self.start + self.step * (len(self.upper) - 1)
+        if (self.start > lower + SPAN_TOLERANCE_DEG
+                or end < upper - SPAN_TOLERANCE_DEG):
+            raise ValueError(f'waybionic_fold for {self.link} and {self.obstacle} covers '
+                             f'{self.across} from {self.start:g} to {end:g} degrees, not its '
+                             f'whole range {lower:.2f} to {upper:.2f}')
+        if any(low > high for low, high in zip(self.lower, self.upper)):
+            raise ValueError(f'waybionic_fold for {self.link} and {self.obstacle} has a lower '
+                             'value above its upper value')
+
+    def limits(self, across):
+        """Return (lower, upper) in radians at this angle of the other joint."""
+        x = (math.degrees(across) - self.start) / self.step
+        index = min(max(int(math.floor(x)), 0), len(self.upper) - 2)
+        t = min(max(x - index, 0.0), 1.0)
+        return tuple(table[index] + t * (table[index + 1] - table[index])
+                     for table in (self.lower, self.upper))
+
+    def excess(self, positions):
+        """How far past the table the joint is, in radians, or 0."""
+        lower, upper = self.limits(positions.get(self.across, 0.0))
+        angle = positions.get(self.joint, 0.0)
+        return max(angle - upper, lower - angle, 0.0)
+
+
+class ArmCollision:
+    """Collision shapes and joint tree read from a URDF."""
+
+    def __init__(self, shapes, joints, root, table_z=0.0, clearance=0.0, self_clearance=0.0,
+                 folds=(), hulls=None):
+        self.shapes, self.joints, self.root = shapes, joints, root
+        self.table_z, self.clearance, self.self_clearance = table_z, clearance, self_clearance
+        self.folds = {(fold.link, fold.obstacle): fold for fold in folds}
+        # link -> (N, 3) points in the link frame whose lowest is the link's lowest point.
+        self.hulls = dict(hulls or {})
 
     @classmethod
-    def from_urdf(cls, urdf, table_z=0.0, clearance=0.01):
-        """Read boxes and joints; raise ValueError without boxes for the base and folding links."""
+    def from_urdf(cls, urdf, table_z=0.0, clearance=0.0, self_clearance=0.0):
+        """Read shapes and joints; raise ValueError if a required link has no shapes."""
         try:
             robot = ET.fromstring(urdf)
         except ET.ParseError as error:
             raise ValueError(f'robot_description is not valid XML: {error}') from None
-        boxes = {}
+        shapes = {}
         for link in robot.findall('link'):
             for collision in link.findall('collision'):
                 box = collision.find('geometry/box')
-                if box is None:
+                cylinder = collision.find('geometry/cylinder')
+                if box is None and cylinder is None:
                     continue
+                if box is not None:
+                    half, radius = tuple(size / 2.0 for size in _vector(box, 'size')), None
+                else:
+                    radius = _number(cylinder, 'radius')
+                    half = (radius, radius, _number(cylinder, 'length') / 2.0)
+                if not all(math.isfinite(size) and size > 0.0 for size in half):
+                    # A shape without a size would silently drop out of the checks.
+                    raise ValueError('robot_description has a collision shape without a '
+                                     f'positive finite size on {link.get("name")}')
                 origin = collision.find('origin')
-                boxes.setdefault(link.get('name'), []).append((
-                    _vector(origin, 'xyz'), _rpy(*_vector(origin, 'rpy')),
-                    tuple(size / 2.0 for size in _vector(box, 'size'))))
-        missing = [name for name in REQUIRED if name not in boxes]
+                shapes.setdefault(link.get('name'), []).append((
+                    _vector(origin, 'xyz'), _rpy(*_vector(origin, 'rpy')), half, radius))
+        missing = [name for name in REQUIRED if name not in shapes]
         if missing:
             raise ValueError('robot_description has no collision box for ' + ', '.join(missing))
         joints, children = {}, set()
         for joint in robot.findall('joint'):
             mimic = joint.find('mimic')
             origin = joint.find('origin')
+            axis = _vector(joint.find('axis'), 'xyz', (1.0, 0.0, 0.0))
+            length = math.sqrt(_dot(axis, axis))
+            if mimic is not None:
+                mimic = (mimic.get('joint'), _number(mimic, 'multiplier', 1.0),
+                         _number(mimic, 'offset', 0.0))
+            if length < 1e-9 or (mimic and not all(map(math.isfinite, mimic[1:]))):
+                raise ValueError(f'robot_description has joint {joint.get("name")} without an '
+                                 'axis, or with a mimic that is not two finite numbers')
             joints[joint.find('child').get('link')] = {
                 'name': joint.get('name'), 'type': joint.get('type'),
                 'parent': joint.find('parent').get('link'),
                 'xyz': _vector(origin, 'xyz'), 'rpy': _rpy(*_vector(origin, 'rpy')),
-                'axis': _vector(joint.find('axis'), 'xyz', (1.0, 0.0, 0.0)),
-                'mimic': None if mimic is None else (
-                    mimic.get('joint'), float(mimic.get('multiplier', 1.0)),
-                    float(mimic.get('offset', 0.0)))}
+                'axis': tuple(value / length for value in axis), 'mimic': mimic}
             children.add(joint.find('child').get('link'))
         roots = [link.get('name') for link in robot.findall('link')
                  if link.get('name') not in children]
         if len(roots) != 1:
             raise ValueError(f'robot_description needs one root link, not {len(roots)}')
-        checker = cls(boxes, joints, roots[0], table_z, clearance)
+        checker = cls(shapes, joints, roots[0], table_z, clearance, self_clearance)
         checker.poses({})
+        limits = {}
+        for joint in robot.findall('joint'):
+            limit = joint.find('limit')
+            if (joint.get('type') == 'revolute' and joint.find('mimic') is None
+                    and limit is not None):
+                bounds = (_number(limit, 'lower'), _number(limit, 'upper'))
+                if all(math.isfinite(bound) for bound in bounds):
+                    limits[joint.get('name')] = bounds
+        moved_by = {}
+        for link in shapes:
+            moved_by[link], child = set(), link
+            # poses() has checked that the joints form a tree, so this reaches the root.
+            while child in joints:
+                if joints[child]['name'] in limits:
+                    moved_by[link].add(joints[child]['name'])
+                child = joints[child]['parent']
+        folds = [Fold(element, moved_by, limits) for element in robot.findall('waybionic_fold')]
+        pairs = {(fold.link, fold.obstacle) for fold in folds}
+        if len(pairs) != len(folds):
+            raise ValueError('robot_description has two waybionic_fold tables for one pair')
+        checker.folds = {(fold.link, fold.obstacle): fold for fold in folds}
+        for element in robot.findall('waybionic_hull'):
+            link = element.get('link')
+            try:
+                values = [float(value) for value in (element.get('points') or '').split()]
+            except ValueError:
+                values = []
+            if (link not in shapes or link in BODY or link in checker.hulls
+                    or len(values) < 12 or len(values) % 3
+                    or not all(math.isfinite(value) for value in values)):
+                # A hull that is not whole would let the link's real parts below the table.
+                raise ValueError(f'robot_description has a waybionic_hull for {link} that is not '
+                                 'one set of at least four finite points of a moving link')
+            checker.hulls[link] = np.array(values).reshape(-1, 3)
         return checker
 
     def poses(self, positions):
@@ -124,12 +269,19 @@ class ArmCollision:
                 pending.remove(child)
         return poses
 
-    def world_boxes(self, poses, link):
+    def world_shapes(self, poses, link):
+        """
+        Yield (centre, axes, half sizes, radius) for the link's shapes in the root frame.
+
+        A box has radius None. A cylinder runs along axes[2], with half sizes (radius, radius,
+        half length).
+        """
         rotation, origin = poses[link]
-        for center, box_rotation, half in self.boxes.get(link, []):
-            world = _multiply(rotation, box_rotation)
+        for center, local, half, radius in self.shapes.get(link, []):
+            world = _multiply(rotation, local)
             axes = tuple(tuple(world[row][column] for row in range(3)) for column in range(3))
-            yield tuple(o + d for o, d in zip(origin, _apply(rotation, center))), axes, half
+            yield (tuple(o + d for o, d in zip(origin, _apply(rotation, center))), axes, half,
+                   radius)
 
     def hits(self, positions):
         """Return what would collide at these joint positions, such as 'forearm_link: table'."""
@@ -140,34 +292,153 @@ class ArmCollision:
         Return {collision: intrusion}: each contact, and how far into it the arm reaches.
 
         Against the table that is the depth in m. Inside the base or shoulder it is the volume
-        in m^3 of the link's box within the obstacle's box grown by the clearance, which, unlike
-        a depth, grows whichever way the link pushes further in.
+        in m^3 of the link's shapes within the obstacle's shapes grown by the self-collision
+        clearance, which, unlike a depth, grows whichever way the link pushes further in. Past
+        a fold table it is the angle in radians beyond the table.
         """
         poses = self.poses(positions)
+        world = {link: [(shape, _reach(shape)) for shape in self.world_shapes(poses, link)]
+                 for link in self.shapes}
         found = {}
-        for link in self.boxes:
+        for link, placed in world.items():
             if link in BODY:
                 continue
-            lowest = min(center[2] - sum(h * abs(axis[2]) for h, axis in zip(half, axes))
-                         for center, axes, half in self.world_boxes(poses, link))
+            if link in self.hulls:
+                rotation, origin = poses[link]
+                lowest = float((self.hulls[link] @ np.array(rotation[2])).min()) + origin[2]
+            else:
+                lowest = min(_lowest(shape) for shape, _ in placed)
             if lowest < self.table_z + self.clearance:
                 found[f'{link}: table'] = self.table_z + self.clearance - lowest
+        margin = self.self_clearance
         for link in FOLDING:
             for body in BODY:
-                volume = sum(_intrusion(box, obstacle, self.clearance)
-                             for box in self.world_boxes(poses, link)
-                             for obstacle in self.world_boxes(poses, body)
-                             if _overlap(box, obstacle, self.clearance) > 0.0)
+                fold = self.folds.get((link, body))
+                if fold is not None:
+                    excess = fold.excess(positions)
+                    if excess > 0.0:
+                        found[f'{link}: {body}'] = excess
+                    continue
+                # Shapes whose bounding spheres are apart cannot overlap, nor can two boxes
+                # that a separating axis keeps apart.
+                volume = sum(_intrusion(shape, obstacle, margin)
+                             for shape, reach in world[link] for obstacle, extent in world[body]
+                             if _squared_distance(shape[0], obstacle[0])
+                             < (reach + extent + margin) ** 2
+                             and (shape[3] is not None or obstacle[3] is not None
+                                  or _overlap(shape, obstacle, margin) > 0.0))
                 if volume > 0.0:
                     found[f'{link}: {body}'] = volume
         return found
 
+    def reach(self, start, goal, step):
+        """
+        Move in a straight line in joint space from start toward goal, checking every step.
 
-def _intrusion(a, b, margin):
-    """Return the volume of box a inside box b grown by margin on every side."""
-    (center_a, axes_a, half_a), (center_b, axes_b, half_b) = a, b
-    # Work relative to b's centre, which keeps the volume sums well conditioned.
-    offset = tuple(ca - cb for ca, cb in zip(center_a, center_b))
+        start and goal map the same joints to radians, and step is the most any joint turns
+        between two checks. Return the furthest pose along the line before anything would
+        collide, to within 1e-6 of the move, and what would collide just past it ([] when the
+        whole move is clear). A start that already collides moves only to a clear goal.
+        """
+        def along(fraction):
+            return {joint: start[joint] + (goal[joint] - start[joint]) * fraction
+                    for joint in goal}
+
+        if self.hits(start):
+            blocked = self.hits(goal)
+            return (dict(start), blocked) if blocked else (dict(goal), [])
+        span = max((abs(goal[joint] - start[joint]) for joint in goal), default=0.0)
+        count = max(1, math.ceil(span / step))
+        clear = 0.0
+        for index in range(1, count + 1):
+            if self.hits(along(index / count)):
+                blocked = index / count
+                while blocked - clear > 1e-6:
+                    middle = (clear + blocked) / 2.0
+                    if self.hits(along(middle)):
+                        blocked = middle
+                    else:
+                        clear = middle
+                return along(clear), self.hits(along(blocked))
+            clear = index / count
+        return along(1.0), []
+
+
+def _squared_distance(a, b):
+    return sum((x - y) ** 2 for x, y in zip(a, b))
+
+
+def _reach(shape):
+    """Return the radius of a sphere about the shape's centre that holds all of it."""
+    _, _, half, radius = shape
+    if radius is None:
+        return math.sqrt(_dot(half, half))
+    return math.hypot(radius * _WIDER, half[2])
+
+
+def _lowest(shape):
+    """Return the height of the shape's lowest point."""
+    center, axes, half, radius = shape
+    if radius is None:
+        return center[2] - sum(h * abs(axis[2]) for h, axis in zip(half, axes))
+    tilt = abs(axes[2][2])
+    return center[2] - half[2] * tilt - radius * math.sqrt(max(0.0, 1.0 - tilt * tilt))
+
+
+def _spread(shape, normal):
+    """Return how far the shape reaches from its centre along a unit normal."""
+    _, axes, half, radius = shape
+    if radius is None:
+        return sum(h * abs(_dot(normal, axis)) for h, axis in zip(half, axes))
+    along = abs(_dot(normal, axes[2]))
+    return half[2] * along + radius * _WIDER * math.sqrt(max(0.0, 1.0 - along * along))
+
+
+def _facing(cylinder, toward):
+    """Return the cylinder's cross axes, turned so that the first points at toward."""
+    center, (first, second, axis), _, _ = cylinder
+    offset = tuple(t - c for t, c in zip(toward, center))
+    along = _dot(offset, axis)
+    outward = tuple(o - along * a for o, a in zip(offset, axis))
+    length = math.sqrt(_dot(outward, outward))
+    if length < 1e-9:
+        return first, second
+    first = tuple(value / length for value in outward)
+    return first, _cross(axis, first)
+
+
+def _planes(shape, toward, margin):
+    """Yield the shape's face planes as (outward normal, distance from its centre), grown."""
+    _, axes, half, radius = shape
+    if radius is None:
+        for axis, h in zip(axes, half):
+            yield axis, h + margin
+            yield tuple(-value for value in axis), h + margin
+        return
+    first, second = _facing(shape, toward)
+    yield first, radius + margin
+    yield axes[2], half[2] + margin
+    yield tuple(-value for value in axes[2]), half[2] + margin
+    for c, s in _SIDES[1:]:
+        yield tuple(c * u + s * v for u, v in zip(first, second)), radius + margin
+
+
+def _faces(shape, origin):
+    """
+    Return the shape's faces relative to origin, each counterclockwise seen from outside.
+
+    A cylinder's prism turns to face origin, so turning about its axis changes nothing.
+    """
+    center, axes, half, radius = shape
+    offset = tuple(c - o for c, o in zip(center, origin))
+    if radius is not None:
+        first, second = _facing(shape, origin)
+        top, bottom = ([tuple(o + side * half[2] * a + radius * _WIDER * (c * u + s * v)
+                              for o, a, u, v in zip(offset, axes[2], first, second))
+                        for c, s in _CORNERS] for side in (1.0, -1.0))
+        return [top, bottom[::-1]] + [
+            [bottom[k], bottom[(k + 1) % SIDES], top[(k + 1) % SIDES], top[k]]
+            for k in range(SIDES)]
     faces = []
     for i in range(3):
         j, k = (i + 1) % 3, (i + 2) % 3
@@ -176,15 +447,36 @@ def _intrusion(a, b, margin):
             for along_j, along_k in ((-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)):
                 signs = [0.0] * 3
                 signs[i], signs[j], signs[k] = side, along_j, along_k
-                loop.append(tuple(o + sum(s * h * u[n] for s, h, u in zip(signs, half_a, axes_a))
+                loop.append(tuple(o + sum(s * h * u[n] for s, h, u in zip(signs, half, axes))
                                   for n, o in enumerate(offset)))
-            # Each face runs counterclockwise seen from outside the box.
             faces.append(loop if side > 0.0 else loop[::-1])
-    for axis, half in zip(axes_b, half_b):
-        for normal in (axis, tuple(-value for value in axis)):
-            faces = _clip(faces, normal, half + margin)
+    return faces
+
+
+def _volume(faces):
     return sum(_dot(face[0], _cross(p, q)) for face in faces
                for p, q in zip(face[1:], face[2:])) / 6.0
+
+
+def _intrusion(a, b, margin):
+    """
+    Return the volume of shape a inside shape b grown by margin on every side.
+
+    A cylinder counts as the SIDES-sided prism around it, turned to face the other shape.
+    """
+    offset = tuple(x - y for x, y in zip(a[0], b[0]))
+    cutting = []
+    for normal, limit in _planes(b, a[0], margin):
+        middle, spread = _dot(normal, offset), _spread(a, normal)
+        if middle - spread >= limit:
+            return 0.0
+        if middle + spread > limit:
+            cutting.append((normal, limit))
+    # Work relative to b's centre, which keeps the volume sums well conditioned.
+    faces = _faces(a, b[0])
+    for normal, limit in cutting:
+        faces = _clip(faces, normal, limit)
+    return _volume(faces)
 
 
 def _clip(faces, normal, limit):
@@ -220,7 +512,7 @@ def _clip(faces, normal, limit):
 
 def _overlap(a, b, margin):
     """Return how far two oriented boxes overlap within margin (separating axes), or 0."""
-    (center_a, axes_a, half_a), (center_b, axes_b, half_b) = a, b
+    (center_a, axes_a, half_a, _), (center_b, axes_b, half_b, _) = a, b
     gap = tuple(cb - ca for ca, cb in zip(center_a, center_b))
     candidates = list(axes_a) + list(axes_b) + [
         _cross(u, v) for u in axes_a for v in axes_b]

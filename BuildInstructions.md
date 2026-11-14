@@ -109,9 +109,10 @@ docker compose run --rm --build wslg
 ```
 
 RViz and the Joint State Publisher window open. Move the `joint_1` to `joint_5`
-sliders to move the arm, and use the diagnostics panel's mock controls to try
-normal and fault states. Everything is simulated. Press **Ctrl+C** in PowerShell to
-stop.
+sliders to move the arm; it stops where it would hit itself or the ground, and the
+sliders jump back to where it stopped. Use the diagnostics panel's mock controls to
+try normal and fault states. Everything is simulated. Press **Ctrl+C** in PowerShell
+to stop.
 
 To sweep each joint in turn instead, add the launch command:
 
@@ -250,7 +251,8 @@ From the repository root:
 
 Keep this Terminal open. Within a few seconds, RViz opens with the **WayBionic
 Engineering Monitor** showing **Current State: NORMAL**, and the Joint State
-Publisher shows the `joint_1` to `joint_5` sliders. Press **Control+C** to stop.
+Publisher shows the `joint_1` to `joint_5` sliders. The arm stops where it would hit
+itself or the ground. Press **Control+C** to stop.
 
 To check the ROS nodes, run this in a second Terminal from the repository root,
 while the first one is running:
@@ -259,8 +261,8 @@ while the first one is running:
 RMW_IMPLEMENTATION=rmw_cyclonedds_cpp ./scripts/macos.sh run ros2 node list
 ```
 
-The list must include `/joint_state_publisher`, `/robot_state_publisher` and
-`/rviz2`.
+The list must include `/joint_state_guard`, `/joint_state_publisher`,
+`/robot_state_publisher` and `/rviz2`.
 
 Always use `scripts/macos.sh`: it selects the macOS SDK and Cyclone DDS and loads
 the workspace. Don't source `install/setup.bash` from zsh, or run `colcon` or
@@ -415,7 +417,8 @@ Then open the arm in RViz:
 ros2 launch waybionic_bringup ground_station.launch.py
 ```
 
-RViz and the Joint State Publisher window open; move the sliders to move the arm.
+RViz and the Joint State Publisher window open; move the sliders to move the arm,
+which stops where it would hit itself or the ground.
 Press **Ctrl+C** to stop.
 
 In every new Ubuntu terminal, source both environments before running ROS

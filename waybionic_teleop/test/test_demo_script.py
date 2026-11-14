@@ -5,16 +5,15 @@ from pathlib import Path
 
 import pytest
 
+from waybionic_teleop.collision import ArmCollision
 from waybionic_teleop.demo_script import (
     CARTESIAN, DemoPlayer, LINES, operator_active, TeleopState)
-from waybionic_teleop.kinematics import ArmKinematics
+from waybionic_teleop.kinematics import ArmKinematics, joint_limits
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
         / 'waybionic_arm.urdf').read_text(encoding='utf-8')
-LIMITS = {'joint_1': (-math.pi, math.pi), 'joint_2': (-1.5708, 1.5708),
-          'joint_3': (-1.5708, 1.5708), 'joint_4': (-1.5708, 1.5708),
-          'joint_5': (-1.5708, 1.5708)}
+LIMITS = joint_limits(URDF, ['joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5'])
 RATE = 120.0
 # The teleop node's input timeout and how often it reports its state.
 INPUT_TIMEOUT_S = 0.5
@@ -57,8 +56,9 @@ def play(teleop, kinematics, measured, seconds):
 def make_teleop(parameters):
     def make(**state):
         kinematics = ArmKinematics.from_urdf(URDF)
+        # Like the teleop node, with the collision checks on.
         teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
-                           LIMITS, kinematics)
+                           LIMITS, kinematics, ArmCollision.from_urdf(URDF))
         for name, value in state.items():
             setattr(teleop, name, value)
         return teleop, kinematics
