@@ -82,21 +82,23 @@ class TestTeleop(unittest.TestCase):
                              'teleop never received the controller packets')
             self.assertEqual(diagnostics['arm.command_gate'].level, DiagnosticStatus.WARN,
                              'the drives never loaded the robot description')
-            hold(1.0, left_x=1.0)
+            # Joy axes are positive left and up: left stick right turns joint_1 positive.
+            hold(1.0, left_x=-1.0)
             self.assertAlmostEqual(joints['joint_1'], 0.0, places=3, msg='moved while disabled')
             hold(0.2, 'start')
-            hold(1.0, left_x=1.0)
+            hold(1.0, left_x=-1.0)
             self.assertGreater(joints['joint_1'], 0.2)
             hold(0.3, 'y')
             yaw = joints['joint_1']
-            hold(1.0, left_x=1.0, right_y=1.0)
+            # In the upper group, right stick down tips the wrist down (joint_4 positive).
+            hold(1.0, left_x=1.0, right_y=-1.0)
             self.assertAlmostEqual(joints['joint_1'], yaw, places=2)
             self.assertGreater(joints['joint_4'], 0.2)
             hold(0.8, right_trigger=-1.0)
             self.assertGreater(joints['tool_grip'], 0.3)
             hold(0.2, 'b')
             pitch = joints['joint_4']
-            hold(0.75, right_y=1.0)
+            hold(0.75, right_y=-1.0)
             self.assertAlmostEqual(joints['joint_4'], pitch, places=2, msg='moved after B')
             self.assertEqual(diagnostics['teleop.state'].values[0].value, 'disabled')
             for drive in ('base_yaw', 'shoulder', 'elbow', 'wrist_left', 'wrist_right', 'tool'):
@@ -105,7 +107,7 @@ class TestTeleop(unittest.TestCase):
                 stop = mks_can.hex_frame(can_id, mks_can.absolute_axis(can_id, 0, 0, 0))
                 self.assertEqual(values['last_command'], stop, f'{drive} did not stop')
             hold(0.2, 'start')
-            hold(0.9, right_y=1.0)
+            hold(0.9, right_y=-1.0)
             self.assertGreater(joints['joint_4'], pitch + 0.05, 'Start did not re-arm')
             self.assertEqual(diagnostics['teleop.state'].values[0].value, 'enabled')
             self.assertEqual(diagnostics['can.bus'].level, b'\x00')

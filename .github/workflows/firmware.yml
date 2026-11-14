@@ -16,7 +16,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Compile for the UNO R4 WiFi
         uses: arduino/compile-sketches@v1
@@ -41,7 +41,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Arduino CLI
         uses: arduino/setup-arduino-cli@v2

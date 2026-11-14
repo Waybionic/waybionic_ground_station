@@ -8,10 +8,16 @@ ros2 launch waybionic_bringup ground_station.launch.py
 
 The default starts the new five-joint arm, joint-state GUI, camera follower, and
 RViz using `waybionic_unified.rviz` with its internal mock diagnostics panel.
+RViz starts maximized to the current screen, keeping diagnostics, menus and
+controls visible. Use `rviz_maximized:=false` to use the layout's saved window
+size instead (1280 x 800 for the bundled layout).
+RViz's separate F11 fullscreen mode hides panels and controls; it is not used
+for ground station startup.
 
 | Argument | Default | Purpose |
 | --- | --- | --- |
 | `launch_rviz` | `true` | Start RViz. |
+| `rviz_maximized` | `true` | Fill the current screen without hiding panels; false uses the layout's window geometry. Unused when RViz is disabled. |
 | `use_joint_state_publisher_gui` | `true` | Start the separate joint-state GUI. |
 | `use_diagnostics` | `true` | Enable the RViz diagnostics panel and permit the demo publisher. |
 | `use_mock_diagnostics` | `true` | Select internal mock data rather than live topics in the panel; demo mode, teleop and the camera always use live topics. |
@@ -21,6 +27,7 @@ RViz using `waybionic_unified.rviz` with its internal mock diagnostics panel.
 | `teleop` | `false` | Drive the arm with a controller through simulated or real CAN drives. |
 | `drive_interface` | `sim` | Drive bus: `sim`, or a python-can interface such as `socketcan` or `slcan` for the real MKS drives. |
 | `drive_channel` | empty | CAN channel for a real drive bus, such as `can0` or `/dev/ttyACM0`. |
+| `arm_profile` | empty | YAML file listing this arm's fitted drives and the angles of joints locked without one (`waybionic_teleop/arm_profile.py`); empty means every drive is fitted. |
 | `joy_source` | `device` | Controller input: local device, UDP host bridge, or none. |
 | `autoplay` | `false` | Play a scripted demo whenever the controller is left idle. |
 | `joy_udp_bind` | `127.0.0.1` | UDP receiver bind address; use `0.0.0.0` inside Docker. |

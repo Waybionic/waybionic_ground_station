@@ -26,7 +26,7 @@ from std_srvs.srv import Trigger
 from waybionic_teleop import carrier, mks_can, slcan_bus
 from waybionic_teleop.can_bus import CanBus
 from waybionic_teleop.mks_drive_sim import serve
-from waybionic_teleop.sim_arm_drives_node import QUIET_BEFORE_ZERO_S, SimArmDrives
+from waybionic_teleop.sim_arm_drives_node import HOLD_RPM, QUIET_BEFORE_ZERO_S, SimArmDrives
 from waybionic_teleop.sim_drives import SimulatedServo
 
 BITRATE = 1000000
@@ -101,6 +101,19 @@ def positions(node):
     return node.map.to_positions(node.counts)
 
 
+def assert_holding(node):
+    """Each drive on the bus is stopped, or runs on only to its hold near where it stopped."""
+    # Two ticks at full speed past the count, and a count of rounding.
+    reach = 2 * node.period * node.max_rpm / 60.0 * mks_can.COUNTS_PER_REV + 31
+    for index, drive in enumerate(node.map.drives):
+        servo = node.bus.drives.get(drive.can_id)
+        if servo is None:
+            continue
+        assert servo.target in (None, node.held[index])
+        assert (servo.rpm == 0.0 if servo.target is None
+                else abs(servo.target - servo.axis) <= reach and servo.speed <= HOLD_RPM)
+
+
 def press_start(node):
     """Load the URDF limits, then release and press Start the way teleop reports it."""
     node.on_description(String(data=URDF))
@@ -111,7 +124,7 @@ def press_start(node):
 def command(node, speed=1.0, **targets):
     """Refresh the enable and send one complete command toward the named joint targets."""
     current = positions(node)
-    goal = {**(node.commanded or current), **targets}
+    goal = {**(node.commanded or current), **node.locked, **targets}
     velocities = [math.copysign(speed, goal[joint] - current[joint]) if joint in targets
                   else 0.0 for joint in goal]
     node.on_enabled(Bool(data=True))
@@ -264,8 +277,9 @@ def test_the_host_drives_mks_servos_over_can(make_node):
         assert node.authorized, node.stop_reason
         assert set(node.limits) == set(node.map.joints)
         assert move(node, executor, joint_1=0.3, joint_4=0.2)
-        # Wrist pitch turns both differential motors the same way, through 3:1 belts.
-        assert servos[4].axis == pytest.approx(servos[5].axis)
+        # Wrist pitch turns the two differential motors through 3:1 belts, the right one
+        # mounted to count the opposite way.
+        assert servos[4].axis == pytest.approx(-servos[5].axis)
         assert servos[4].axis == pytest.approx(
             0.2 * node.map.drives[3].gear_ratio / (2 * math.pi) * mks_can.COUNTS_PER_REV,
             abs=1.0)
@@ -312,6 +326,9 @@ class FakeCarrier:
                   for reply in servo.step(now - self.last)]
         self.last = now
         for line in bytes(data).split(b'\r')[:-1]:
+            if line == b'V':
+                self.output += b'V0100\r'
+                continue
             if line[:1] != b't':
                 # C, Sn, O and an empty line get \r; a frame the carrier puts on the bus, nothing.
                 self.open = {b'O': True, b'C': False}.get(line, self.open)
@@ -357,7 +374,7 @@ def test_the_host_drives_the_arm_through_the_carrier(make_node, carrier_port, mo
     node, executor = make_node(interface='slcan', channel='/dev/cu.usbmodem1101',
                                drives=ARM_DRIVES)
     # The carrier opens at the drives' bit rate, and the monitor waits for its first report.
-    assert port.writes[0] == b'C\rS8\rO\r'
+    assert port.writes[0] == b'V\rC\rS6\rO\r'
     assert carrier_row(node, monkeypatch).level == DiagnosticStatus.WARN
     port.flags = carrier.ESTOP_WIRED
     assert spin_until(executor, lambda: all(state == 'ready' for state in node.state))
@@ -395,7 +412,7 @@ def test_the_host_drives_the_arm_through_the_carrier(make_node, carrier_port, mo
     assert 'USB link lost' in carrier_row(node, monkeypatch).message
     port.unplugged = False
     assert spin_until(executor, lambda: not any(node.lost))
-    assert node.bus.reopens == 1 and port.writes.count(b'C\rS8\rO\r') == 2
+    assert node.bus.reopens == 1 and port.writes.count(b'V\rC\rS6\rO\r') == 2
     assert node.bus.refused == 0
 
 
@@ -429,6 +446,35 @@ def test_frames_the_carrier_refuses_go_out_again(make_node, carrier_port, monkey
     assert any(row.level == DiagnosticStatus.WARN and 'frames refused' in row.message
                for row in rows)
     assert node.bus.refused > 0 and node.bus.errors == 0 and node.bus_errors == 0
+
+
+def test_an_arm_without_its_shoulder_drive_zeroes_and_moves_through_the_carrier(
+        make_node, carrier_port, monkeypatch, bench_profile):
+    port = carrier_port
+    # Only the drives the bench arm has wired answer; a frame for any other fails the test.
+    del port.servos[2]
+    port.flags = carrier.ESTOP_WIRED
+    node, executor = make_node(interface='slcan', channel='/dev/cu.usbmodem1101',
+                               arm_profile=bench_profile)
+    states = []
+    monkeypatch.setattr(node.state_publisher, 'publish', states.append)
+    assert spin_until(executor, lambda: all(state == 'ready' for state in node.state))
+    assert zero(node).success
+    assert spin_until(executor, lambda: node.commanded is not None)
+    press_start(node)
+    assert node.authorized, node.stop_reason
+    assert move(node, executor, joint_1=0.3, joint_4=0.2)
+    assert dict(zip(states[-1].name, states[-1].position))['joint_2'] == 0.0
+    reports = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', reports.append)
+    node.report()
+    assert all(row.level == DiagnosticStatus.OK for row in reports[-1].status), [
+        (row.name, row.message) for row in reports[-1].status
+        if row.level != DiagnosticStatus.OK]
+    sent = {int(line[1:4], 16) for data in port.writes for line in data.split(b'\r')
+            if line[:1] == b't'}
+    assert sent == {1, 3, 4, 5}
+    assert node.bus.errors == 0 and node.bus.refused == 0
 
 
 def test_a_real_bus_needs_a_urdf_limit_for_every_drive_joint(make_node, mock_drives):
@@ -482,7 +528,7 @@ def test_a_drive_that_stops_answering_stops_the_arm_until_it_is_zeroed_again(mak
     assert spin_until(executor, commanding_until_lost)
     assert node.commanded is None and not node.zeroed[2] and not node.authorized
     # Every other drive was told to stop where it is.
-    assert all(servo.target is None for servo in node.bus.drives.values())
+    assert_holding(node)
 
     node.bus.drives[3] = elbow
     assert spin_until(executor, lambda: not node.lost[2] and not node.unconfirmed[2])
@@ -496,6 +542,29 @@ def test_a_drive_that_stops_answering_stops_the_arm_until_it_is_zeroed_again(mak
     assert spin_until(executor, lambda: node.commanded is not None)
     press_start(node)
     assert node.authorized
+
+
+def test_a_relaunch_keeps_the_zero_while_the_drives_stay_powered(
+        make_node, mock_drives, tmp_path):
+    channel, servos = mock_drives
+    saved = tmp_path / 'drive_zero.yaml'
+    servos[1].axis = mks_can.COUNTS_PER_REV / 2
+    node, executor = make_node(interface='virtual', channel=channel, drives=ARM_DRIVES,
+                               zero_state=str(saved))
+    assert spin_until(executor, lambda: all(state == 'ready' for state in node.state))
+    assert zero(node).success
+    assert spin_until(executor, saved.exists)
+    # Pushed by hand while the station is down; raw and zeroed counts move alike.
+    servos[1].axis = 1234.0
+    relaunched, executor = make_node(interface='virtual', channel=channel, drives=ARM_DRIVES,
+                                     zero_state=str(saved))
+    assert not any(relaunched.zeroed)
+    assert spin_until(executor, lambda: all(relaunched.zeroed))
+    assert spin_until(executor, lambda: relaunched.commanded is not None)
+    assert relaunched.counts[0] == 1234
+    press_start(relaunched)
+    assert relaunched.authorized, relaunched.stop_reason
+    assert relaunched.bus.errors == 0 and relaunched.bus_errors == 0
 
 
 def test_commands_that_stop_mid_move_stop_the_drives(make_node):
@@ -567,7 +636,7 @@ def test_a_command_without_speeds_stops_the_drives(make_node):
     targets = dict(node.commanded)
     node.on_command(JointState(name=list(targets), position=list(targets.values())))
     assert not node.authorized and node.rejected == 1
-    assert all(servo.target is None and servo.rpm == 0.0 for servo in node.bus.drives.values())
+    assert_holding(node)
     stopped = positions(node)['joint_1']
     spin_for(executor, 0.5)
     assert positions(node)['joint_1'] == pytest.approx(stopped, abs=1e-3)
@@ -625,7 +694,7 @@ def test_an_empty_command_stops_the_drives_until_a_fresh_start(make_node):
     assert node.bus.drives[1].target is not None
     node.on_command(JointState())
     assert not node.authorized and node.rejected == 1
-    assert all(servo.target is None and servo.rpm == 0.0 for servo in node.bus.drives.values())
+    assert_holding(node)
     response = zero(node)
     assert not response.success and 'still arriving' in response.message
     # Neither an invalid nor a valid command moves the arm again without a fresh Start.
@@ -633,7 +702,7 @@ def test_an_empty_command_stops_the_drives_until_a_fresh_start(make_node):
     command(node, joint_1=0.3)
     spin_for(executor, 0.1)
     assert not node.authorized
-    assert all(servo.target is None and servo.rpm == 0.0 for servo in node.bus.drives.values())
+    assert_holding(node)
     press_start(node)
     # 6 rpm turns the base 0.024 rad/s through its reducer.
     assert move(node, executor, joint_1=0.01)

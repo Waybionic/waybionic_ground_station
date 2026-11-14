@@ -9,7 +9,8 @@ from rclpy.parameter import Parameter
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
-from waybionic_teleop.sim_arm_drives_node import SimArmDrives
+from waybionic_teleop import mks_can
+from waybionic_teleop.sim_arm_drives_node import SimArmDrives, START_DEADBAND_COUNTS
 from waybionic_teleop.xbox_teleop_node import XboxTeleop
 
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
@@ -122,11 +123,21 @@ def test_description_reload_stops_a_moving_drive(
         drives.last_tick -= 0.05
         drives.tick()
         stopped_at = motor.axis
-        assert motor.rpm == 0.0 and motor.target is None
+        # The stop is followed by a hold at the moving drive's last target, no farther than
+        # two ticks of full-speed travel plus the start deadband, and never behind the stop.
+        held = drives.held[0]
+        reach = (2 * drives.period * drives.max_rpm / 60.0 * mks_can.COUNTS_PER_REV
+                 + START_DEADBAND_COUNTS + 1)
+        assert motor.target == held and stopped_at - 1 <= held <= stopped_at + reach
         for _ in range(10):
             drives.last_tick -= 0.05
             drives.tick()
-        assert motor.axis == stopped_at and not drives.authorized
+        assert motor.target in (None, held) and motor.axis == pytest.approx(held, abs=1)
+        rested = motor.axis
+        for _ in range(10):
+            drives.last_tick -= 0.05
+            drives.tick()
+        assert motor.axis == rested and not drives.authorized
         if valid_replacement:
             enable()
             heard = drives.command_time

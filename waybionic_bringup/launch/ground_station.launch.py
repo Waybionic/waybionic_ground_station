@@ -25,6 +25,7 @@ import yaml
 BOOLEAN_CHOICES = ['true', 'false', 'True', 'False', '1', '0']
 BOOLEAN_OPTIONS = {
     'launch_rviz': 'true',
+    'rviz_maximized': 'true',
     'use_joint_state_publisher_gui': 'true',
     'use_diagnostics': 'true',
     'use_mock_diagnostics': 'true',
@@ -124,6 +125,28 @@ def check_files_exist(context, *args, **kwargs):
     return actions
 
 
+def _launch_rviz(context):
+    maximized = IfCondition(LaunchConfiguration('rviz_maximized')).evaluate(context)
+    # Demo mode, teleop and the camera report on live topics.
+    live_diagnostics = OrSubstitution(
+        OrSubstitution(LaunchConfiguration('demo_mode'), LaunchConfiguration('teleop')),
+        LaunchConfiguration('camera'))
+    return [Node(
+        package='waybionic_rviz_plugins' if maximized else 'rviz2',
+        executable='ground_station_rviz' if maximized else 'rviz2',
+        name='rviz2', output='screen',
+        arguments=['-d', LaunchConfiguration('effective_rvizconfig')],
+        condition=IfCondition(LaunchConfiguration('launch_rviz')),
+        parameters=[
+            {'use_sim_time': LaunchConfiguration('use_sim_time')},
+            {'use_mock_diagnostics': AndSubstitution(
+                LaunchConfiguration('use_mock_diagnostics'),
+                NotSubstitution(live_diagnostics))},
+            {'diagnostics_topic': LaunchConfiguration('diagnostics_topic')}
+        ]
+    )]
+
+
 def generate_launch_description():
     waybionic_desc_dir = get_package_share_directory('waybionic_description')
     waybionic_bringup_dir = get_package_share_directory('waybionic_bringup')
@@ -180,6 +203,23 @@ def generate_launch_description():
         description='The carrier serial port or CAN channel, such as /dev/cu.usbmodem1101, '
                     '/dev/ttyACM0 or can0')
 
+    drive_frame_log_arg = DeclareLaunchArgument(
+        'drive_frame_log', default_value='',
+        description='File to append every drive frame sent, received or refused to, with its '
+                    'host time (waybionic_teleop/frame_log.py); empty records nothing')
+
+    drive_zero_state_arg = DeclareLaunchArgument(
+        'drive_zero_state', default_value='',
+        description='File to save the drive zero in, so a restart keeps it while the drives '
+                    'stay powered (SimArmDrives.check_zero); empty saves nothing')
+
+    arm_profile_arg = DeclareLaunchArgument(
+        'arm_profile', default_value='',
+        description="YAML file with this arm's fitted drives and locked joints "
+                    '(waybionic_teleop/arm_profile.py); empty for every drive fitted')
+    arm_profile = {'arm_profile': ParameterValue(LaunchConfiguration('arm_profile'),
+                                                 value_type=str)}
+
     joy_source_arg = DeclareLaunchArgument(
         'joy_source', default_value='device',
         description='Controller input: device (local joystick), udp (host bridge) or none')
@@ -220,6 +260,10 @@ def generate_launch_description():
     launch_rviz_arg = DeclareLaunchArgument(
         'launch_rviz', default_value='true', choices=BOOLEAN_CHOICES,
         description='Launch RViz (set false for headless validation)')
+
+    rviz_maximized_arg = DeclareLaunchArgument(
+        'rviz_maximized', default_value='true', choices=BOOLEAN_CHOICES,
+        description='Fill the screen with RViz while keeping its panels and controls visible')
 
     rviz_config_arg = DeclareLaunchArgument(
         'rvizconfig', default_value=default_rviz_config_path,
@@ -285,7 +329,7 @@ def generate_launch_description():
         package='waybionic_teleop', executable='xbox_teleop', name='xbox_teleop',
         output='screen', condition=IfCondition(teleop),
         parameters=[os.path.join(teleop_config_dir, 'xbox_teleop.yaml'), diagnostics_topic,
-                    sim_time]
+                    arm_profile, sim_time]
     )
 
     drives_node = Node(
@@ -295,8 +339,12 @@ def generate_launch_description():
                     {'interface': ParameterValue(LaunchConfiguration('drive_interface'),
                                                  value_type=str),
                      'channel': ParameterValue(LaunchConfiguration('drive_channel'),
-                                               value_type=str)},
-                    sim_time]
+                                               value_type=str),
+                     'frame_log': ParameterValue(LaunchConfiguration('drive_frame_log'),
+                                                 value_type=str),
+                     'zero_state': ParameterValue(LaunchConfiguration('drive_zero_state'),
+                                                  value_type=str)},
+                    arm_profile, sim_time]
     )
 
     # RViz orbits view_focus, so the follower also runs for the fixed view.
@@ -346,27 +394,18 @@ def generate_launch_description():
         }.items()
     )
 
-    # Demo mode, teleop and the camera report on /diagnostics, so the panel listens to them.
-    rviz_node = Node(
-        package='rviz2', executable='rviz2', name='rviz2', output='screen',
-        arguments=['-d', LaunchConfiguration('effective_rvizconfig')],
-        condition=IfCondition(LaunchConfiguration('launch_rviz')),
-        parameters=[
-            {'use_sim_time': LaunchConfiguration('use_sim_time')},
-            {'use_mock_diagnostics': AndSubstitution(
-                LaunchConfiguration('use_mock_diagnostics'),
-                NotSubstitution(OrSubstitution(simulated_joints, camera)))},
-            {'diagnostics_topic': LaunchConfiguration('diagnostics_topic')}
-        ]
-    )
+    rviz_node = OpaqueFunction(function=_launch_rviz)
 
     return LaunchDescription([
         model_arg, use_mock_diag_arg, diag_topic_arg, start_temp_pub_arg,
         use_jsp_gui_arg, use_diagnostics_arg, demo_mode_arg, demo_speed_arg, teleop_arg,
-        drive_interface_arg, drive_channel_arg, joy_source_arg, autoplay_arg,
+        drive_interface_arg, drive_channel_arg, drive_frame_log_arg, drive_zero_state_arg,
+        arm_profile_arg,
+        joy_source_arg, autoplay_arg,
         joy_udp_bind_arg, joy_udp_port_arg, follow_camera_arg, use_sim_time_arg, camera_arg,
         camera_bind_arg, camera_log_arg,
-        launch_rviz_arg, rviz_config_arg, file_check, rsp_node, jsp_gui_node, joint_demo_node,
+        launch_rviz_arg, rviz_maximized_arg, rviz_config_arg, file_check,
+        rsp_node, jsp_gui_node, joint_demo_node,
         joy_node, joy_udp_node, autoplay_node, teleop_node, drives_node, camera_follower_node,
         temp_diag_pub_node, camera_launch, rviz_node
     ])

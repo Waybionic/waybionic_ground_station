@@ -20,6 +20,8 @@
   <exec_depend>python3-can</exec_depend>
   <!-- The WayBionic carrier's USB serial link (slcan_bus.py). -->
   <exec_depend>python3-serial</exec_depend>
+  <!-- Arm profiles and the saved drive zero. -->
+  <exec_depend>python3-yaml</exec_depend>
 
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>
