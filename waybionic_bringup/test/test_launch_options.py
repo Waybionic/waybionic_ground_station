@@ -2,10 +2,14 @@
 
 import importlib.util
 from pathlib import Path
+from unittest.mock import patch
 
 from launch import LaunchContext
-from launch.actions import DeclareLaunchArgument, RegisterEventHandler
+from launch.actions import DeclareLaunchArgument, EmitEvent, RegisterEventHandler
+from launch.conditions import IfCondition
+from launch.event_handlers import OnProcessExit
 from launch.events import Shutdown
+from launch.events.process import ProcessExited
 from launch_ros.actions import Node
 import pytest
 import yaml
@@ -63,7 +67,7 @@ def test_carried_over_options_and_arm_default():
     for name in (
         'demo_mode', 'demo_speed', 'teleop', 'joy_source', 'joy_udp_bind',
         'joy_udp_port', 'follow_camera', 'use_diagnostics', 'drive_interface',
-        'drive_channel', 'autoplay', 'camera', 'camera_bind', 'camera_log',
+        'drive_channel', 'arm_profile', 'autoplay', 'camera', 'camera_bind', 'camera_log',
     ):
         assert name in args
     assert args['model'].default_value[0].text.endswith('waybionic_arm.urdf')
@@ -76,8 +80,67 @@ def test_headless_ignores_unused_rviz_file(context):
     })
     MODULE.check_files_exist(context)
     assert context.launch_configurations['effective_rvizconfig'] == '/missing/layout.rviz'
-    assert not node('rviz2').condition.evaluate(context)
+    assert not MODULE._launch_rviz(context)[0].condition.evaluate(context)
     assert not node('joint_state_publisher_gui').condition.evaluate(context)
+
+
+@pytest.mark.parametrize('value', MODULE.BOOLEAN_CHOICES)
+def test_rviz_maximized_argument(context, value):
+    context.launch_configurations['rviz_maximized'] = value
+    MODULE.check_files_exist(context)
+    with patch.object(MODULE, 'Node') as constructor:
+        MODULE._launch_rviz(context)
+    options = constructor.call_args.kwargs
+    maximized = value in ('true', 'True', '1')
+    assert options['package'] == ('waybionic_rviz_plugins' if maximized else 'rviz2')
+    assert options['executable'] == ('ground_station_rviz' if maximized else 'rviz2')
+    arguments = options['arguments']
+    assert arguments[0] == '-d'
+    assert arguments[1].perform(context) == (
+        context.launch_configurations['effective_rvizconfig'])
+    assert len(arguments) == 2
+
+
+def test_rviz_defaults_to_maximized():
+    assert declarations()['rviz_maximized'].default_value[0].text == 'true'
+
+
+@pytest.mark.parametrize('mock', ['true', 'false'])
+@pytest.mark.parametrize('mode', [None, 'demo_mode', 'teleop', 'camera'])
+def test_rviz_keeps_live_diagnostics_selection(context, mock, mode):
+    context.launch_configurations['use_mock_diagnostics'] = mock
+    if mode:
+        context.launch_configurations[mode] = 'true'
+    with patch.object(MODULE, 'Node') as constructor:
+        MODULE._launch_rviz(context)
+    parameters = constructor.call_args.kwargs['parameters']
+    use_mock = parameters[1]['use_mock_diagnostics']
+    assert IfCondition(use_mock).evaluate(context) == (mock == 'true' and mode is None)
+
+
+def test_rviz_exit_ends_the_launch_only_when_asked(context):
+    assert declarations()['exit_with_rviz'].default_value[0].text == 'false'
+    context.launch_configurations['exit_with_rviz'] = 'false'
+    assert [type(action) for action in MODULE._launch_rviz(context)] == [Node]
+    context.launch_configurations['exit_with_rviz'] = 'true'
+    rviz, handler = MODULE._launch_rviz(context)
+    assert isinstance(handler, RegisterEventHandler)
+    assert isinstance(handler.event_handler, OnProcessExit)
+    closed = ProcessExited(action=rviz, name='rviz2', cmd=['rviz2'], cwd=None, env=None,
+                           pid=1, returncode=0)
+    assert any(isinstance(action, EmitEvent)
+               for action in handler.event_handler.handle(closed, context))
+
+
+def test_default_window_geometry():
+    config = yaml.safe_load((ROOT / 'rviz/waybionic_unified.rviz').read_text())
+    geometry = config['Window Geometry']
+    assert (geometry['Width'], geometry['Height']) == (1280, 800)
+    state = bytes.fromhex(geometry['QMainWindow State'])
+    for panel in config['Panels']:
+        assert state.count(panel['Name'].encode('utf-16-be')) == 1
+    assert sum(panel['Class'] == 'waybionic_rviz_plugins/DiagnosticsPanel'
+               for panel in config['Panels']) == 1
 
 
 @pytest.mark.parametrize('argument', ['model', 'rvizconfig'])

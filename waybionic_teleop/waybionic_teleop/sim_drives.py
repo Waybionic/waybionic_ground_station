@@ -6,6 +6,11 @@ import math
 from waybionic_teleop import mks_can
 
 MAX_STEP_S = 0.01
+# Firmware V1.0.9 keeps a target behind a running move. Bench runs sent 250 targets up to one
+# 120 Hz host tick of travel behind the drive without one being kept, so only a target farther
+# behind than this much travel is kept here. The bench drives also kept an occasional target
+# ahead of the move, which tests set as latched directly.
+LATCH_MARGIN_S = 0.01
 
 
 def ramp_rpm_per_s(acc):
@@ -31,10 +36,17 @@ class SimulatedServo:
         self.quiet_ms = 0.0
         self.heartbeat_stops = 0
         self.axis = 0.0
+        # The raw encoder (35h) is the axis plus this shift, which a zero (92h) grows by the
+        # axis it clears; power-on resets the axis to 0 at the shaft's magnetic angle.
+        self.raw_shift = 0
+        self.zero_set = False
         self.rpm = 0.0
         self.target = None
         self.speed = 0
         self.acc = 0
+        # Firmware V1.0.9 keeps a target that reverses a running move, as on the bench, and
+        # runs to it once the moves stop: at a stop, an emergency stop or the last target.
+        self.latched = None
 
     def set_test_fault(self, fault=None):
         """Activate or clear a simulator-only drive fault."""
@@ -47,7 +59,14 @@ class SimulatedServo:
         if fault == 'disabled':
             self._enabled_before_test_fault = self.enabled
             self.enabled = False
-            self.target, self.rpm = None, 0.0
+            self.target, self.rpm, self.latched = None, 0.0, None
+
+    def power_cycle(self, magnetic_angle=0):
+        """Lose power and come back where the shaft is: settings, move and zero are gone."""
+        self.mode, self.enabled, self.heartbeat_ms, self.quiet_ms = None, False, 0, 0.0
+        self.respond, self.active = True, True
+        self.target, self.rpm, self.latched, self.speed, self.acc = None, 0.0, None, 0, 0
+        self.axis, self.raw_shift, self.zero_set = 0.0, int(magnetic_angle), False
 
     def receive(self, data, address=None):
         """Handle one command sent to address (by default this drive's ID); return the replies."""
@@ -61,6 +80,14 @@ class SimulatedServo:
             value = round(self.axis).to_bytes(6, 'big', signed=True)
             return ([mks_can.frame(self.can_id, code, value)]
                     if self._responding() else [])
+        if code == mks_can.READ_RAW_ENCODER and not arguments:
+            value = (round(self.axis) + self.raw_shift).to_bytes(6, 'big', signed=True)
+            return ([mks_can.frame(self.can_id, code, value)]
+                    if self._responding() else [])
+        if code == mks_can.READ_ZERO_STATUS and not arguments:
+            value = [2, 1 if self.zero_set else 2]
+            return ([mks_can.frame(self.can_id, code, value)]
+                    if self._responding() else [])
         if code == mks_can.SET_MODE and len(arguments) == 1:
             self.mode, status = arguments[0], 1
         elif code == mks_can.SET_RESPONSE and len(arguments) == 2:
@@ -68,16 +95,19 @@ class SimulatedServo:
         elif code == mks_can.SET_HEARTBEAT and len(arguments) == 4:
             self.heartbeat_ms, status = int.from_bytes(arguments, 'big'), 1
         elif code == mks_can.SET_ZERO and not arguments:
-            self.axis, self.rpm, self.target, status = 0.0, 0.0, None, 1
+            self.raw_shift += round(self.axis)
+            self.axis, self.rpm, self.target, self.latched, status = 0.0, 0.0, None, None, 1
+            self.zero_set = True
         elif code == mks_can.ENABLE and len(arguments) == 1:
             self.enabled = bool(arguments[0]) and self.test_fault != 'disabled'
             status = 1
             if not self.enabled:
-                self.target, self.rpm = None, 0.0
+                self.target, self.rpm, self.latched = None, 0.0, None
         elif code == mks_can.ABSOLUTE_AXIS and len(arguments) == 6:
             status = self.start_move(arguments)
         elif code == mks_can.EMERGENCY_STOP and not arguments:
             self.target, self.rpm, status = None, 0.0, 1
+            self._run_latched()
         elif code == mks_can.SET_BITRATE and len(arguments) == 1:
             rates = {value: rate for rate, value in mks_can.BITRATES.items()}
             status = int(arguments[0] in rates)
@@ -109,10 +139,22 @@ class SimulatedServo:
             self.target = None
             if not self.acc:
                 self.rpm = 0.0
-                return 2
+                return 1 if self._run_latched() else 2
             return 1
-        self.target = int.from_bytes(arguments[3:], 'big', signed=True)
+        target = int.from_bytes(arguments[3:], 'big', signed=True)
+        margin = abs(self.rpm) / 60.0 * mks_can.COUNTS_PER_REV * LATCH_MARGIN_S
+        if (self.rpm * (target - self.axis) < 0 and abs(target - self.axis) > margin
+                and self.latched is None):
+            self.latched = (target, self.speed, self.acc)
+        self.target = target
         return 1
+
+    def _run_latched(self):
+        """Start the move to a latched target, as V1.0.9 does once its moves stop."""
+        if self.latched is None:
+            return False
+        (self.target, self.speed, self.acc), self.latched = self.latched, None
+        return True
 
     def step(self, dt):
         """Advance the motor by dt seconds and return any frames it sends unprompted."""
@@ -154,6 +196,8 @@ class SimulatedServo:
         remaining = self.target - self.axis
         if abs(remaining) < 0.5 or (move * remaining > 0 and abs(move) >= abs(remaining)):
             self.axis, self.rpm, self.target = float(self.target), 0.0, None
+            if self._run_latched():
+                return []
             if self._responding() and self.active:
                 return [mks_can.frame(self.can_id, mks_can.ABSOLUTE_AXIS, [2])]
             return []

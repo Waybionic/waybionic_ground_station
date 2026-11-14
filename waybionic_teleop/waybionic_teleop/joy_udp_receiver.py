@@ -10,13 +10,13 @@ import time
 
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 import rclpy
-from rclpy._rclpy_pybind11 import RCLError
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from sensor_msgs.msg import Joy, JoyFeedback
 
 from waybionic_teleop.gamepad import (AXES, BUTTONS, pack_ping, pack_rumble, PACKET_SIZE,
                                       PONG_MAGIC, unpack, unpack_pong)
+from waybionic_teleop.ros_shutdown import is_shutdown_error
 
 # What a connected packet with centred sticks, released triggers and no buttons unpacks to.
 NEUTRAL = ([0.0] * len(AXES), [0] * len(BUTTONS))
@@ -240,14 +240,8 @@ def main():
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
-    except RCLError as error:
-        # SIGINT can shut down the context before spin recreates its wait set.
-        if rclpy.ok() or 'the given context is not valid' not in str(error):
-            raise
     except RuntimeError as error:
-        # Jazzy may surface this binding error when SIGINT invalidates a subscription.
-        if (rclpy.ok() or not str(error).startswith(
-                "Unable to convert call argument '0' to Python object")):
+        if not is_shutdown_error(error):
             raise
     finally:
         node.socket.close()

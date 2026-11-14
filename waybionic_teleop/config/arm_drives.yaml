@@ -8,10 +8,12 @@
 sim_arm_drives:
   ros__parameters:
     rate_hz: 120.0
-    # Set every drive to 1 Mbit/s first (mks_setup, or CanRate on its screen; MKS ships 500k):
-    # six drives at 120 Hz load the bus about 30% at 1 Mbit/s and 60% at 500 kbit/s.
-    bitrate: 1000000
-    # The carrier's USB serial speed (carrier_bridge.ino); only used with interface slcan.
+    # Every drive and the carrier must run CAN at this rate. MKS drives ship at 500k (mks_setup or
+    # CanRate on a drive's screen changes it), and the carrier's MCP2515 module, with its 8 MHz
+    # crystal, runs 500 kbit/s at most. Six drives at 120 Hz load the bus about 60% at 500 kbit/s.
+    bitrate: 500000
+    # The carrier's link is native USB, which ignores the baud rate, except that 1200 hands the
+    # port back for an upload (UsbHandBack.h). Only used with interface slcan.
     tty_baudrate: 1000000
     # Teleop ramps the speed. A steep drive ramp keeps the drives in step with each other: a
     # gentle one gives every drive the same rpm/s, so the one that must change most falls behind.
@@ -54,24 +56,25 @@ sim_arm_drives:
       gear_ratio: 26.0
       joints: [joint_2]
       factors: [1.0]
-    # SERVO42D
+    # SERVO42D. Its motor counts down as the elbow turns the URDF's positive way (bench arm).
     elbow:
       can_id: 3
       gear_ratio: 26.0
       joints: [joint_3]
-      factors: [1.0]
+      factors: [-1.0]
     # SERVO42D, left side gear: pitch minus roll
     wrist_left:
       can_id: 4
       gear_ratio: 3.0
       joints: [joint_4, joint_5]
       factors: [1.0, -1.0]
-    # SERVO42D, right side gear: pitch plus roll
+    # SERVO42D, right side gear: pitch plus roll. Its motor counts the opposite way to the left
+    # one (bench arm), so pitch turns the two encoders opposite ways and roll the same way.
     wrist_right:
       can_id: 5
       gear_ratio: 3.0
       joints: [joint_4, joint_5]
-      factors: [1.0, 1.0]
+      factors: [-1.0, -1.0]
     tool:
       can_id: 6
       gear_ratio: 1.0

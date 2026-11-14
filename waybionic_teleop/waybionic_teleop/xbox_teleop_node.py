@@ -2,8 +2,13 @@
 Drive the arm from an Xbox controller: /joy in, /joint_commands out.
 
 Mapping and limits come from config/xbox_teleop.yaml and the robot_description joint limits;
-the logic lives in :mod:`waybionic_teleop.teleop`. The node also reports its state on
-/diagnostics and draws a placeholder end effector and a status label in RViz.
+a joint the arm profile (``arm_profile``) locks stays at its angle, and so does one the drive
+node reports switched off on ``arm/joint_control``. The logic lives in
+:mod:`waybionic_teleop.teleop`. The node also reports its state on /diagnostics and draws a
+placeholder end effector and a status label in RViz. Chicken head mode, which holds the tool
+tip at a spot while the sticks tilt and roll the tool, and demo mode, which moves the arm around
+slowly by itself, are each switched with a service and reported on a latched topic
+(:mod:`waybionic_teleop.chicken_head`, :mod:`waybionic_teleop.demo_mode`).
 """
 
 import math
@@ -11,17 +16,20 @@ import time
 
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 import rclpy
-from rclpy._rclpy_pybind11 import RCLError
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState, Joy, JoyFeedback
 from std_msgs.msg import Bool, String
+from std_srvs.srv import SetBool
 from visualization_msgs.msg import Marker, MarkerArray
 
+from waybionic_teleop import chicken_head, demo_mode, joint_control
+from waybionic_teleop.arm_profile import load_profile
 from waybionic_teleop.collision import ArmCollision
 from waybionic_teleop.gamepad import AXES, BUTTON, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
+from waybionic_teleop.ros_shutdown import is_shutdown_error
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
 
 JAW_SIZE = (0.006, 0.014, 0.03)
@@ -72,6 +80,9 @@ class XboxTeleop(Node):
                 and 0 <= self.self_clearance < math.inf):
             raise ValueError('table_height must be finite, and collision_clearance and '
                              'self_collision_clearance zero or more and finite')
+        self.locked = load_profile(params.get('arm_profile', '')).locked_joints
+        # Joints the drive node says are switched off, even before there is a teleop to tell.
+        self.disabled = set()
         self.teleop = None
         self.problem = 'Waiting for robot_description'
         self.joy = None
@@ -84,6 +95,12 @@ class XboxTeleop(Node):
         self.create_subscription(String, 'robot_description', self.load, latched)
         self.create_subscription(Joy, 'joy', self.on_joy, 10)
         self.create_subscription(JointState, 'joint_states', self.on_joint_states, 10)
+        self.create_subscription(DiagnosticArray, joint_control.TOPIC, self.on_joint_control,
+                                 latched)
+        self.head_publisher = self.create_publisher(DiagnosticArray, chicken_head.TOPIC, latched)
+        self.create_service(SetBool, chicken_head.SERVICE, self.on_head)
+        self.demo_publisher = self.create_publisher(DiagnosticArray, demo_mode.TOPIC, latched)
+        self.create_service(SetBool, demo_mode.SERVICE, self.on_demo)
         self.command_publisher = self.create_publisher(JointState, 'joint_commands', 10)
         self.enable_publisher = self.create_publisher(Bool, 'teleop_enabled', latched)
         # game_controller_node rumbles a local controller; joy_udp_receiver passes it on.
@@ -132,12 +149,13 @@ class XboxTeleop(Node):
             kinematics = None
             self.get_logger().warning(f'Cartesian group unavailable: {error}')
         try:
-            self.teleop = ArmTeleop(self.config, limits, kinematics, collision)
+            self.teleop = ArmTeleop(self.config, limits, kinematics, collision, self.locked)
         except ValueError as error:
             self.teleop, self.problem = None, str(error)
             self.get_logger().error(f'Teleop disabled: {error}')
             return
         self.problem = ''
+        self.apply_disabled()
         self.get_logger().info('Xbox teleop ready (press Start to enable): ' + '; '.join(
             f'{group.name}: {group.describe()}' for group in self.teleop.groups))
 
@@ -155,6 +173,52 @@ class XboxTeleop(Node):
             return
         self.joy, self.joy_time = message, time.monotonic()
         self.joy_count += 1
+
+    def on_head(self, request, response):
+        if self.teleop is None:
+            response.success, response.message = False, self.problem
+        else:
+            response.success, response.message = self.teleop.set_head_mode(request.data)
+        self.publish_head()
+        return response
+
+    def publish_head(self):
+        if self.teleop is None:
+            state, message = chicken_head.UNAVAILABLE, self.problem
+        else:
+            state, message = self.teleop.head_status()
+        self.head_publisher.publish(chicken_head.head_message(state, message))
+
+    def on_demo(self, request, response):
+        if self.teleop is None:
+            response.success, response.message = False, self.problem
+        else:
+            response.success, response.message = self.teleop.set_demo_mode(request.data)
+        self.publish_demo()
+        return response
+
+    def publish_demo(self):
+        if self.teleop is None:
+            state, message = demo_mode.UNAVAILABLE, self.problem
+        else:
+            state, message = self.teleop.demo_status()
+        self.demo_publisher.publish(demo_mode.demo_message(state, message))
+
+    def on_joint_control(self, message):
+        self.disabled = joint_control.disabled_joints(message)
+        self.apply_disabled()
+
+    def apply_disabled(self):
+        if self.teleop is None:
+            return
+        was_enabled = self.teleop.enabled
+        changed = self.teleop.set_disabled(
+            self.disabled, self.recent_measurement(time.monotonic()))
+        if changed and was_enabled:
+            # Hold the arm where it is until the operator presses Start again.
+            self.publish_enabled(False)
+            self.publish_command()
+            self.get_logger().warning('Joint enable changed: teleop disabled, arm held')
 
     def on_joint_states(self, message):
         now = time.monotonic()
@@ -255,7 +319,9 @@ class XboxTeleop(Node):
                 state += '\n' + stop_reason(teleop.blocked)
         else:
             state = 'DISABLED\nPRESS-MENU' if fresh else 'NO-CONTROLLER'
-        return f'{teleop.active_group.name.upper()}\n{self.speed_percent():.0f}%\n{state}'
+        name = ('HEAD' if teleop.head is not None else 'DEMO' if teleop.demo is not None
+                else teleop.active_group.name.upper())
+        return f'{name}\n{self.speed_percent():.0f}%\n{state}'
 
     def speed_percent(self):
         return 100.0 * self.config.speed_levels[self.teleop.level]
@@ -315,29 +381,46 @@ class XboxTeleop(Node):
         else:
             group = teleop.active_group
             cartesian = group.mode == 'cartesian'
+            head, demo = teleop.head is not None, teleop.demo is not None
             hint = 'B stops, Y switches group, A holds to go home'
-            if group.mode == 'incision':
+            if head:
+                hint = 'B stops; Y or A leaves chicken head'
+            elif demo:
+                hint = 'B stops; Y or A leaves demo mode'
+            elif group.mode == 'incision':
                 hint = ('Tilt stays in the arm plane; going home is off here; B stops; '
                         'Y switches once the tool is withdrawn')
             note = teleop.note or ('At limit: ' + ', '.join(teleop.blocked) if teleop.blocked
                                    else ('LB moves along one axis; ' if cartesian else '') + hint)
-            speed = (f'{1000.0 * teleop.linear_speed:.1f} mm/s' if group.mode != 'joint'
+            if teleop.disabled:
+                note = f'Joints off: {", ".join(sorted(teleop.disabled))}; {note}'
+            speed = (f'{1000.0 * teleop.linear_speed:.1f} mm/s'
+                     if group.mode != 'joint' and not (head or demo)
                      else f'{math.degrees(teleop.speed):.0f} deg/s')
+            speed_note = f'{speed} max; D-pad up/down changes it'
+            if demo:
+                top = math.degrees(min(teleop.speed, self.config.demo.max_speed))
+                speed_note = f'{top:.0f} deg/s max; D-pad down slows it, up does not speed it up'
             low, high = self.config.tool_limits
             closed = (self.measured.get(self.config.tool_joint, low) - low) / (high - low)
             statuses += [
                 status('teleop.state', DiagnosticStatus.WARN if teleop.warning
                        else DiagnosticStatus.OK, 'enabled' if teleop.enabled else 'disabled',
                        '', note),
-                status('teleop.group', DiagnosticStatus.OK, group.name, '', group.describe()),
+                status('teleop.group', DiagnosticStatus.OK,
+                       'chicken head' if head else 'demo' if demo else group.name, '',
+                       teleop.head_status()[1] if head else teleop.demo_status()[1] if demo
+                       else group.describe()),
                 status('teleop.speed', DiagnosticStatus.OK, f'{self.speed_percent():.0f}', '%',
-                       f'{speed} max; D-pad up/down changes it'),
+                       speed_note),
                 status('teleop.tool', DiagnosticStatus.OK, f'{100.0 * closed:.0f}', '%',
                        'closed (placeholder end effector); RT closes, LT opens'),
             ]
         message = DiagnosticArray(status=statuses)
         message.header.stamp = self.get_clock().now().to_msg()
         self.diagnostics_publisher.publish(message)
+        self.publish_head()
+        self.publish_demo()
 
 
 def main():
@@ -347,14 +430,8 @@ def main():
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
-    except RCLError as error:
-        # SIGINT can shut down the context before spin recreates its wait set.
-        if rclpy.ok() or 'the given context is not valid' not in str(error):
-            raise
     except RuntimeError as error:
-        # Jazzy may surface this binding error when SIGINT invalidates a subscription.
-        if (rclpy.ok() or not str(error).startswith(
-                "Unable to convert call argument '0' to Python object")):
+        if not is_shutdown_error(error):
             raise
     finally:
         node.destroy_node()

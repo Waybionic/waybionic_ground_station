@@ -1,11 +1,16 @@
-# CAN bench firmware (UNO R4 + TJA1051T + MKS SERVO42D/57D)
+# CAN bench firmware (UNO R4 + MKS SERVO42D/57D)
 
 This folder holds the Arduino firmware for bringing up the arm's MKS drives on a real classic
 CAN bus. The shared MKS subset is ported from `waybionic_teleop/mks_can.py` (merged through
 PR #28) and checked against it byte for byte. The host build in `../CMakeLists.txt` compiles
 and unit-tests the same library files.
 
-For the supervised session with all five arm drives, use the
+There are **two different carrier topologies**: the R4's built-in CAN controller with a
+TJA1051T transceiver, and the arm's external [MCP2515 SPI module](#mcp2515-carrier).
+Select the matching sketch before flashing; identical host protocols do not make the
+hardware interchangeable.
+
+For a supervised built-in-CAN session with all five arm drives, use the
 [five-drive hardware checklist](../docs/HARDWARE_BRINGUP_CHECKLIST.md).
 
 | Sketch | Board role | Moves anything? |
@@ -14,7 +19,8 @@ For the supervised session with all five arm drives, use the
 | `four_node_bench/gateway/` | Arduino 1 of the four-node bench: the laptop types commands, the board puts them on the bus and tracks which receiver answered | Only when typed |
 | `four_node_bench/receiver/` | Arduinos 2-4: answer MKS frames like a drive, with a software-only actuator | No (software only) |
 | `carrier_bridge/` | Laptop USB serial ↔ CAN bridge speaking a subset of SLCAN, so python-can can use it | Forwards whatever the host sends |
-| `libraries/WaybionicCan/` | Shared code: MKS framing, receiver/gateway logic, console, SLCAN, UNO R4 CAN transport | - |
+| `carrier_bridge_mcp2515/` | Same host protocol, using the external MCP2515 SPI module rather than the R4's built-in CAN controller | Forwards whatever the host sends |
+| `libraries/WaybionicCan/` | Shared code: MKS framing, receiver/gateway logic, console, SLCAN, built-in and MCP2515 CAN transports | - |
 
 ## Safety rules (read before powering a drive)
 
@@ -30,12 +36,13 @@ For the supervised session with all five arm drives, use the
   -0x800000..0x7FFFFF, 0-3000 rpm, acc 0-255). They are constants in the sketch
   (`benchPolicy()` / `MotionPolicy`). Change them only with the leads, then re-upload.
 - The human-readable bench sketches stay at the drive's factory **500 kbit/s**. The real-arm
-  host and `carrier_bridge` select **1 Mbit/s CAN** after each drive is configured.
+  built-in-CAN configuration targets **1 Mbit/s CAN** after each drive is configured.
+  The MCP2515 arm configuration stays at **500 kbit/s**.
 - `estop <id>` sends the manual's F7h immediate emergency-stop command. It is a software
   command and does not replace the physical E-stop. Drive-ID (8Bh) and bitrate (8Ah) are not
   implemented in the merged `mks_can.py` or this shared library.
 
-## Hardware topology
+## Built-in CAN hardware topology
 
 ```text
 laptop (USB serial: 1000000 baud for carrier_bridge, 115200 for the consoles)
@@ -50,11 +57,89 @@ UNO R4 WiFi -- CAN TX = D10 --> TJA1051T TXD
                            24 V supply, current limited
 ```
 
-- **The UNO R4 has a CAN controller built in.** The TJA1051T is only a **transceiver**: it turns the controller's TX/RX logic signals into the differential CAN_H/CAN_L pair. No MCP2515 is used.
+- **The UNO R4 has a CAN controller built in.** The TJA1051T is only a **transceiver**: it turns the controller's TX/RX logic signals into the differential CAN_H/CAN_L pair. No MCP2515 is used in this variant.
 - **Pins:** on the **UNO R4 WiFi**, CAN TX = **D10** and CAN RX = **D13**, as in the official core (`variants/UNOWIFIR4/pins_arduino.h`: `PIN_CAN0_TX 10`, `PIN_CAN0_RX 13`). The **UNO R4 Minima** uses different pins, D4 (TX) and D5 (RX), per `variants/MINIMA/pins_arduino.h`. The sketches use the core's `CAN` object, so they pick the right pins for whichever board you compile for, and they print those pins at boot.
 - **Termination:** one 120 Ω resistor across CAN_H/CAN_L at **each of the two physical ends** of the bus, and nowhere else. With power off, CAN_H to CAN_L should measure about 60 Ω.
 - **Bus wiring:** CAN_H to CAN_H and CAN_L to CAN_L on every node.
 - **Not yet specified by Electrical (TBD, ask Yassin):** how the TJA1051T module is powered, how its mode pin is strapped (it must be in normal mode, not silent), the ground reference between the Arduino, the transceiver and the drive, and the connector pinout on the drive side. This README doesn't guess at them.
+
+## MCP2515 carrier
+
+The arm's carrier uses `carrier_bridge_mcp2515`: UNO R4 WiFi hardware SPI on D11
+(MOSI), D12 (MISO), D13 (SCK), with CS on D10 and INT on D2. The configured module
+oscillator is 8 MHz and CAN runs at 500 kbit/s. D13 is **SPI clock in this topology**,
+not a transceiver RXD pin. A pin-level diagnosis for the built-in-CAN topology does
+not apply to this carrier.
+
+`scripts/macos.sh flash` selects this sketch by default. The built-in-CAN sketch
+requires `scripts/macos.sh flash carrier_bridge`. Neither operation should be
+used as a diagnostic probe without confirming the connected hardware and a safe bench state.
+
+The MCP2515 receive configuration uses **RXM=00 and explicitly zeroed acceptance
+masks/filters**, retaining all standard IDs/data bytes while requiring valid CAN messages.
+Do not use RXM=11 as a shortcut for accepting all IDs: according to the
+[MCP2515 datasheet, sections 4.1.3 and 4.2.2, page 23](https://ww1.microchip.com/downloads/en/DeviceDoc/MCP2515-Stand-Alone-CAN-Controller-with-SPI-20001801J.pdf#page=23),
+that debug mode also delivers partially assembled messages when CAN errors occur.
+The MKS eight-bit checksum can accidentally accept corrupted data; it does not
+replace the controller's CAN validation.
+All filters use EXIDE=0, so reception is limited to standard frames. Software also
+defensively rejects extended and remote frames if they reach the receive buffers.
+
+RXnIF locks each receive buffer until the firmware clears it **after** copying the
+frame. Slow, separate register reads can contribute to overflow of the other
+buffer, but do not by themselves cause a pending frame to be overwritten mid-read.
+The existing bench-tested SPI read conditioning is retained. Controller errors
+remain counted; no encoder-jump or motion-stop checks are relaxed.
+
+The previous RXM=11 setting is a confirmed software defect. It is not proof that
+every historical corrupt host-log entry originated there: those logs contain
+neither the CAN wire traffic nor the SPI transactions. A host fault message alone
+does not establish a wiring or transceiver fault.
+
+### Stationary validation of valid-only reception
+
+The corrected sketch was uploaded to the UNO R4 WiFi and checked on 2026-10-31,
+with the arm supported and the operator present. The five-minute check sent only
+31h encoder requests to drives 1, 3, 4 and 5 at 500 kbit/s; it sent no enable, zero,
+stop or position commands.
+
+- **143,985 requests and matching replies**, approximately 119.99 Hz per drive.
+- Per-drive p95 host-queue-to-next-matching-reply time: **3.96-4.37 ms**.
+- No bad MKS checksums; the largest successive count change was **one count**.
+- No new host errors, refusals, reopen events, or carrier-counter increases during
+  the measurement. A separate audit of the raw serial records confirmed the
+  encoder-only command whitelist and reply totals.
+
+Carrier counters are cumulative across serial sessions. The refused-line count
+increased between sessions from 0 to 1 to 2, before any encoder requests in those
+new sessions, and stayed at 2 throughout the five-minute measurement. The initial
+absolute-counter check stopped before polling, and the later measurement explicitly
+recorded its baseline rather than resetting the counter. The subsequent
+[serial-close check](#serial-close-acknowledgement) isolated a host lifecycle issue,
+not evidence of a CAN wiring fault.
+
+E-stop and supply-voltage telemetry reported **unknown**, not healthy or faulty.
+The operator's physical power cutoff, not those unavailable telemetry inputs, was
+the safeguard for this stationary check.
+
+This validates stationary request/reply traffic only. It does **not** establish
+calibration accuracy, motion safety, or the source of every historical corrupt
+frame. Comparable motion-traffic testing and, if corruption recurs, independent
+CAN/SPI capture remain necessary before declaring that failure resolved.
+
+### Serial-close acknowledgement
+
+A control-only bench comparison reproduced a refused-line increment when USB was
+closed immediately after writing SLCAN `C`. The tested in-band close/open,
+flush-before-close and acknowledged-close cycles did not increment it. The host
+now waits up to 250 ms for the carrier's close acknowledgement before releasing
+USB, rather than treating `write()` as proof that the final line was received.
+Timeouts, refusals and disconnects are reported; the port is still released.
+
+With the corrected host, **30 USB close/reopen cycles and 120 encoder requests**
+completed with matching replies and no counter increase. Close acknowledgements
+took at most **2.90 ms** in that run. This change does not alter the drive node's
+stop/hold sequence and does not send additional motor commands.
 
 ## Bitrate
 
@@ -63,10 +148,13 @@ UNO R4 WiFi -- CAN TX = D10 --> TJA1051T TXD
 | MKS drives as shipped | 500 kbit/s | Factory default |
 | Bench sketches (`kCanBitrate`) | 500 kbit/s | Match drives as shipped |
 | Real-arm host through `carrier_bridge` | 1 Mbit/s | Target for the five arm drives |
+| Real-arm host through `carrier_bridge_mcp2515` | 500 kbit/s | Current 8 MHz MCP2515 arm configuration |
 | Carrier USB serial | 1,000,000 baud | Separate serial-link setting, not CAN bitrate |
 
-Configure each drive alone before using the real-arm host. The carrier keeps the CAN rate at
-which it first opened until reset, so replug it before checking the shared 1 Mbit/s bus:
+The following migration is **only for the built-in-CAN 1 Mbit/s topology**, not the
+8 MHz MCP2515 carrier (which cannot use 1 Mbit/s with this driver). Configure each
+drive alone. The carrier keeps the CAN rate at which it first opened until reset,
+so replug it before checking the shared 1 Mbit/s bus:
 
 ```bash
 ./scripts/macos.sh drives set-bitrate 3 1000000
@@ -285,6 +373,7 @@ must remain effective with the carrier absent or failed.
 | Command | Status | Source |
 | --- | --- | --- |
 | 31h READ_ENCODER + 6-byte signed reply | Implemented and verified against merged vectors and an ~81k-case cross-check with `mks_can.py` | `mks_can.py`, `test_mks_can.py` |
+| 39h READ_POSITION_ERROR + signed int32 | Python decoder and read-only `mks_setup read-error` query; 1424 matching replies in an elbow pressure recording | `mks_can.py`, `mks_setup.py`, their unit tests |
 | 82h SET_MODE (05h SR_vFOC) | Implemented and verified | same |
 | 8Ch SET_RESPONSE | Implemented and verified | same |
 | 98h SET_HEARTBEAT | Implemented and verified | same |
@@ -296,6 +385,50 @@ must remain effective with the carrier absent or failed.
 | Broadcast ID 0, other MKS commands | Not implemented | - |
 
 "Verified" means checked against the repo's reference implementation and its manual vectors. The real-hardware check is the frame log from the bench session.
+
+The observed `39h` reply has DLC 6: command byte, four signed error bytes, and checksum.
+Its scale is 51200 units per motor turn, unlike the `31h` encoder's 16384 counts per
+turn. It is motor-shaft position error, not a fault code or a measured force. See
+[powered hand-guiding](../../docs/operator_guide.md#powered-hand-guiding) for the limits
+of using it to infer a push.
+
+### F5h on firmware V1.0.9
+
+The bench drives (SERVO42D_CAN, firmware V1.0.9, hardware 2) take the F5h frames above as the
+manual says, with one exception found with `waybionic_teleop`'s 120 Hz target stream. A target
+sent while a running move is reversing or slowing to turn back can be kept, and so can an
+occasional target sent mid-stroke in the same direction. Once the moves stop (F5h speed 0,
+F7h, or the last target reached), the drive runs to that kept target at the old speed, up to
+12° of base travel and 0.07-0.9 s after the frame. Frame logs show the run starting 3-5 ms
+after the stop. Each runaway ended 1-8 counts from a target sent earlier. The exact trigger
+isn't known.
+
+The drive node avoids this in two ways.
+
+- **No target behind a running move.** When the commanded target passes the last encoder
+  reading against the drive's direction, the node sends an F5h stop (speed 0, acc 0). It
+  sends no new target until the drive has settled: 12 ms after the stop, with no encoder
+  step in the old direction; or a run-complete reply after the stop, with a step under 5
+  counts. The bench pause before the drive turns back is 17 ms median, 42 ms worst case.
+  Over the same random stick profiles on the base, streaming straight through each reversal
+  ran away 7 times in 80 cycles; the stop and settle ran away 0 times in 80 (p≈0.007).
+- **A hold right behind every stop.** Every stop of a running move is followed at once by an
+  F5h to where the drive is to stay, at 60 rpm. That is the stopped move's last target, at
+  most two ticks of travel past the last encoder reading. The hold goes out again every tick
+  for 0.25 s. A drive that may have lost its zero (lost, faulted, being zeroed) or whose
+  E-stop is pressed gets no hold. Bench, base, 80 ramped-down stops per variant:
+
+  | After the stop | Runs to a kept target | Worst excursion |
+  | --- | --- | --- |
+  | One re-target once a run showed | 7 | 2515 counts (2.1°) |
+  | Hold every tick from 8 ms | 8 | 1282 counts (1.1°) |
+  | Hold 1 ms after the stop, then every tick | 5, each caught | 437 counts (0.37°) |
+  | **Hold right behind the stop, then every tick** (the node) | **0** | **107 counts (0.09°)** |
+
+`sim_drives.py` models the kept target so the tests catch any regression.
+
+The speed-0, acc-0 stop itself overshoots by about 100 counts on the base, then creeps back to
+the last F5h target.
 
 ## Verification status
 

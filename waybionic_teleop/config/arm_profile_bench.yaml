@@ -1,0 +1,7 @@
+# The bench arm as it is built now: a drive on each of J1 to J5 (CAN IDs 1 to 5) and no tool
+# drive. The Windows launcher (compose.yaml, wslg-arm) uses this file, as a Mac uses
+# ~/.waybionic/arm_profile.yaml; waybionic_teleop/arm_profile.py describes the format.
+# When the tool drive (CAN ID 6) is fitted, add `tool` to fitted_drives and delete tool_grip
+# from locked_joints.
+fitted_drives: [base_yaw, shoulder, elbow, wrist_left, wrist_right]
+locked_joints: {tool_grip: 0.0}

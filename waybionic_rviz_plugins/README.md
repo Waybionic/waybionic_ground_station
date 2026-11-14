@@ -1,11 +1,16 @@
 # WayBionic RViz2 Diagnostics Plugin
 
-RViz2-native diagnostics and monitoring UI for WayBionic. This package is diagnostics-only: it provides the engineer monitoring panel, mock/live diagnostics switching, and a temporary `/diagnostics` publisher for local validation.
+RViz2-native diagnostics and monitoring UI for WayBionic. This package provides the engineer monitoring panel, mock/live diagnostics switching, and a temporary `/diagnostics` publisher for local validation. Two small operator panels sit beside it, the arm setup guide and joint control (see [Operator panels](#operator-panels)); they only read topics and call services, and never send motion.
 
-Monitoring-only scope:
+It also provides `ground_station_rviz`, the ground station's RViz entry point.
+It uses RViz's normal application initialization and then maximizes the window
+with Qt, rather than entering RViz's panel-hiding fullscreen mode. It accepts
+the normal RViz and ROS arguments and does not send motor commands.
+
+Monitoring scope:
 
 - No motor commands from this package.
-- No robot control or safety-critical logic.
+- No robot control or safety-critical logic. The operator panels ask the drive node to hold or release a joint, or to zero, over services; the drive node decides and refuses while the arm is enabled.
 - No camera or doctor/surgeon UI in this PR (handled separately later).
 - Mock diagnostics for validation while backend `/diagnostics` is not ready.
 
@@ -29,13 +34,59 @@ colcon test --packages-select waybionic_rviz_plugins
 colcon test-result --verbose
 ```
 
+## Operator panels
+
+The panels are in the ground station's right-hand dock, above the diagnostics panel
+(`ground_station_rviz` stacks them; a plain `rviz2` leaves them wherever the layout puts them).
+It also puts the joint control and diagnostics panels in scroll areas, so that the panels together
+do not make the window taller than a laptop screen; the setup and motion modes panels ask for the
+height their text needs (`fitPanelHeight`) and do not scroll.
+
+**Arm setup** (`waybionic_rviz_plugins/SetupPanel`) lists the start-up steps the `setup_guide`
+node publishes on the latched `/arm/setup` topic (a DiagnosticArray of `setup.<step>` rows:
+carrier, drives, controller, zero, ready). Each row's message is what to do next and its values
+are `title`, `state` (`ok`, `todo`, `blocked` or `working`), `action` (`zero` or empty) and
+`current`. When the guide asks for a zero, the panel offers a Zero button; after the operator
+confirms the arm is in its zero pose it calls the drive node's `/sim_arm_drives/zero`
+(`std_srvs/Trigger`) and shows the answer. Once every step is done the panel shrinks to one line,
+and four seconds later (`kSetupHideAfter`) it closes its dock; `SetupDockPolicy` opens it again, once,
+when a step before ready needs the operator (`SetupSnapshot::needsAttention`) and again hides it once
+the arm is next ready. Teleop merely being stopped changes nothing.
+
+**Joint control** (`waybionic_rviz_plugins/JointControlPanel`) shows a checkbox per joint,
+J1 to J5 and the tool. It reads the latched `/arm/joint_control` topic (a DiagnosticArray with
+one row per joint: `state` is `enabled`, `disabled` or `no_drive`, plus `drives` and `angle`)
+and calls `/arm/<joint>/set_enabled` (`std_srvs/SetBool`) when a box is clicked. A joint that
+is off is held by the drive node, which refuses a change while the arm is enabled; the panel
+shows that refusal and leaves the box as the topic says. A joint with no drive is shown but
+cannot be switched.
+
+**Motion modes** (`waybionic_rviz_plugins/MotionModesPanel`) has one checkbox for each mode in which
+the teleop node moves the arm by itself. Chicken head mode holds the tool tip at a preset spot while
+the sticks tilt and roll the tool, and demo mode moves the arm around slowly and smoothly. Each mode
+has a latched topic with one row whose `state` says what it is doing (`/arm/chicken_head`: `off`,
+`approach`, `hold`, `blocked` or `unavailable`; `/arm/demo`: `off`, `running`, `stopping` or
+`unavailable`) and whose message says what is going on, and a `std_srvs/SetBool` service the panel
+calls when the box is clicked (`/arm/chicken_head/set_enabled`, `/arm/demo/set_enabled`). As in the
+joint control panel, a box follows the topic, not the click: a refusal such as "Press Start first"
+is shown for a few seconds and the box stays as it was, and a row that is a warning, such as a demo
+that stopped because something was in the way, is shown in the warning colour. The panel sends only
+the switches, never a motion command; the teleop node moves the arm. The modes, their topics and the words for their states are one table
+each in `mode_model.cpp` (`ModeSpec`), and a test in `waybionic_teleop` keeps the table in step with
+the node's own module for the mode. Adding a mode to the panel is adding a table.
+
+All three publishers repeat their message every 0.5 s, so three seconds of silence greys a panel
+out as waiting. The parsing of each topic lives in a Qt-free unit (`joint_control_model.*`,
+`setup_model.*`, `mode_model.*`) with gtests that build fabricated messages.
+
 ## Package Layout
 
 ```text
 waybionic_rviz_plugins/
   CMakeLists.txt              # Builds the shared RViz plugin library + tests
   package.xml                 # Generic deps only; no Annin/AR4 exec deps
-  plugin_description.xml      # Registers DiagnosticsPanel
+  plugin_description.xml      # Registers DiagnosticsPanel, SetupPanel, MotionModesPanel, JointControlPanel,
+                                  # MotionTestPanel
   scripts/
     temporary_diagnostics_publisher.py
     diagnostics_recorder.py
@@ -43,12 +94,25 @@ waybionic_rviz_plugins/
     diagnostics_contract.hpp  # Normalized DiagnosticMessage model
     diagnostics_source.hpp    # DiagnosticsSource interface
     diagnostics_panel.hpp     # Engineer monitoring panel
+    joint_control_model.hpp   # Qt-free parsing of /arm/joint_control
+    joint_control_panel.hpp   # Joint on/off checkboxes
     mock_diagnostics_source.hpp
+    mode_model.hpp            # Qt-free parsing of the motion mode topics
+    motion_modes_panel.hpp    # Motion mode checkboxes
+    panel_fit.hpp             # Height a panel asks of its dock
     ros_diagnostics_source.hpp
+    setup_model.hpp           # Qt-free parsing of /arm/setup
+    setup_panel.hpp           # Start-up steps and the Zero button
   src/
     diagnostics_panel.cpp
+    joint_control_model.cpp
+    joint_control_panel.cpp
     mock_diagnostics_source.cpp
+    mode_model.cpp
+    motion_modes_panel.cpp
     ros_diagnostics_source.cpp
+    setup_model.cpp
+    setup_panel.cpp
   config/
     engineer_monitoring_view.rviz   # Generic engineer layout (default)
   launch/
@@ -56,7 +120,10 @@ waybionic_rviz_plugins/
     temporary_diagnostics_publisher.launch.py
   test/
     test_package_metadata.py
+    test_joint_control_model.cpp      # /arm/joint_control parsing
+    test_mode_model.cpp               # Motion mode topic parsing
     test_ros_diagnostics_source.cpp   # Live/mock source handoff stress tests
+    test_setup_model.cpp              # /arm/setup parsing
   docs/
     DIAGNOSTICS_CONTRACT.md
     DIAGNOSTICS_SOURCE_LIFECYCLE.md
