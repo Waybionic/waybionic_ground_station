@@ -106,11 +106,11 @@ def test_unreachable_points_have_no_solution(arm):
     assert arm.inverse((0.01, 0.0, 0.3), math.pi, 0.0, DOWN, LIMITS) is None
 
 
-def cut(arm, velocity, seconds, joints=DOWN, pitch_rate=0.0, roll_rate=0.0):
+def cut(arm, velocity, seconds, joints=DOWN, pitch_rate=0.0, roll_rate=0.0, keep_in=None):
     path = [dict(joints)]
     for _ in range(round(seconds / DT)):
         joints, fraction, blocked = arm.jog(joints, velocity, pitch_rate, roll_rate, DT, LIMITS,
-                                            MAX_RATE)
+                                            MAX_RATE, keep_in)
         path.append(joints)
     return path
 
@@ -181,6 +181,45 @@ def test_a_fast_request_slows_the_whole_step_and_stays_on_the_line(arm):
     assert distance_from_line(arm.forward(joints)[0], start, (0.0, 1.0, 0.0)) < 1e-12
 
 
+def test_a_cut_stops_at_the_keep_in_box(arm):
+    start, _ = arm.forward(DOWN)
+    box = ((-1.0, -1.0, -1.0), (1.0, 1.0, start[2] + 0.01))
+    joints = DOWN
+    for _ in range(round(1.0 / DT)):
+        joints, fraction, blocked = arm.jog(joints, (0.0, 0.0, 0.02), 0.0, 0.0, DT, LIMITS,
+                                            MAX_RATE, box)
+    assert arm.forward(joints)[0][2] == pytest.approx(start[2] + 0.01, abs=1e-6)
+    assert blocked == ['keep_in']
+
+
+def test_outside_the_keep_in_box_the_tip_may_only_move_back_in(arm):
+    start, _ = arm.forward(DOWN)
+    box = ((-1.0, -1.0, -1.0), (1.0, 1.0, start[2] - 0.05))
+    up, _, blocked = arm.jog(DOWN, (0.0, 0.0, 0.02), 0.0, 0.0, DT, LIMITS, MAX_RATE, box)
+    assert up == pytest.approx(DOWN, abs=1e-6) and blocked == ['keep_in']
+    _, fraction, blocked = arm.jog(DOWN, (0.0, 0.0, -0.02), 0.0, 0.0, DT, LIMITS, MAX_RATE, box)
+    assert fraction == 1.0 and blocked == []
+
+
+@pytest.mark.parametrize('velocity, moves', [
+    ((-0.02, 0.0, 0.02), True),  # Back in through both faces
+    ((-0.02, 0.0, 0.0), True),  # Back in through one, holding the other
+    ((0.0, 0.02, 0.0), True),  # Along both faces
+    ((-0.02, 0.0, -0.02), False),  # Back in through one, further out through the other
+    ((0.02, 0.0, 0.02), False),
+    ((0.02, 0.0, -0.02), False),  # Further out through both
+])
+def test_outside_two_faces_the_tip_may_not_move_further_out_through_either(arm, velocity, moves):
+    # The tip starts 2 cm in front of the x max face and 2 cm below the z min face.
+    start, _ = arm.forward(DOWN)
+    box = ((-1.0, -1.0, start[2] + 0.02), (start[0] - 0.02, 1.0, 1.0))
+    joints, fraction, blocked = arm.jog(DOWN, velocity, 0.0, 0.0, DT, LIMITS, MAX_RATE, box)
+    if moves:
+        assert fraction == 1.0 and blocked == []
+    else:
+        assert joints == pytest.approx(DOWN, abs=1e-6) and blocked == ['keep_in']
+
+
 def test_a_cut_stops_on_the_line_at_the_edge_of_the_workspace(arm):
     path = cut(arm, (0.05, 0.0, 0.0), 20.0)
     start = arm.forward(path[0])[0]
@@ -242,3 +281,34 @@ def test_cartesian_step_can_recover_from_a_joint_outside_its_limit(arm):
     assert fraction > 0 and inward['joint_3'] < outside
     outward, _, _ = arm.jog(start, (0.0, 0.0, 0.0), -0.2, 0.0, DT, LIMITS, MAX_RATE)
     assert outward['joint_3'] <= outside
+
+
+def test_a_diagonal_cut_stops_on_its_line_at_the_keep_in_box(arm):
+    # A box that is 1 m away on every side except the top, 1 cm above the tip.
+    start, _ = arm.forward(DOWN)
+    box = ((-1.0, -1.0, -1.0), (1.0, 1.0, start[2] + 0.01))
+    # Forward, left and up at once, so sliding along the wall would leave the line.
+    velocity = (0.01, 0.01, 0.02)
+    # The wall is reached in about half a second; keep pushing so any creep through it adds up.
+    path = cut(arm, velocity, 20.0, keep_in=box)
+    direction = [value / math.hypot(*velocity) for value in velocity]
+    for joints in path:
+        tip = arm.forward(joints)[0]
+        assert distance_from_line(tip, start, direction) < 1e-9  # Stays on its line
+        assert tip[2] <= box[1][2] + 1e-8  # Never through the top face
+    # The last step reports the box, not the reach or a joint, as what stopped it.
+    _, fraction, blocked = arm.jog(path[-1], velocity, 0.0, 0.0, DT, LIMITS, MAX_RATE, box)
+    assert fraction == 0.0 and blocked == ['keep_in']
+
+
+def test_tilting_and_rolling_at_the_keep_in_box_keep_the_tip_inside(arm):
+    start, _ = arm.forward(DOWN)
+    box = ((-1.0, -1.0, -1.0), (1.0, 1.0, start[2] + 0.01))
+    # Move up 2 cm into a top face 1 cm away, so the tip ends on the wall, not past it.
+    path = cut(arm, (0.0, 0.0, 0.02), 1.0, keep_in=box)
+    joints, wall = path[-1], arm.forward(path[-1])[0]
+    assert wall[2] == pytest.approx(box[1][2], abs=1e-8)
+    # Sticks centred while tilting and rolling: both pivot about the tip, so it must not move.
+    for _ in range(round(5.0 / DT)):
+        joints, _, _ = arm.jog(joints, (0.0, 0.0, 0.0), 0.3, 0.5, DT, LIMITS, MAX_RATE, box)
+        assert arm.forward(joints)[0] == pytest.approx(wall, abs=1e-9)

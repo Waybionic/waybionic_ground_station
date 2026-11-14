@@ -25,6 +25,13 @@ def pose(shoulder, elbow, wrist, yaw=0.0):
             'joint_4': math.radians(wrist), 'joint_5': 0.0, 'tool_grip': 0.0}
 
 
+def unboxed(parameters):
+    """Teleop parameters with a keep-in box out of the arm's reach, so collisions stop it."""
+    return config_from_parameters({**parameters('xbox_teleop.yaml', 'xbox_teleop'),
+                                   'keep_in_min_mm': [-2000.0] * 3,
+                                   'keep_in_max_mm': [2000.0] * 3})
+
+
 @pytest.fixture
 def check():
     return ArmCollision.from_urdf(URDF)
@@ -79,8 +86,7 @@ def test_a_urdf_without_exactly_one_root_link_is_refused(extra, roots):
 
 
 def test_teleop_backs_out_of_a_collision_but_never_goes_deeper(parameters, check):
-    teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
-                       LIMITS, ArmKinematics.from_urdf(URDF), check)
+    teleop = ArmTeleop(unboxed(parameters), LIMITS, ArmKinematics.from_urdf(URDF), check)
     # The forearm already reaches into the table.
     start = pose(90, 75, 0)
     assert 'forearm_link: table' in check.hits(start)
@@ -97,8 +103,7 @@ def test_teleop_backs_out_of_a_collision_but_never_goes_deeper(parameters, check
 
 
 def test_teleop_stops_before_the_forearm_reaches_the_table(parameters, check):
-    teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
-                       LIMITS, ArmKinematics.from_urdf(URDF), check)
+    teleop = ArmTeleop(unboxed(parameters), LIMITS, ArmKinematics.from_urdf(URDF), check)
     start = pose(60, 30, 60)
     for button in ('start', 'y'):
         teleop.update(*sample(button), start, DT)
@@ -122,8 +127,11 @@ def test_teleop_stops_before_the_forearm_reaches_the_table(parameters, check):
 
 
 def test_a_tool_pointing_down_stops_with_its_jaws_clear_of_the_table(parameters, check):
-    teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
-                       LIMITS, ArmKinematics.from_urdf(URDF), check)
+    # Floor the keep-in box at the table, so the table check is what stops the tool.
+    params = {**parameters('xbox_teleop.yaml', 'xbox_teleop'),
+              'keep_in_min_mm': [-550.0, -550.0, 0.0]}
+    teleop = ArmTeleop(config_from_parameters(params), LIMITS, ArmKinematics.from_urdf(URDF),
+                       check)
     # The tool points straight down in front of the base, its tip 175 mm above the table.
     start = {'joint_1': 0.1, 'joint_2': 0.5, 'joint_3': 1.4, 'joint_4': math.pi - 1.9,
              'joint_5': 0.0, 'tool_grip': 0.0}
@@ -144,8 +152,7 @@ def test_a_tool_pointing_down_stops_with_its_jaws_clear_of_the_table(parameters,
 
 
 def test_teleop_refuses_a_step_that_presses_one_contact_deeper(parameters, check):
-    teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
-                       LIMITS, ArmKinematics.from_urdf(URDF), check)
+    teleop = ArmTeleop(unboxed(parameters), LIMITS, ArmKinematics.from_urdf(URDF), check)
     # Folded flat onto the table. Lifting the elbow from here eases five of the six contacts
     # by more than it costs, so a total would call it an escape, but the forearm itself is
     # pressed about 3 mm further into the table.
