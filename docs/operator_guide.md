@@ -214,6 +214,15 @@ is commanded to go faster than 7 deg/s or to speed up or slow down by more than 
 second, and the tool tip stays under 8 cm/s. Through the simulated drives the arm follows that path
 to within 0.2 degrees.
 
+![The Motion modes panel while demo mode runs](images/motion_modes_demo_running.png)
+
+Only one mode runs at a time, and the panel says why a mode is refused. While demo mode runs,
+chicken head is refused; before Start has been pressed, demo mode is:
+
+![Chicken head refused while demo mode runs](images/motion_modes_chicken_head_refused.png)
+
+![Demo mode refused until Start is pressed, with the Arm setup panel above the Motion modes panel](images/motion_modes_refused_before_start.png)
+
 - It is not the other two demos. `autoplay:=true` (the self-running demo, above) plays a scripted
   controller, presses Start itself and runs only on simulated drives. `demo_mode:=true` sweeps each
   joint once to check the TF, also in simulation only. Demo mode needs your Start press and is
