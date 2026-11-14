@@ -143,8 +143,13 @@ def check_config(config):
 class ArmTeleop:
     """Hold joint targets and move them with the active group's sticks while enabled."""
 
-    def __init__(self, config, limits, kinematics=None, collision=None):
-        """Take the config, {joint: (lower, upper)} radians, ArmKinematics and ArmCollision."""
+    def __init__(self, config, limits, kinematics=None, collision=None, locked=None):
+        """
+        Take the config, {joint: (lower, upper)} radians, ArmKinematics and ArmCollision.
+
+        locked gives {joint: angle} for joints that cannot move on this arm, which then stay
+        at that angle as if it were both of their limits.
+        """
         check_config(config)
         self.config = config
         self.kinematics = kinematics
@@ -162,6 +167,10 @@ class ArmTeleop:
                     f'{group.mode.capitalize()} group {group.name} does not match the URDF chain')
         self.limits = dict(limits)
         self.limits[config.tool_joint] = config.tool_limits
+        self.locked = {joint: angle for joint, angle in (locked or {}).items()
+                       if joint in self.limits}
+        for joint, angle in self.locked.items():
+            self.limits[joint] = (angle, angle)
         self.enabled = False
         self.group = 0
         self.level = config.speed_level
@@ -281,6 +290,7 @@ class ArmTeleop:
         self.targets = {joint: measured[joint] for joint in self.limits}
         self.command_targets = dict(self.targets)
         self.velocities = dict.fromkeys(self.limits, 0.0)
+        self.pin_locked()
         self.stop_cartesian()
         self.wait_for_center = False
         self.enabled, self.note, self.warning = True, '', False
@@ -295,6 +305,13 @@ class ArmTeleop:
         self.targets.update({joint: measured[joint] for joint in self.limits
                              if joint in measured and math.isfinite(measured[joint])})
         self.command_targets = dict(self.targets)
+        self.pin_locked()
+
+    def pin_locked(self):
+        # A solve may leave a locked joint a rounding error off its angle; send it unchanged.
+        for joint, angle in self.locked.items():
+            self.targets[joint] = self.command_targets[joint] = angle
+            self.velocities[joint] = 0.0
 
     def stop_cartesian(self):
         self.linear, self.tilt, self.roll, self.insert = (0.0, 0.0, 0.0), 0.0, 0.0, 0.0
@@ -348,6 +365,7 @@ class ArmTeleop:
                 homing or self.active_group.mode != 'cartesian'):
             self.keep_inside(before, dt)
         self.avoid_collisions(before)
+        self.pin_locked()
 
     def avoid_collisions(self, before):
         """Undo this step's arm motion if it would take a link into the table or the base."""

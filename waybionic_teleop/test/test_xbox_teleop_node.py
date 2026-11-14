@@ -96,11 +96,11 @@ def test_a_host_pause_disables_even_if_controller_packets_look_fresh(node, monke
 def test_a_late_tick_moves_the_targets_at_most_two_periods(node):
     ready(node)
     for _ in range(20):
-        tick(node, left_x=1.0)
+        tick(node, left_x=-1.0)
     speed = node.teleop.velocities['joint_1']
     assert speed == pytest.approx(node.teleop.speed)
     before = node.teleop.targets['joint_1']
-    tick(node, left_x=1.0, elapsed=0.1)
+    tick(node, left_x=-1.0, elapsed=0.1)
     assert node.teleop.targets['joint_1'] - before == pytest.approx(
         2 * node.config.period * speed)
 
@@ -125,7 +125,7 @@ def test_a_silent_controller_disables_and_holds_the_measured_pose(node, monkeypa
     step(joy())
     step(joy('start'))
     for _ in range(10):
-        step(joy(left_x=1.0))
+        step(joy(left_x=-1.0))
     assert node.teleop.enabled and node.teleop.velocities['joint_1'] > 0
     last_input = clock.now
     # The drives trail the moving target.
@@ -192,6 +192,23 @@ def test_the_rate_and_input_timeout_must_be_positive(monkeypatch, parameters, ch
         rclpy.try_shutdown(context=context)
 
 
+def test_the_arm_profile_pins_its_locked_joints(monkeypatch, parameters, bench_profile):
+    monkeypatch.setenv('ROS_AUTOMATIC_DISCOVERY_RANGE', 'OFF')
+    context = rclpy.Context()
+    rclpy.init(context=context)
+    params = {**parameters('xbox_teleop.yaml', 'xbox_teleop'), 'arm_profile': bench_profile}
+    node = XboxTeleop(context=context, parameter_overrides=[
+        Parameter(name, value=value) for name, value in params.items()])
+    try:
+        node.load(String(data=URDF))
+        assert node.teleop.limits['joint_2'] == (0.0, 0.0)
+        assert node.teleop.limits['tool_grip'] == (0.0, 0.0)
+        assert node.teleop.limits['joint_1'][0] < node.teleop.limits['joint_1'][1]
+    finally:
+        node.destroy_node()
+        rclpy.try_shutdown(context=context)
+
+
 def test_a_stick_wavering_at_a_limit_rumbles_at_most_once_a_second(node, monkeypatch):
     clock = Clock()
     monkeypatch.setattr(xbox_teleop_node, 'time', clock)
@@ -216,7 +233,7 @@ def test_a_stick_wavering_at_a_limit_rumbles_at_most_once_a_second(node, monkeyp
     # The base group's right stick pushes the elbow into its limit, past the deadzone every
     # other tick, so the arm is blocked and released 60 times a second.
     for index in range(round(2.5 / period)):
-        step(right_y=0.2 if index % 2 == 0 else 0.0)
+        step(right_y=-0.2 if index % 2 == 0 else 0.0)
     starts = [at for at, intensity in rumbles if intensity > 0]
     assert starts[0] == first
     assert len(starts) == 3

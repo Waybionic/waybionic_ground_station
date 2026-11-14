@@ -3,14 +3,14 @@
 This is the ROS 2 workspace for the WayBionic robotic ground station. This guide
 covers how we work: how to set up, how to name branches, how to write commits,
 and what a pull request needs before it can merge. Read it once before your first
-contribution — it keeps everyone's work consistent and keeps `main` stable.
+contribution. It keeps everyone's work consistent and keeps `main` stable.
 
 ## Access & workflow
 
 Everyone on the team has **Write** access, so you don't need to fork. You branch
 directly off this repo, push your branch, and open a pull request.
 
-`main` is protected — you can't push to it directly, and every change lands through
+`main` is protected: you can't push to it directly, and every change lands through
 a reviewed PR. The loop:
 
 ```bash
@@ -85,12 +85,12 @@ Make sure:
 - [ ] The Compose `test` service image builds successfully from the current source.
 - [ ] Both architecture jobs pass in CI.
 - [ ] No lint errors on Python you changed.
-- [ ] No build artifacts committed (`build/`, `install/`, `log/` are gitignored — keep it that way).
+- [ ] No build artifacts committed (`build/`, `install/` and `log/` are gitignored; keep it that way).
 - [ ] No personal or machine-specific paths committed (absolute paths, local `.vscode` settings, etc.).
 
 ## Opening the PR
 
-- Keep it focused. One feature or fix per PR — small PRs get reviewed faster.
+- Keep it focused. One feature or fix per PR; small PRs get reviewed faster.
 - Base the PR on `main`.
 - In the description, cover **what** changed, **why**, and **how you tested it**.
 - For anything visual (RViz, GUI), drop in a screenshot or a short clip.
@@ -98,8 +98,9 @@ Make sure:
 
 ## Review & merge
 
-- Every PR needs approval from the code owner (**@yassinsolim**) before it can merge —
-  this is requested automatically via [`.github/CODEOWNERS`](./.github/CODEOWNERS).
+- Every PR needs approval from a code owner before it can merge. The owners are
+  listed in [`.github/CODEOWNERS`](./.github/CODEOWNERS), and their review is
+  requested automatically.
 - Resolve all review conversations before merging.
 - Pushing new commits dismisses stale approvals, so get the branch green before final review.
 - We **squash merge** to keep `main`'s history clean (one PR = one commit).
@@ -123,4 +124,4 @@ Full first-time setup, build, and launch steps are in
 ## Questions
 
 Not sure about something? Ask in the team channel, or open a draft PR early and tag
-@yassinsolim. Better to ask than to guess.
+a code owner. Better to ask than to guess.

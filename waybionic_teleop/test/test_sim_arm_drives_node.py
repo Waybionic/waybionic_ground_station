@@ -16,13 +16,35 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 
-from waybionic_teleop import joy_udp_receiver, mks_can, sim_arm_drives_node, xbox_teleop_node
+from waybionic_control.drive_health import (
+    DriveHealthMonitor,
+    DriveHealthState,
+    DriveHealthThresholds,
+)
+from waybionic_teleop import (
+    autoplay_node,
+    carrier,
+    joy_udp_receiver,
+    mks_can,
+    ros_shutdown,
+    sim_arm_drives_node,
+    xbox_teleop_node,
+)
 from waybionic_teleop.gamepad import AXES, BUTTONS
 from waybionic_teleop.kinematics import ArmKinematics, joint_limits
-from waybionic_teleop.sim_arm_drives_node import QUIET_BEFORE_ZERO_S, REPLY_TIMEOUT_S, SimArmDrives
+from waybionic_teleop.sim_arm_drives_node import (
+    HOLD_RPM,
+    HOLD_S,
+    QUIET_BEFORE_ZERO_S,
+    REPLY_TIMEOUT_S,
+    REPORT_PERIOD_S,
+    SimArmDrives,
+    START_DEADBAND_COUNTS,
+)
 from waybionic_teleop.sim_drives import SimulatedServo
 from waybionic_teleop.slcan_bus import SlcanBus
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
+import yaml
 
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
         / 'waybionic_arm.urdf').read_text(encoding='utf-8')
@@ -50,6 +72,7 @@ SHUTDOWN_NODES = [
     (joy_udp_receiver, 'JoyUdpReceiver'),
     (camera_module, 'CameraFollower'),
     (joint_demo_module, 'JointDemo'),
+    (autoplay_node, 'Autoplay'),
 ]
 
 
@@ -99,8 +122,15 @@ def sent_frame(node, index):
 
 def assert_stopped(node):
     assert not node.authorized
-    assert all(servo.enabled and servo.target is None and servo.rpm == 0.0
-               for servo in node.bus.drives.values())
+    # Two ticks at full speed past the count, and a count of rounding.
+    reach = (2 * node.period * node.max_rpm / 60.0 * mks_can.COUNTS_PER_REV
+             + START_DEADBAND_COUNTS + 1)
+    for index, drive in enumerate(node.map.drives):
+        servo = node.bus.drives[drive.can_id]
+        # A drive stopped mid-move runs on only to its hold, its last move's nearby end.
+        assert servo.enabled and servo.target in (None, node.held[index])
+        assert (servo.rpm == 0.0 if servo.target is None
+                else abs(servo.target - servo.axis) <= reach and servo.speed <= HOLD_RPM)
     assert all(sent_frame(node, index) == (mks_can.ABSOLUTE_AXIS, bytes(6))
                for index in range(len(node.map.drives)))
 
@@ -361,6 +391,8 @@ def test_stale_encoder_feedback_stops_before_sending_another_position(node):
     assert not node.authorized
     node.on_enabled(Bool(data=False))
     node.on_enabled(Bool(data=True))
+    # The base was stopped mid-move, so it moves again once a reading shows it has settled.
+    advance(node)
     node.on_command(command(node, joint_1=1.0))
     advance(node)
     assert node.authorized and node.bus.drives[1].target is not None
@@ -409,7 +441,11 @@ def test_a_drive_that_fails_its_move_stops_every_drive_until_zeroed(node, monkey
     node.on_command(command(node, joint_1=0.31, joint_2=0.31))
     advance(node)
     assert not node.authorized and not node.zeroed[1] and 'shoulder' in node.stop_reason
-    assert all(servo.target is None and servo.rpm == 0.0 for servo in node.bus.drives.values())
+    # The others hold where their moves end; the shoulder, no longer trusted, gets no hold.
+    assert_stopped(node)
+    advance(node)
+    assert shoulder.target is None and node.hold_tick[1] == -1
+    assert node.hold_tick[0] == node.ticks
     published = []
     monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
     node.report()
@@ -445,6 +481,265 @@ def test_a_drive_that_stops_following_its_targets_stops_every_drive(node, monkey
     assert all(servo.target is None and servo.rpm == 0.0 for servo in node.bus.drives.values())
 
 
+def test_a_reversing_drive_stops_before_it_gets_a_target_behind_it(node, monkeypatch):
+    ready(node)
+    clock = [time.monotonic()]
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: clock[0])
+    # A gentler ramp keeps the base turning when the stick reverses, and a slow stroke back
+    # lets the fast stroke forward put the next target behind the still-turning base.
+    node.acc = 240
+    base = node.bus.drives[1]
+    stops, angle, turns, latched = capture_sends(node, monkeypatch), 0.0, [0.0], []
+    rates = [0.5] * 30 + [-0.3] * 40 + [0.5] * 20 + [0.0] * 30
+    for previous, rate in zip([0.5] + rates, rates):
+        if rate != previous:
+            turns.append(base.axis)
+        angle += rate * node.period
+        node.on_enabled(Bool(data=True))
+        node.on_command(command(node, velocities={'joint_1': rate}, joint_1=angle))
+        clock[0] += node.period
+        advance(node)
+        # Firmware V1.0.9 would run back to this target after the next stop.
+        latched.append(base.latched)
+    assert node.authorized and latched == [None] * len(rates)
+    # Each reversal and the final hold stopped the base, which followed the stick both ways.
+    assert stops.count(mks_can.stop(1, 0)) >= 3
+    assert turns[0] < turns[1] > turns[2] < turns[3]
+    held = base.axis
+    for _ in range(60):
+        node.on_enabled(Bool(data=True))
+        node.on_command(command(node, velocities={}, joint_1=angle))
+        clock[0] += node.period
+        advance(node)
+    assert base.axis == held and node.authorized
+
+
+def test_a_drive_that_turns_after_its_stop_stops_every_drive_but_keeps_its_zero(node):
+    ready(node)
+    node.following_error, node.following_ticks = 400, 5
+    hold = command(node, velocities={})
+    node.on_command(hold)
+    advance(node)
+    assert node.sent[0] == (None, 0) and node.held[0] == 0
+    # The base runs on to a target its firmware kept from before the stop.
+    base = node.bus.drives[1]
+    base.target, base.speed, base.acc = 20000, 60, 0
+    for _ in range(100):
+        node.on_enabled(Bool(data=True))
+        node.on_command(hold)
+        advance(node)
+        if not node.authorized:
+            break
+    assert node.stop_reason.startswith('base_yaw turned +') and all(node.zeroed)
+    assert 400 < base.axis < 2000 and base.target is None and base.rpm == 0.0
+
+
+def stroke(node, clock, ticks, rate=0.5):
+    """Turn the base with the stick for some ticks of a mocked clock; return its angle."""
+    angle = 0.0
+    for _ in range(ticks):
+        angle += rate * node.period
+        node.on_enabled(Bool(data=True))
+        node.on_command(command(node, velocities={'joint_1': rate}, joint_1=angle))
+        clock[0] += node.period
+        advance(node)
+    return angle
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    clock = [time.monotonic()]
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: clock[0])
+    return clock
+
+
+def test_a_target_kept_by_the_firmware_never_runs_past_the_hold_behind_the_stop(node, clock):
+    ready(node)
+    base = node.bus.drives[1]
+    angle = stroke(node, clock, 20)
+    up = node.direction[0]
+    assert up
+    # Firmware V1.0.9 kept a target from earlier in the stroke, and runs back to it at once
+    # when the stick's release stops the base.
+    base.latched = (round(base.axis) - 3000 * up, 300, 0)
+    stopped = base.axis
+    node.on_command(command(node, velocities={}, joint_1=angle))
+    assert base.latched is None and base.target == node.held[0]
+    assert 0 <= (node.held[0] - stopped) * up <= (
+        2 * node.period * node.max_rpm / 60.0 * mks_can.COUNTS_PER_REV + START_DEADBAND_COUNTS)
+    lowest = stopped * up
+    for _ in range(60):
+        node.on_enabled(Bool(data=True))
+        node.on_command(command(node, velocities={}, joint_1=angle))
+        clock[0] += node.period
+        advance(node)
+        lowest = min(lowest, base.axis * up)
+    # The hold right behind the stop took over before the base turned back at all.
+    assert node.authorized and lowest == stopped * up and base.axis == node.held[0]
+
+
+def test_a_target_kept_by_the_firmware_is_taken_over_within_a_tick_of_the_hold(
+        node, clock, monkeypatch):
+    ready(node)
+    base = node.bus.drives[1]
+    angle = stroke(node, clock, 20)
+    up = node.direction[0]
+    assert up
+    node.on_command(command(node, velocities={}, joint_1=angle))
+    stopped_at, held = clock[0], node.held[0]
+
+    def hold_tick():
+        node.on_enabled(Bool(data=True))
+        node.on_command(command(node, velocities={}, joint_1=angle))
+        clock[0] += node.period
+        advance(node)
+    for _ in range(5):
+        hold_tick()
+    # The base reaches its hold, then runs back to a target its firmware kept. The hold goes
+    # out again on the next tick, before the following error could stop the arm.
+    base.target, base.speed, base.acc = held - 20000 * up, 300, 0
+    farthest = 0
+    for _ in range(20):
+        hold_tick()
+        farthest = max(farthest, (held - base.axis) * up)
+    assert node.authorized and 0 < farthest < 1500 and base.axis == held
+    # Once HOLD_S has passed, nothing but stops goes out to a drive at rest.
+    while clock[0] - stopped_at < HOLD_S:
+        hold_tick()
+    sent = capture_sends(node, monkeypatch)
+    for _ in range(10):
+        hold_tick()
+    assert all(frame[0] != mks_can.ABSOLUTE_AXIS for frame in sent)
+
+
+def test_a_drive_disabled_mid_stroke_is_held_every_tick_for_the_hold_time(
+        node, clock, monkeypatch):
+    ready(node)
+    base = node.bus.drives[1]
+    stroke(node, clock, 20)
+    up = node.direction[0]
+    assert up
+    sent = capture_sends(node, monkeypatch)
+    node.on_enabled(Bool(data=False))
+    stopped_at, held = clock[0], node.held[0]
+    hold = mks_can.absolute_axis(1, held, min(HOLD_RPM, node.max_rpm), node.acc)
+    # The hold goes out right behind the stop, a little ahead of the base, never behind it.
+    assert sent == [mks_can.stop(1, 0), hold] and (held - base.axis) * up >= 0
+    ticks = []
+    for _ in range(40):
+        sent.clear()
+        clock[0] += node.period
+        advance(node)
+        ticks.append((clock[0] - stopped_at, sent.count(hold)))
+    assert all(holds == 1 for elapsed, holds in ticks if elapsed < HOLD_S - 1e-6)
+    assert all(holds == 0 for elapsed, holds in ticks if elapsed > HOLD_S + 1e-6)
+    assert not node.authorized and base.axis == held and base.target is None
+
+
+@pytest.mark.parametrize('state', ['moving', 'disabled', 'holding'])
+def test_zeroing_sends_no_hold_in_the_old_coordinates(node, clock, monkeypatch, state):
+    ready(node)
+    base = node.bus.drives[1]
+    angle = stroke(node, clock, 10)
+    if state == 'disabled':
+        node.on_enabled(Bool(data=False))
+    elif state == 'holding':
+        node.on_command(command(node, velocities={}, joint_1=angle))
+        assert node.authorized
+    if state != 'moving':
+        # Its hold, a few thousand counts out, would be within reach of the new zero.
+        assert node.hold_until[0] > clock[0] and 0 < abs(node.held[0]) < node.following_error
+    sent = capture_sends(node, monkeypatch)
+    node.zero()
+    for _ in range(10):
+        clock[0] += node.period
+        advance(node)
+    assert all(node.zeroed) and node.counts[0] == 0
+    assert not [frame for frame in sent
+                if frame[0] == mks_can.ABSOLUTE_AXIS and frame[1:3] != b'\x00\x00']
+    assert base.axis == 0 and base.target is None
+
+
+def test_a_drive_that_turns_after_a_disable_stops_every_drive_again(node, clock):
+    ready(node)
+    node.following_error, node.following_ticks = 400, 5
+    base = node.bus.drives[1]
+    stroke(node, clock, 20)
+    up = node.direction[0]
+    node.on_enabled(Bool(data=False))
+    held = node.held[0]
+    for _ in range(40):
+        clock[0] += node.period
+        advance(node)
+    assert not node.authorized and base.axis == held and node.stop_reason == 'Teleop disabled'
+    # Its hold over, the base runs on to a target its firmware kept, though disarmed.
+    base.target, base.speed, base.acc = held + 20000 * up, 60, 0
+    for _ in range(100):
+        clock[0] += node.period
+        advance(node)
+        if node.stop_reason != 'Teleop disabled':
+            break
+    assert node.stop_reason.startswith('base_yaw turned ') and all(node.zeroed)
+    assert 400 < (base.axis - held) * up < 2000 and base.target is None and base.rpm == 0.0
+
+
+def test_a_hold_from_an_old_count_never_pulls_the_drive_back(node, clock):
+    ready(node)
+    base = node.bus.drives[1]
+    stroke(node, clock, 20)
+    up, speed = node.direction[0], node.sent[0][1]
+    # The base's last few counts were lost, so the node's count is four ticks behind it.
+    lag = 4 * node.period
+    node.counts[0] -= round(up * lag * speed / 60.0 * mks_can.COUNTS_PER_REV)
+    node.since_count[0] += lag
+    node.on_enabled(Bool(data=False))
+    assert (node.held[0] - base.axis) * up >= -1
+
+
+def test_no_hold_goes_out_once_an_estop_press_is_released(node, clock, monkeypatch):
+    ready(node)
+    stroke(node, clock, 20)
+    node.interface = 'slcan'
+    monkeypatch.setattr(node.bus, 'take_refused', lambda: [], raising=False)
+    sent = capture_sends(node, monkeypatch)
+    flags = carrier.ESTOP_WIRED
+    node.on_reply(carrier.STATUS_ID, bytes([1, flags | carrier.ESTOP_PRESSED, 0, 0, 0, 0, 0, 0]),
+                  clock[0])
+    assert node.stop_reason == 'E-stop pressed' and mks_can.stop(1, 0) in sent
+    clock[0] += node.period
+    advance(node)
+    node.on_reply(carrier.STATUS_ID, bytes([2, flags, 0, 0, 0, 0, 0, 0]), clock[0])
+    assert not node.estop_pressed
+    for _ in range(10):
+        clock[0] += node.period
+        advance(node)
+    # The drives may have restarted with new counts, so nothing but stops went out.
+    assert not [frame for frame in sent
+                if frame[0] == mks_can.ABSOLUTE_AXIS and frame[1:3] != b'\x00\x00']
+
+
+def test_closing_mid_move_holds_the_drive_until_the_hold_time_is_over(node, usb_carrier):
+    ready(node)
+    node.on_command(command(node, velocities={'joint_1': 0.5}, joint_1=0.5))
+    for _ in range(3):
+        advance(node)
+    assert node.sent[0][0] is not None
+    port = usb_carrier()
+    node.interface = 'slcan'
+    node.bus = SlcanBus('/dev/fake', 1000000, open_port=lambda: port)
+    started = time.monotonic()
+    node.close()
+    written = b''.join(port.writes)
+    frames = [line for line in written.split(b'\r') if line.startswith(b't')]
+    hold = mks_can.absolute_axis(1, node.held[0], min(HOLD_RPM, node.max_rpm), node.acc)
+    hold_line = b't001%d%s' % (len(hold), hold.hex().upper().encode())
+    # The hold goes out right behind the base's stop, then about once a tick for HOLD_S.
+    assert frames[frames.index(stop_line(1)) + 1] == hold_line
+    assert 0.6 * HOLD_S / node.period <= frames.count(hold_line) <= HOLD_S / node.period + 2
+    assert written.endswith(b'C\r') and port.closed
+    assert HOLD_S <= time.monotonic() - started < sim_arm_drives_node.CLOSE_TIMEOUT_S + 0.1
+
+
 def test_a_drive_that_restarts_between_polls_is_set_up_and_zeroed_again(node):
     start = dict.fromkeys(node.map.joints, 0.0)
     start['joint_2'] = 1.2
@@ -465,6 +760,143 @@ def test_a_drive_that_restarts_between_polls_is_set_up_and_zeroed_again(node):
     node.on_enabled(Bool(data=False))
     node.on_enabled(Bool(data=True))
     assert not node.authorized
+
+
+@pytest.fixture
+def drives_with(monkeypatch, parameters):
+    """Make drive nodes with changed parameters, all destroyed after the test."""
+    monkeypatch.setenv('ROS_AUTOMATIC_DISCOVERY_RANGE', 'OFF')
+    context = rclpy.Context()
+    rclpy.init(context=context)
+    made = []
+
+    def make(**changes):
+        configured = parameters('arm_drives.yaml', 'sim_arm_drives')
+        configured.update(changes)
+        made.append(SimArmDrives(context=context, parameter_overrides=[
+            Parameter(name, value=value) for name, value in configured.items()]))
+        return made[-1]
+    yield make
+    for made_node in made:
+        made_node.destroy_node()
+    rclpy.try_shutdown(context=context)
+
+
+def zeroed_with_state(drives_with, path):
+    """Zero drives powered on away from the zero pose, saving the zero to path."""
+    node = drives_with(zero_state=str(path), zero_on_start=False)
+    for index, servo in enumerate(node.bus.drives.values()):
+        # Power-on starts the raw encoder at the shaft's magnetic angle.
+        servo.raw_shift, servo.axis = 1000 * index + 7, 5000.0
+    advance(node)
+    assert not path.exists()
+    assert node.on_zero(Trigger.Request(), Trigger.Response()).success
+    for _ in range(3):
+        advance(node)
+    return node
+
+
+def restart(drives_with, old, path):
+    """Start the node again on the same simulated drives, as a relaunch does."""
+    node = drives_with(zero_state=str(path), zero_on_start=False)
+    node.bus = old.bus
+    for index in range(len(node.map.drives)):
+        node.set_up(index)
+    return node
+
+
+def test_a_zero_is_saved_once_every_drive_reports_its_fingerprint(drives_with, tmp_path):
+    path = tmp_path / 'state' / 'drive_zero.yaml'
+    node = zeroed_with_state(drives_with, path)
+    saved = yaml.safe_load(path.read_text(encoding='utf-8'))['drives']
+    assert saved == {drive.name: {'can_id': drive.can_id, 'offset': 1000 * index + 5007}
+                     for index, drive in enumerate(node.map.drives)}
+    assert not node.checks and not list(tmp_path.glob('state/*.partial'))
+
+
+def test_a_restart_keeps_the_zero_of_drives_that_stayed_powered(drives_with, tmp_path):
+    path = tmp_path / 'drive_zero.yaml'
+    old = zeroed_with_state(drives_with, path)
+    # The arm is driven or pushed elsewhere before the station restarts.
+    for servo in old.bus.drives.values():
+        servo.axis = 2000.0
+    node = restart(drives_with, old, path)
+    assert not any(node.zeroed) and node.checks
+    published = []
+    node.state_publisher.publish = published.append
+    for _ in range(3):
+        advance(node)
+    assert all(node.zeroed) and not node.checks
+    assert node.counts == [2000] * len(node.map.drives)
+    assert published[-1].position[:len(node.map.joints)] == pytest.approx(
+        list(node.map.to_positions(node.counts).values()))
+    ready(node)
+
+
+def test_a_restart_after_a_power_cycle_does_not_keep_the_zero(drives_with, tmp_path):
+    path = tmp_path / 'drive_zero.yaml'
+    old = zeroed_with_state(drives_with, path)
+    saved = yaml.safe_load(path.read_text(encoding='utf-8'))['drives']
+    for drive in old.map.drives:
+        # Powered on again where its raw encoder reads its saved offset, so only the zero
+        # status shows it lost its zero.
+        old.bus.drives[drive.can_id].power_cycle(saved[drive.name]['offset'])
+    node = restart(drives_with, old, path)
+    for _ in range(3):
+        advance(node)
+    assert not any(node.zeroed) and not node.checks
+    node.on_description(String(data=URDF))
+    node.on_enabled(Bool(data=False))
+    node.on_enabled(Bool(data=True))
+    assert not node.authorized
+
+
+def test_a_restart_does_not_keep_a_zero_made_elsewhere(drives_with, tmp_path):
+    path = tmp_path / 'drive_zero.yaml'
+    old = zeroed_with_state(drives_with, path)
+    base = old.bus.drives[old.map.drives[0].can_id]
+    base.axis = 3000.0
+    base.receive(mks_can.set_zero(base.can_id))
+    node = restart(drives_with, old, path)
+    for _ in range(3):
+        advance(node)
+    assert node.zeroed == [False] + [True] * (len(node.map.drives) - 1)
+
+
+def test_a_fault_or_a_new_zero_forgets_the_saved_zero(drives_with, tmp_path):
+    path = tmp_path / 'drive_zero.yaml'
+    node = zeroed_with_state(drives_with, path)
+    node.zero()
+    assert not path.exists() and not node.saved_zero
+    for _ in range(3):
+        advance(node)
+    assert path.exists()
+    node.fault(0, 'is 5000 counts from its target')
+    assert not path.exists() and not node.saved_zero
+    for _ in range(3):
+        advance(node)
+    assert not path.exists()
+    restarted = restart(drives_with, node, path)
+    assert not restarted.checks and not any(restarted.zeroed)
+
+
+def test_a_drive_that_answers_again_keeps_its_zero_unless_it_lost_power(drives_with, tmp_path):
+    path = tmp_path / 'drive_zero.yaml'
+    node = zeroed_with_state(drives_with, path)
+    ready(node)
+    can_id = node.map.drives[0].can_id
+    for power_cycled in (False, True):
+        unplugged = node.bus.drives.pop(can_id)
+        for _ in range(node.max_unanswered + 3):
+            advance(node)
+        assert node.lost[0] and not node.zeroed[0] and not node.authorized
+        if power_cycled:
+            unplugged.power_cycle(5007)
+        node.bus.drives[can_id] = unplugged
+        for _ in range(3):
+            advance(node)
+        assert not node.lost[0] and node.zeroed[0] is not power_cycled
+        assert node.held[0] is None and not node.checks
 
 
 def test_zeroing_waits_until_teleop_stops_streaming_to_an_arm_that_lost_its_zero(node):
@@ -512,6 +944,8 @@ def test_a_stop_the_interface_refuses_is_sent_again_until_it_goes_out(node, monk
     advance(node)
     base = node.bus.drives[1]
     assert base.target is not None
+    up = node.direction[0]
+    assert up
     send, refusing = node.bus.send, [True]
 
     def full(can_id, data):
@@ -530,9 +964,448 @@ def test_a_stop_the_interface_refuses_is_sent_again_until_it_goes_out(node, monk
     assert not node.authorized
     refusing[0] = False
     advance(node)
-    assert not node.stopping and base.target is None and base.rpm == 0.0
+    # The hold is taken where the drive was once its stop went out, so it never pulls back.
+    assert not node.stopping and base.target == node.held[0] and base.rpm == 0.0
+    assert (node.held[0] - base.axis) * up >= 0
     node.on_enabled(Bool(data=True))
     assert node.authorized
+
+
+def test_each_drive_is_evaluated_with_its_target_encoder_and_reply_age(node, monkeypatch):
+    monitors = [MagicMock(wraps=DriveHealthMonitor())
+                for _ in node.drive_health_monitors]
+    node.drive_health_monitors = monitors
+
+    node.report()
+    assert all(not monitor.evaluate.called for monitor in monitors)
+
+    ready(node)
+    node.on_command(command(
+        node,
+        velocities=dict.fromkeys(node.map.joints, 0.0),
+        joint_1=math.radians(3.0)))
+    advance(node)
+    now = time.monotonic()
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: now)
+    node.heard = [now - 0.1] * len(node.heard)
+    expected_targets = node.map.to_counts(node.commanded)
+    expected_motion = [rate > 0.0 for rate in node.map.to_rpm(node.velocities)]
+
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+    node.report()
+
+    assert all(monitor.evaluate.called for monitor in monitors)
+    assert all(state is not None for state in node.drive_health_states)
+    for index, monitor in enumerate(monitors):
+        values = monitor.evaluate.call_args.kwargs
+        assert values['target_position'] == pytest.approx(
+            expected_targets[index] * 360.0 / mks_can.COUNTS_PER_REV
+            / node.map.drives[index].gear_ratio)
+        assert values['encoder_position'] == pytest.approx(
+            node.counts[index] * 360.0 / mks_can.COUNTS_PER_REV
+            / node.map.drives[index].gear_ratio)
+        assert values['reply_age_seconds'] == pytest.approx(0.1)
+        assert values['motion_commanded'] is expected_motion[index]
+        assert values['enabled'] is True
+    drive_status = next(item for item in published[-1].status
+                        if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in drive_status.values}
+    assert drive_status.name == 'drive.base_yaw'
+    assert drive_status.level == DiagnosticStatus.OK
+    assert values['state'] == DriveHealthState.OK.value
+    assert float(values['target_encoder_error_deg']) == pytest.approx(3.0, abs=0.01)
+    assert float(values['reply_age_sec']) == pytest.approx(0.1)
+    assert [value.key for value in drive_status.values] == [
+        'value', 'unit', 'can_id', 'last_command', 'state',
+        'target_encoder_error_deg', 'reply_age_sec']
+
+
+def test_drive_health_positions_and_error_use_joint_degrees_with_gear_ratio(
+        node, monkeypatch):
+    ready(node)
+    drive = node.map.drives[0]
+    drive.gear_ratio = 2.0
+    node.counts[0] = round(mks_can.COUNTS_PER_REV * 2 / 360.0)
+    monitor = MagicMock(wraps=DriveHealthMonitor())
+    node.drive_health_monitors[0] = monitor
+    now = max(node.heard) + 0.1
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: now)
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+
+    node.on_command(command(
+        node,
+        velocities=dict.fromkeys(node.map.joints, 0.0),
+        joint_1=math.radians(3.0)))
+    node.report()
+
+    assert monitor.evaluate.call_args.kwargs['target_position'] == pytest.approx(
+        3.0, abs=0.001)
+    assert monitor.evaluate.call_args.kwargs['encoder_position'] == pytest.approx(
+        1.0, abs=0.001)
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
+    assert row.level == DiagnosticStatus.OK
+    assert values['state'] == DriveHealthState.OK.value
+    assert float(values['target_encoder_error_deg']) == pytest.approx(2.0, abs=0.01)
+
+
+def test_drive_health_thresholds_load_from_arm_drive_configuration(node, parameters):
+    configured = parameters('arm_drives.yaml', 'sim_arm_drives')
+    assert {
+        name: configured[name] for name in (
+            'health_following_error_degrees',
+            'health_stall_movement_degrees',
+            'health_stall_duration_seconds',
+            'health_reply_timeout_seconds',
+        )
+    } == {
+        'health_following_error_degrees': 5.0,
+        'health_stall_movement_degrees': 1.0,
+        'health_stall_duration_seconds': 2.0,
+        'health_reply_timeout_seconds': 0.5,
+    }
+    expected = DriveHealthThresholds(
+        following_error_degrees=configured['health_following_error_degrees'],
+        stall_movement_degrees=configured['health_stall_movement_degrees'],
+        stall_duration_seconds=configured['health_stall_duration_seconds'],
+        reply_timeout_seconds=configured['health_reply_timeout_seconds'],
+    )
+    assert all(monitor.thresholds == expected for monitor in node.drive_health_monitors)
+
+
+def test_non_default_drive_health_threshold_is_used_for_evaluation(
+        monkeypatch, parameters):
+    monkeypatch.setenv('ROS_AUTOMATIC_DISCOVERY_RANGE', 'OFF')
+    configured = parameters('arm_drives.yaml', 'sim_arm_drives')
+    configured.update({
+        'health_following_error_degrees': 1.25,
+        'health_stall_movement_degrees': 0.75,
+        'health_stall_duration_seconds': 1.25,
+        'health_reply_timeout_seconds': 0.3,
+    })
+    context = rclpy.Context()
+    rclpy.init(context=context)
+    node = SimArmDrives(context=context, parameter_overrides=[
+        Parameter(name, value=value) for name, value in configured.items()])
+    try:
+        expected = DriveHealthThresholds(
+            following_error_degrees=1.25,
+            stall_movement_degrees=0.75,
+            stall_duration_seconds=1.25,
+            reply_timeout_seconds=0.3,
+        )
+        assert all(monitor.thresholds == expected for monitor in node.drive_health_monitors)
+        ready(node)
+        node.on_command(command(
+            node,
+            velocities=dict.fromkeys(node.map.joints, 0.0),
+            joint_1=math.radians(2.0)))
+        advance(node)
+        node.report()
+        assert node.drive_health_states[0] is DriveHealthState.FOLLOWING_ERROR
+    finally:
+        node.destroy_node()
+        rclpy.try_shutdown(context=context)
+
+
+@pytest.mark.parametrize(('health_state', 'expected_level'), [
+    (DriveHealthState.OK, DiagnosticStatus.OK),
+    (DriveHealthState.NOT_RESPONDING, DiagnosticStatus.STALE),
+    (DriveHealthState.FOLLOWING_ERROR, DiagnosticStatus.ERROR),
+    (DriveHealthState.STALLED, DiagnosticStatus.ERROR),
+    (DriveHealthState.DISABLED, DiagnosticStatus.ERROR),
+])
+def test_drive_health_state_maps_to_diagnostic_level(
+        node, monkeypatch, health_state, expected_level):
+    ready(node)
+    node.drive_health_monitors = [
+        MagicMock(evaluate=MagicMock(return_value=health_state))
+        for _ in node.map.drives]
+    now = time.monotonic()
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: now)
+    age = REPLY_TIMEOUT_S + 0.1 if health_state is DriveHealthState.NOT_RESPONDING else 0.1
+    node.heard = [now - age] * len(node.heard)
+
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+    node.report()
+
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
+    assert row.level == expected_level
+    assert values['state'] == health_state.value
+
+
+def test_drive_health_does_not_replace_an_existing_protocol_error(node, monkeypatch):
+    ready(node)
+    node.drive_health_monitors = [
+        MagicMock(evaluate=MagicMock(return_value=DriveHealthState.NOT_RESPONDING))
+        for _ in node.map.drives]
+    node.state[0] = 'setup 98h failed'
+    now = time.monotonic()
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: now)
+    node.heard = [now - REPLY_TIMEOUT_S - 0.1] * len(node.heard)
+
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+    node.report()
+
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
+    assert row.level == DiagnosticStatus.ERROR
+    assert values['state'] == DriveHealthState.NOT_RESPONDING.value
+
+
+def test_simulator_test_fault_parameter_applies_and_clears_selected_drive(node):
+    servo = node.bus.drives[node.map.drives[0].can_id]
+    result = node.set_parameters([
+        Parameter('test_fault', Parameter.Type.STRING, 'base_yaw:stalled')])[0]
+    assert result.successful and servo.test_fault == 'stalled'
+
+    result = node.set_parameters([
+        Parameter('test_fault', Parameter.Type.STRING, 'none')])[0]
+    assert result.successful and servo.test_fault is None
+
+
+def test_simulator_test_fault_parameter_rejects_unknown_drive_or_fault(node):
+    unknown_drive = node.set_parameters([
+        Parameter('test_fault', Parameter.Type.STRING, 'unknown:stalled')])[0]
+    unknown_fault = node.set_parameters([
+        Parameter('test_fault', Parameter.Type.STRING, 'base_yaw:other')])[0]
+    assert not unknown_drive.successful
+    assert not unknown_fault.successful
+    assert node.test_fault is None
+
+
+def test_disabled_test_fault_releases_and_restores_the_servo(node):
+    ready(node)
+    servo = node.bus.drives[node.map.drives[0].can_id]
+
+    result = node.set_parameters([
+        Parameter('test_fault', Parameter.Type.STRING, 'base_yaw:disabled')])[0]
+    assert result.successful
+    assert not servo.enabled and not node.authorized
+
+    result = node.set_parameters([
+        Parameter('test_fault', Parameter.Type.STRING, 'none')])[0]
+    assert result.successful and servo.enabled
+
+
+def test_all_healthy_simulated_drive_rows_report_ok(node, monkeypatch):
+    ready(node)
+    now = max(node.heard) + 0.1
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: now)
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+
+    node.report()
+
+    rows = {item.name: item for item in published[-1].status
+            if item.name.startswith('drive.')}
+    assert set(rows) == {f'drive.{drive.name}' for drive in node.map.drives}
+    for row in rows.values():
+        values = {value.key: value.value for value in row.values}
+        assert row.level == DiagnosticStatus.OK
+        assert values['state'] == DriveHealthState.OK.value
+        assert 'target_encoder_error_deg' in values
+        assert 'reply_age_sec' in values
+
+
+def test_following_error_is_reported_and_clears_on_a_current_pose_command(node, monkeypatch):
+    ready(node)
+    now = max(node.heard) + 0.1
+    clock = [now]
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: clock[0])
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+
+    node.on_command(command(
+        node,
+        velocities=dict.fromkeys(node.map.joints, 0.0),
+        joint_1=math.radians(6.0)))
+    clock[0] += 0.1
+    node.report()
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
+    assert row.level == DiagnosticStatus.ERROR
+    assert values['state'] == DriveHealthState.FOLLOWING_ERROR.value
+    assert float(values['target_encoder_error_deg']) == pytest.approx(6.0, abs=0.01)
+    assert float(values['reply_age_sec']) == pytest.approx(0.1)
+    assert clock[0] - now <= REPORT_PERIOD_S
+
+    measured = node.map.to_positions(node.counts)
+    node.on_command(command(
+        node,
+        velocities=dict.fromkeys(node.map.joints, 0.0),
+        **measured))
+    node.report()
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
+    assert row.level == DiagnosticStatus.OK
+    assert values['state'] == DriveHealthState.OK.value
+
+
+def test_stalled_simulated_drive_is_reported_within_detection_window_and_recovers(
+        node, monkeypatch):
+    ready(node)
+    drive_index = 0
+    servo = node.bus.drives[node.map.drives[drive_index].can_id]
+    start = max(node.heard) + 0.1
+    clock = [start]
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: clock[0])
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+    node.on_command(command(node, joint_1=math.radians(3.0)))
+    node.report()
+    servo.set_test_fault('stalled')
+    fault_started = clock[0]
+    assert node.authorized
+    assert node.map.to_rpm(node.velocities)[drive_index] > 0.0
+
+    states = []
+    samples = round((2.0 + REPORT_PERIOD_S) / node.period)
+    for tick in range(1, samples + 1):
+        clock[0] += node.period
+        node.on_enabled(Bool(data=True))
+        node.on_command(command(node, joint_1=math.radians(3.0)))
+        node.last_tick = clock[0] - node.period
+        node.tick()
+        if tick % round(REPORT_PERIOD_S / node.period) == 0:
+            node.report()
+            row = next(item for item in published[-1].status
+                       if item.name == 'drive.base_yaw')
+            values = {value.key: value.value for value in row.values}
+            states.append((clock[0], row.level, values['state'], values))
+
+    stalled = [sample for sample in states
+               if sample[2] == DriveHealthState.STALLED.value]
+    assert node.authorized, (node.stop_reason, node.zeroed, node.heard, node.last_tick,
+                             clock[0], servo.enabled, servo.target, servo.rpm)
+    assert stalled, states
+    assert stalled[0][1] == DiagnosticStatus.ERROR
+    assert stalled[0][0] - fault_started <= 2.0 + REPORT_PERIOD_S + 1e-6
+    assert float(stalled[0][3]['target_encoder_error_deg']) == pytest.approx(3.0, abs=0.01)
+    assert float(stalled[0][3]['reply_age_sec']) <= REPORT_PERIOD_S
+    assert servo.axis == pytest.approx(0.0)
+
+    servo.set_test_fault()
+    for _ in range(round(REPORT_PERIOD_S / node.period)):
+        clock[0] += node.period
+        node.on_enabled(Bool(data=True))
+        node.on_command(command(node, joint_1=math.radians(3.0)))
+        node.last_tick = clock[0] - node.period
+        node.tick()
+    node.report()
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
+    assert row.level == DiagnosticStatus.OK
+    assert values['state'] == DriveHealthState.OK.value
+
+
+def test_not_responding_simulated_drive_is_stale_within_one_report_period_and_recovers(
+        node, monkeypatch):
+    ready(node)
+    start = max(node.heard) + 0.1
+    clock = [start]
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: clock[0])
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+    node.report()
+    servo = node.bus.drives[node.map.drives[0].can_id]
+    servo.set_test_fault('not_responding')
+    fault_started = clock[0]
+    node.bus.send(servo.can_id, mks_can.read_encoder(servo.can_id))
+    assert node.bus.receive() is None
+
+    ticks = round(REPORT_PERIOD_S / node.period)
+    for _ in range(ticks):
+        clock[0] += node.period
+        node.on_enabled(Bool(data=True))
+        node.on_command(command(
+            node,
+            velocities=dict.fromkeys(node.map.joints, 0.0),
+            **node.commanded))
+        node.last_tick = clock[0] - node.period
+        node.tick()
+    node.report()
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
+    # The clock is a float sum of tick periods, which can overshoot by a rounding error.
+    assert clock[0] - fault_started <= REPORT_PERIOD_S + 1e-6
+    assert row.level == DiagnosticStatus.STALE
+    assert values['state'] == DriveHealthState.NOT_RESPONDING.value
+    assert 'target_encoder_error_deg' in values and 'reply_age_sec' in values
+    assert (float(values['reply_age_sec'])
+            > node.drive_health_monitors[0].thresholds.reply_timeout_seconds)
+
+    servo.set_test_fault(None)
+    clock[0] += node.period
+    node.on_enabled(Bool(data=True))
+    node.on_command(command(
+        node,
+        velocities=dict.fromkeys(node.map.joints, 0.0),
+        **node.commanded))
+    node.last_tick = clock[0] - node.period
+    node.tick()
+    node.report()
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
+    assert row.level == DiagnosticStatus.OK
+    assert values['state'] == DriveHealthState.OK.value
+
+
+def test_disabled_simulated_drive_reports_error_and_recovers(node, monkeypatch):
+    ready(node)
+    clock = [max(node.heard) + 0.1]
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: clock[0])
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+    servo = node.bus.drives[node.map.drives[0].can_id]
+
+    servo.set_test_fault('disabled')
+    node.report()
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
+    assert not servo.enabled
+    assert row.level == DiagnosticStatus.ERROR
+    assert values['state'] == DriveHealthState.DISABLED.value
+    assert float(values['target_encoder_error_deg']) == pytest.approx(0.0, abs=0.01)
+    assert float(values['reply_age_sec']) == pytest.approx(0.1)
+
+    servo.set_test_fault(None)
+    node.report()
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
+    assert servo.enabled
+    assert row.level == DiagnosticStatus.OK
+    assert values['state'] == DriveHealthState.OK.value
+
+
+def test_drive_health_requires_host_confirmation_of_enable_setup(node, monkeypatch):
+    ready(node)
+    clock = [max(node.heard) + 0.1]
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: clock[0])
+    published = []
+    monkeypatch.setattr(node.diagnostics_publisher, 'publish', published.append)
+    drive_index = 0
+    can_id = node.map.drives[drive_index].can_id
+    servo = node.bus.drives[can_id]
+    assert servo.enabled
+    assert mks_can.ENABLE not in node.unconfirmed[drive_index]
+
+    node.unconfirmed[drive_index].add(mks_can.ENABLE)
+    node.report()
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
+    assert values['state'] == DriveHealthState.DISABLED.value
+
+    node.unconfirmed[drive_index].remove(mks_can.ENABLE)
+    node.report()
+    row = next(item for item in published[-1].status if item.name == 'drive.base_yaw')
+    values = {value.key: value.value for value in row.values}
+    assert values['state'] == DriveHealthState.OK.value
 
 
 def test_drive_rows_show_a_setup_frame_until_the_drive_confirms_it(node, monkeypatch):
@@ -599,17 +1472,20 @@ def test_zero_speed_f5_stops_six_drives_and_negative_targets_rearm(node):
     node.on_command(command(node, velocities=dict.fromkeys(POSE, 0.0), **measured))
     advance(node)
     assert node.authorized
-    assert all(drive.enabled and drive.target is None and drive.rpm == 0.0
-               for drive in node.bus.drives.values())
+    servos = [node.bus.drives[drive.can_id] for drive in node.map.drives]
+    # Each drive stops, then runs on only to its hold, the nearby end of its move.
+    assert all(servo.enabled and servo.target == held and abs(held - servo.axis) <= 60
+               for servo, held in zip(servos, node.held))
     assert all(sent_frame(node, index) == (mks_can.ABSOLUTE_AXIS, bytes(6))
                for index in range(len(node.map.drives)))
-    held = [drive.axis for drive in node.bus.drives.values()]
     advance(node, 0.6)
-    assert [drive.axis for drive in node.bus.drives.values()] == held
+    assert [servo.axis for servo in servos] == node.held
     assert_stopped(node)
 
     node.on_enabled(Bool(data=False))
     node.on_enabled(Bool(data=True))
+    # Its hold reached, the next quiet encoder step lets each drive move again.
+    advance(node)
     reverse = dict.fromkeys(POSE, -0.4)
     reverse.update(joint_5=0.1, tool_grip=0.2)
     rates = dict.fromkeys(POSE, -0.2)
@@ -677,8 +1553,109 @@ def test_a_cartesian_tilt_into_a_joint_limit_keeps_the_drives_enabled(node, para
     assert node.commanded['joint_3'] == pytest.approx(node.limits['joint_3'][1], abs=1e-9)
 
 
+@pytest.fixture
+def bench(monkeypatch, parameters, bench_profile):
+    monkeypatch.setenv('ROS_AUTOMATIC_DISCOVERY_RANGE', 'OFF')
+    context = rclpy.Context()
+    rclpy.init(context=context)
+    configured = {**parameters('arm_drives.yaml', 'sim_arm_drives'),
+                  'arm_profile': bench_profile}
+    node = SimArmDrives(context=context, parameter_overrides=[
+        Parameter(name, value=value) for name, value in configured.items()])
+    yield node
+    node.destroy_node()
+    rclpy.try_shutdown(context=context)
+
+
+def test_an_arm_without_a_shoulder_drive_publishes_the_shoulder_where_it_is_fixed(
+        bench, monkeypatch):
+    states = []
+    monkeypatch.setattr(bench.state_publisher, 'publish', states.append)
+    assert [drive.can_id for drive in bench.map.drives] == [1, 3, 4, 5]
+    assert sorted(bench.bus.drives) == [1, 3, 4, 5]
+    ready(bench)
+    published = dict(zip(states[-1].name, states[-1].position))
+    assert set(published) == {'joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5',
+                              'tool_grip'}
+    assert published['joint_2'] == 0.0 and published['tool_grip'] == 0.0
+
+
+def test_a_command_must_hold_a_locked_joint_where_it_is(bench):
+    ready(bench)
+    bench.on_command(command(bench, joint_1=0.5, joint_2=0.0, tool_grip=0.0))
+    advance(bench)
+    assert bench.authorized and bench.rejected == 0
+    assert set(bench.commanded) == set(bench.map.joints)
+    assert bench.bus.drives[1].target is not None
+    bench.on_command(command(bench, joint_1=0.5, joint_2=0.1, tool_grip=0.0))
+    assert not bench.authorized and bench.stop_reason == 'joint_2 is locked at 0 rad'
+    ready(bench)
+    # Leaving a locked joint out is as incomplete as leaving out a driven one.
+    bench.on_command(command(bench, joint_1=0.5, tool_grip=0.0))
+    assert not bench.authorized and bench.stop_reason.startswith('incomplete')
+
+
+def test_a_profile_that_leaves_a_joint_unaccounted_for_stops_the_node(
+        monkeypatch, parameters, tmp_path):
+    monkeypatch.setenv('ROS_AUTOMATIC_DISCOVERY_RANGE', 'OFF')
+    profile = tmp_path / 'arm_profile.yaml'
+    profile.write_text('fitted_drives: [base_yaw, elbow, wrist_left, wrist_right]\n',
+                       encoding='utf-8')
+    configured = {**parameters('arm_drives.yaml', 'sim_arm_drives'),
+                  'arm_profile': str(profile)}
+    context = rclpy.Context()
+    rclpy.init(context=context)
+    try:
+        with pytest.raises(ValueError, match='joint_2'):
+            SimArmDrives(context=context, parameter_overrides=[
+                Parameter(name, value=value) for name, value in configured.items()])
+    finally:
+        rclpy.try_shutdown(context=context)
+
+
+def test_teleop_drives_an_arm_with_a_locked_shoulder_without_a_stop(
+        bench, parameters, monkeypatch):
+    states = []
+    monkeypatch.setattr(bench.state_publisher, 'publish', states.append)
+    ready(bench)
+    arm = ArmKinematics.from_urdf(URDF)
+    teleop = ArmTeleop(config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')),
+                       joint_limits(URDF, arm.joints), arm, locked=bench.locked)
+
+    def measured():
+        return dict(zip(states[-1].name, states[-1].position))
+    teleop.enable(measured(), [0.0] * len(AXES))
+    assert teleop.enabled, teleop.note
+    # The base group's sticks ask for the base, the shoulder and the elbow at once; then, with
+    # the elbow bent, the Cartesian group asks for a straight move only the shoulder could make.
+    sticks = [[0.0] * len(AXES) for _ in range(2)]
+    for axis in ('left_x', 'left_y', 'right_y'):
+        sticks[0][AXES.index(axis)] = 1.0
+    sticks[1][AXES.index('left_y')] = 1.0
+    for group, axes in zip(('base', 'cartesian'), sticks):
+        teleop.group = [item.name for item in teleop.groups].index(group)
+        for _ in range(60):
+            teleop.update(axes, [0] * len(BUTTONS), measured(), bench.period)
+            targets = teleop.command_targets
+            bench.on_enabled(Bool(data=True))
+            bench.on_command(JointState(
+                name=list(targets), position=list(targets.values()),
+                velocity=[teleop.velocities[joint] for joint in targets]))
+            advance(bench)
+            assert bench.authorized, bench.stop_reason
+        assert 'joint_2' in teleop.blocked, group
+    assert bench.rejected == 0
+    assert abs(measured()['joint_1']) > 0.1 and measured()['joint_2'] == 0.0
+
+
+@pytest.fixture
+def short_shutdown_grace(monkeypatch):
+    monkeypatch.setattr(ros_shutdown, 'SHUTDOWN_GRACE_S', 0.05)
+
+
 @pytest.mark.parametrize('module, class_name', SHUTDOWN_NODES)
-def test_shutdown_only_ignores_an_invalid_shutdown_context(module, class_name, monkeypatch):
+def test_shutdown_only_ignores_an_invalid_shutdown_context(
+        module, class_name, monkeypatch, short_shutdown_grace):
     factory = MagicMock()
     spin = MagicMock(side_effect=RCLError('the given context is not valid'))
     monkeypatch.setattr(module, class_name, factory)
@@ -700,7 +1677,8 @@ def test_shutdown_only_ignores_an_invalid_shutdown_context(module, class_name, m
 
 
 @pytest.mark.parametrize('module, class_name', SHUTDOWN_NODES)
-def test_binding_error_only_ignored_after_context_shutdown(module, class_name, monkeypatch):
+def test_binding_error_only_ignored_after_context_shutdown(
+        module, class_name, monkeypatch, short_shutdown_grace):
     factory = MagicMock()
     error = RuntimeError("Unable to convert call argument '0' to Python object")
     spin = MagicMock(side_effect=error)
@@ -724,7 +1702,8 @@ def test_binding_error_only_ignored_after_context_shutdown(module, class_name, m
 
 @pytest.mark.parametrize('module, class_name', [
     (camera_module, 'CameraFollower'), (joint_demo_module, 'JointDemo')])
-def test_tf_time_error_only_ignored_after_context_shutdown(module, class_name, monkeypatch):
+def test_tf_time_error_only_ignored_after_context_shutdown(
+        module, class_name, monkeypatch, short_shutdown_grace):
     factory = MagicMock()
     error = TypeError('time must have sec and nanosec, or nanoseconds.')
     spin = MagicMock(side_effect=error)
@@ -744,3 +1723,22 @@ def test_tf_time_error_only_ignored_after_context_shutdown(module, class_name, m
         module.main()
     assert spin.call_count == 3
     assert factory.return_value.destroy_node.call_count == 3
+
+
+@pytest.mark.parametrize('error', [
+    RCLError('the given context is not valid'),
+    RuntimeError("Unable to convert call argument '0' to Python object")])
+@pytest.mark.parametrize('module, class_name', SHUTDOWN_NODES)
+def test_shutdown_error_waits_for_the_signal_thread_to_shut_rclpy_down(
+        module, class_name, error, monkeypatch):
+    # rclpy's SIGINT thread wakes spin before it shuts the context down.
+    factory = MagicMock()
+    running = iter([True, True, True])
+    monkeypatch.setattr(module, class_name, factory)
+    monkeypatch.setattr(module.rclpy, 'init', MagicMock())
+    monkeypatch.setattr(module.rclpy, 'try_shutdown', MagicMock())
+    monkeypatch.setattr(module.rclpy, 'spin', MagicMock(side_effect=error))
+    monkeypatch.setattr(module.rclpy, 'ok', lambda: next(running, False))
+    module.main()
+    assert next(running, None) is None
+    assert factory.return_value.destroy_node.call_count == 1

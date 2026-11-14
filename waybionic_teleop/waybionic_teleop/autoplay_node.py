@@ -27,6 +27,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 from waybionic_teleop.demo_script import (
     DemoPlayer, operator_active, PIVOT, STALE_S, TeleopState)
 from waybionic_teleop.kinematics import ArmKinematics
+from waybionic_teleop.ros_shutdown import is_shutdown_error
 
 HOME_TOLERANCE_RAD = 0.01
 
@@ -207,6 +208,9 @@ def main():
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
+    except RuntimeError as error:
+        if not is_shutdown_error(error):
+            raise
     finally:
         node.destroy_node()
         rclpy.try_shutdown()
