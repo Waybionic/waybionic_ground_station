@@ -5,7 +5,7 @@
 
 ## Five Minute Experiment Results
 ### Ran at 1280x720 at and average of 30fps
-- Taking a picture of the timer and the doctor view, there is a **0.54ms** difference in the timer.
+- Taking a picture of the timer and the doctor view, there is a **0.54s (540ms)** difference in the timer.
 	- The monitor measures from when the bridge reads a frame from the camera to when the ground station receives it, while the stopwatch also includes the camera and the screen. The stopwatch test only covers visible delays, not internal.
 - The minimum camera delay was **0.17ms**
 - The maximum camera delay was **1031.21ms**
@@ -15,7 +15,7 @@
 
 ## Five Minute Experiment Results with Demo
 ### Ran at 1280x720 at an average of 31.59fps
-- Taking a picture of the timer and the doctor view, there is a **0.56ms** difference in the timer.
+- Taking a picture of the timer and the doctor view, there is a **0.56s (560ms)** difference in the timer.
 	- The monitor measures from when the bridge reads a frame from the camera to when the ground station receives it, while the stopwatch also includes the camera and the screen. The stopwatch test only covers visible delays, not internal.
 - The minimum camera delay was **0.13ms**
 - The maximum camera delay was **1069.63ms**
@@ -30,6 +30,7 @@ Overall, the results with the demo running in the background was not too differe
 	- This could be due to the constant movement needing to be captured by the camera, thus creating more delay compared to a stopwatch moving. 
 - The average jitter for capture and receiving weren't very different in the two experiments.
 - The experiment with the demo seemed to capture more frames per second compared to the one without. Although, this difference in frame rate is not by much.
+
 ## Disconnect/Reconnect Behaviour
 - Doctor view went black and stopped sending frames. There was a camera warning in the alert section.
 	- The camera bridge in the terminal showed a message saying "Ground Station disconnected; retrying"
