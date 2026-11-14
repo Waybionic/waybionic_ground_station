@@ -17,6 +17,12 @@ it has not lost power since: see ``check_zero``.
 has fitted; each joint no fitted drive moves is published at its locked angle, and a command
 must leave it there.
 
+A joint can be switched off while the arm is stopped (``arm/<joint>/set_enabled``, see
+waybionic_teleop/joint_control.py), for a drive that is faulty or not fitted yet. It is held
+where it was and teleop must leave it there. A drive whose joints are all off gets no targets,
+and its silence or its turns do not stop the arm; it is read for the joints' angles while it
+answers. One wrist joint off still needs both wrist drives, which then hold it.
+
 Joint commands are accepted only after a valid robot_description and a fresh teleop enable
 that teleop keeps republishing. Whoever publishes ``/joint_commands`` must keep publishing
 while the arm is meant to move: once ``command_timeout_s`` passes with no command, every
@@ -35,6 +41,7 @@ after its stop while the arm is enabled stops every drive.
 """
 
 import datetime
+import functools
 import math
 import os
 import time
@@ -47,14 +54,14 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, String
-from std_srvs.srv import Trigger
+from std_srvs.srv import SetBool, Trigger
 
 from waybionic_control.drive_health import (
     DriveHealthMonitor,
     DriveHealthState,
     DriveHealthThresholds,
 )
-from waybionic_teleop import carrier, mks_can
+from waybionic_teleop import carrier, joint_control, mks_can
 from waybionic_teleop.arm_profile import fit_drive_parameters, load_profile
 from waybionic_teleop.drive_map import drive_map_from_parameters
 from waybionic_teleop.frame_log import RecordingBus
@@ -78,6 +85,8 @@ SETUP = (mks_can.SET_MODE, mks_can.SET_RESPONSE, mks_can.ENABLE, mks_can.SET_HEA
 RUN_FAULTS = (0, 3)
 # Teleop sends a locked joint's angle back unchanged; anything beyond rounding is a move.
 LOCKED_TOLERANCE_RAD = 1e-6
+# A disabled joint is held where teleop saw it, give or take the counts between two readings.
+DISABLED_TOLERANCE_RAD = 0.01
 # A drive stopped mid-move starts again once an encoder reading this long after its stop no
 # longer advances the old way, or once it reports the stop complete and barely moves. Bench
 # reversals on firmware V1.0.9 settled in 17 ms (median) and 42 ms at most at 120 Hz.
@@ -158,6 +167,11 @@ class SimArmDrives(Node):
             raise ValueError('at least one drive joint needs a URDF limit')
         drives = self.map.drives
         self.index = {drive.can_id: index for index, drive in enumerate(drives)}
+        # Joints switched off at run time, where each was held when the arm was last enabled,
+        # and where each was last seen, for the drives that no longer tell.
+        self.disabled, self.anchors, self.last_angle = set(), {}, {}
+        self.drive_joints = [{joint for joint, factor in drive.factors.items() if factor}
+                             for drive in drives]
         if self.interface == 'sim':
             self.bus = SimulatedBus([SimulatedServo(drive.can_id) for drive in drives],
                                     self.bitrate)
@@ -251,6 +265,12 @@ class SimArmDrives(Node):
         self.create_subscription(Bool, 'teleop_enabled', self.on_enabled, latched)
         self.create_subscription(JointState, 'joint_commands', self.on_command, 10)
         self.create_service(Trigger, '~/zero', self.on_zero)
+        self.joint_control_publisher = self.create_publisher(
+            DiagnosticArray, joint_control.TOPIC, latched)
+        self.joint_services = {
+            joint: self.create_service(SetBool, f'arm/{joint}/set_enabled',
+                                       functools.partial(self.on_set_enabled, joint))
+            for joint in self.map.joints}
         self.state_publisher = self.create_publisher(JointState, 'joint_states', 10)
         self.diagnostics_publisher = self.create_publisher(DiagnosticArray, topic, 10)
         self.last_tick = time.monotonic()
@@ -258,6 +278,7 @@ class SimArmDrives(Node):
         self.report_errors = self.report_refused = 0
         self.create_timer(self.period, self.tick)
         self.create_timer(REPORT_PERIOD_S, self.report)
+        self.publish_joint_control()
         drive_list = ', '.join(f'{drive.name}=CAN {drive.can_id}' for drive in drives)
         if self.interface == 'sim':
             self.get_logger().info(f'Simulated drives: {drive_list} (no hardware)')
@@ -308,13 +329,20 @@ class SimArmDrives(Node):
             return response
         self.zero()
         deadline = time.monotonic() + REPLY_TIMEOUT_S
-        while not all(self.zeroed) and time.monotonic() < deadline:
+        idle = self.idle
+        while (not all(self.zeroed[index] for index in self.active(idle))
+               and time.monotonic() < deadline):
             time.sleep(0.005)
             self.drain(time.monotonic(), zeroing=True)
-        missing = [drive.name for drive, done in zip(self.map.drives, self.zeroed) if not done]
+        missing = [drive.name for index, drive in enumerate(self.map.drives)
+                   if not self.zeroed[index] and index not in idle]
+        skipped = [drive.name for index, drive in enumerate(self.map.drives)
+                   if not self.zeroed[index] and index in idle]
         response.success = not missing
-        response.message = ('Zeroed every drive' if response.success
-                            else 'No zero reply from ' + ', '.join(missing))
+        response.message = ('No zero reply from ' + ', '.join(missing) if missing
+                            else 'Zeroed every drive but ' + ', '.join(skipped)
+                            + ' (its joints are disabled)' if skipped
+                            else 'Zeroed every drive')
         self.get_logger().info(response.message)
         return response
 
@@ -363,7 +391,8 @@ class SimArmDrives(Node):
                 self.get_logger().warning(f'{name} does not report its zero, so it is not saved')
                 return
             self.zero_offsets[index] = offset
-            if len(self.zero_offsets) == len(self.map.drives):
+            # A drive with its joints off may never answer; it is saved if it did.
+            if all(other in self.zero_offsets for other in self.active()):
                 self.save_zero()
             return
         saved = self.saved_zero[index]
@@ -400,7 +429,7 @@ class SimArmDrives(Node):
 
     def save_zero(self):
         drives = {drive.name: {'can_id': drive.can_id, 'offset': self.zero_offsets[index]}
-                  for index, drive in enumerate(self.map.drives)}
+                  for index, drive in enumerate(self.map.drives) if index in self.zero_offsets}
         saved = {'saved': datetime.datetime.now().isoformat(timespec='seconds'),
                  'drives': drives}
         partial = self.zero_state + '.partial'
@@ -439,19 +468,60 @@ class SimArmDrives(Node):
             return
         self.description_valid = True
 
+    @property
+    def idle(self):
+        """Return the indices of the drives whose joints are all disabled: nothing moves them."""
+        return {index for index, joints in enumerate(self.drive_joints)
+                if joints <= self.disabled}
+
+    def active(self, idle=None):
+        """Return the indices of the drives that the arm needs."""
+        idle = self.idle if idle is None else idle
+        return [index for index in range(len(self.map.drives)) if index not in idle]
+
+    def trusted(self, index, now):
+        """Return whether a drive has answered lately and holds the zero."""
+        heard = self.heard[index]
+        return (self.counts[index] is not None and self.zeroed[index] and not self.lost[index]
+                and heard is not None and now - heard <= REPLY_TIMEOUT_S)
+
+    def full_counts(self, now=None):
+        """
+        Return one encoder count per drive, or None while a drive the arm needs has none.
+
+        A drive whose joints are all off may be missing, faulty or unzeroed: it counts as
+        wherever its joints were last seen, so the others neither wait for it nor tell it apart.
+        """
+        now = time.monotonic() if now is None else now
+        idle = self.idle
+        counts = []
+        for index, count in enumerate(self.counts):
+            if index in idle and not self.trusted(index, now):
+                angles = {joint: self.last_angle.get(joint, 0.0) for joint in self.map.joints}
+                count = self.map.to_counts(angles)[index]
+            elif count is None:
+                return None
+            counts.append(count)
+        return counts
+
     def feedback_fresh(self, now):
-        return all(heard is not None and now - heard <= REPLY_TIMEOUT_S for heard in self.heard)
+        return all(self.heard[index] is not None and now - self.heard[index] <= REPLY_TIMEOUT_S
+                   for index in self.active())
 
     def on_enabled(self, message):
         now = time.monotonic()
+        counts = self.full_counts(now)
         if not message.data:
             self.disarm('Teleop disabled')
             self.awaiting_release = False
-        elif (not self.awaiting_release and self.description_valid and all(self.zeroed)
-              and not any(self.unconfirmed) and not self.stopping and None not in self.counts
+        elif (not self.awaiting_release and self.description_valid
+              and all(self.zeroed[index] for index in self.active())
+              and not any(self.unconfirmed[index] for index in self.active())
+              and not self.stopping and counts is not None
               and self.feedback_fresh(now) and not self.estop_pressed):
             if not self.authorized:
-                self.commanded = self.map.to_positions(self.counts)
+                self.commanded = self.map.to_positions(counts)
+                self.anchors = {joint: self.commanded[joint] for joint in self.disabled}
             self.authorized = True
             self.enabled_at = now
             self.stop_reason = ''
@@ -492,8 +562,20 @@ class SimArmDrives(Node):
                 self.reject_command(f'{joint} is locked at {angle:g} rad')
                 return
             del velocities[joint]
-        measured = self.map.to_positions(self.counts)
+        for joint in self.disabled:
+            if abs(positions[joint] - self.anchors[joint]) > DISABLED_TOLERANCE_RAD:
+                self.reject_command(f'{joint} is disabled')
+                return
+            # Teleop's reading may differ by a count or two; the drives get exactly the anchor.
+            positions[joint], velocities[joint] = self.anchors[joint], 0.0
+        counts = self.full_counts()
+        if counts is None:
+            self.reject_command('Waiting for drive feedback')
+            return
+        measured = self.map.to_positions(counts)
         for joint, (lower, upper) in self.limits.items():
+            if joint in self.disabled:
+                continue
             position, actual = positions[joint], measured[joint]
             # An already-outside encoder may move toward the URDF range, never farther out.
             if ((position < lower and (actual >= lower or position < actual))
@@ -562,9 +644,12 @@ class SimArmDrives(Node):
             self.unanswered[index] += 1
         self.drain(now)
         self.check_following()
-        if not all(self.zeroed) or None in self.counts:
+        counts = self.full_counts(now)
+        if not all(self.zeroed[index] for index in self.active()) or counts is None:
             return
-        positions = self.map.to_positions(self.counts)
+        positions = self.map.to_positions(counts)
+        for joint in self.disabled:
+            self.last_angle[joint] = positions[joint]
         if self.commanded is None:
             # Hold the actual encoder pose while disarmed, including after a host pause.
             self.commanded = dict(positions)
@@ -589,11 +674,21 @@ class SimArmDrives(Node):
         name = self.map.drives[index].name
         self.lost[index], self.zeroed[index] = True, False
         self.checks.pop(index, None)
+        if index in self.idle:
+            # Nothing is moving because of it, so the arm carries on without it.
+            self.get_logger().warning(f'{name} {reason}; its joints are disabled, so the arm '
+                                      'carries on')
+            return
         self.stop_all(f'{name} {reason}')
         self.get_logger().error(f'{name} {reason}; every drive is stopped')
 
     def check_following(self):
+        idle = self.idle
         for index, (sent, count) in enumerate(zip(self.sent, self.counts)):
+            if index in idle:
+                # Its joints are off, so a hand that moved it is no fault.
+                self.behind[index] = 0
+                continue
             # A stopped drive must stay where it stopped, armed or not, as its firmware can
             # run on to a kept target after any stop.
             target = None
@@ -631,7 +726,9 @@ class SimArmDrives(Node):
     def stop_drives(self):
         """Stop every drive with the manual's F5 zero-speed, zero-acceleration frame."""
         self.velocities.clear()
-        self.stopping.update(index for index, sent in enumerate(self.sent) if sent != (None, 0))
+        idle = self.idle
+        self.stopping.update(index for index, sent in enumerate(self.sent)
+                             if sent != (None, 0) and index not in idle)
         self.send_stops()
 
     def send_stops(self):
@@ -652,8 +749,16 @@ class SimArmDrives(Node):
                     self.start_hold(index, now)
 
     def send_targets(self):
+        idle = self.idle
+        counts = self.full_counts()
+        if counts is None:
+            self.reject_command('Waiting for drive feedback')
+            return
+        # A drive with its joints off is never moved, so it must not set the others' speed.
+        wanted = self.map.to_counts(self.commanded)
+        counts = [wanted[index] if index in idle else count for index, count in enumerate(counts)]
         try:
-            moves = self.map.synchronized(self.commanded, self.counts, self.period, self.max_rpm,
+            moves = self.map.synchronized(self.commanded, counts, self.period, self.max_rpm,
                                           self.velocities)
             motor_rates = self.map.shaft_rpm(self.velocities)
             commands = []
@@ -667,6 +772,8 @@ class SimArmDrives(Node):
             return
         for index, (drive, (axis, speed), rpm, data) in enumerate(
                 zip(self.map.drives, moves, motor_rates, commands)):
+            if index in idle:
+                continue
             ahead, direction = axis - self.counts[index], self.direction[index]
             if (rpm == 0.0 or self.settling[index] is not None
                     or (direction and ahead * direction < 0)):
@@ -857,7 +964,7 @@ class SimArmDrives(Node):
         if index in self.checks:
             self.finish_check(index)
         # Only stops and holds go out while disarmed, and a released motor refuses those too.
-        if failed and self.authorized:
+        if failed and self.authorized and index not in self.idle:
             self.fault(index, failed)
 
     def report(self):
@@ -884,14 +991,16 @@ class SimArmDrives(Node):
         statuses.append(status('arm.command_gate', gate_level,
                                'enabled' if self.authorized else 'stopped', '',
                                self.stop_reason or 'Receiving validated teleop setpoints'))
-        if not all(self.zeroed):
+        idle = self.idle
+        counts = self.full_counts(now)
+        if not all(self.zeroed[index] for index in self.active(idle)):
             restoring = any(check['purpose'] == 'restore' for check in self.checks.values())
             statuses.append(status(
                 'arm.zero', DiagnosticStatus.WARN, 'checking' if restoring else 'no', '',
                 'Checking whether the drives kept their saved zero' if restoring
                 else f'Not zeroed. {self.zero_hint()}'))
-        elif None not in self.counts:
-            positions = self.map.to_positions(self.counts)
+        elif counts is not None:
+            positions = self.map.to_positions(counts)
             commanded = self.commanded or {}
             for joint, position in positions.items():
                 target = math.degrees(commanded.get(joint, position))
@@ -954,6 +1063,10 @@ class SimArmDrives(Node):
                         level = DiagnosticStatus.STALE
                     elif health_state is not DriveHealthState.OK:
                         level = DiagnosticStatus.ERROR
+            if index in idle:
+                # Its joints are off: whatever it does is not the arm's fault.
+                level = min(level, DiagnosticStatus.WARN)
+                text = f'disabled ({text})'
             statuses.append(status(
                 f'drive.{drive.name}', level, turns, 'rev',
                 f'CAN ID {drive.can_id}: {text}'
@@ -963,6 +1076,66 @@ class SimArmDrives(Node):
         message = DiagnosticArray(status=statuses)
         message.header.stamp = self.get_clock().now().to_msg()
         self.diagnostics_publisher.publish(message)
+        self.publish_joint_control()
+
+    def set_joint_enabled(self, joint, enabled):
+        """
+        Switch one joint on or off while the arm is stopped; return (done, what happened).
+
+        Like zeroing, this waits until teleop has stopped streaming. A joint that is switched
+        on again needs its drive answering and zeroed before the arm can be enabled.
+        """
+        if joint not in self.map.joints:
+            return False, f'{joint} has no drive on this arm'
+        if self.authorized or time.monotonic() - self.command_time < QUIET_BEFORE_ZERO_S:
+            return False, 'Joint commands are still arriving; disable teleop (Start) first'
+        word = 'enabled' if enabled else 'disabled'
+        if enabled != (joint in self.disabled):
+            return True, f'{joint} is already {word}'
+        if enabled:
+            self.disabled.discard(joint)
+        else:
+            counts = self.full_counts()
+            if counts is not None:
+                self.last_angle[joint] = self.map.to_positions(counts)[joint]
+            self.disabled.add(joint)
+        # A hold from before the switch must not move a drive that was left alone meanwhile,
+        # and a stop that a missing drive never took is no longer anyone's concern.
+        for index, joints in enumerate(self.drive_joints):
+            if joint in joints:
+                self.held[index], self.hold_until[index] = None, -math.inf
+        self.stopping.difference_update(self.idle)
+        self.get_logger().info(f'{joint} is {word}')
+        self.publish_joint_control()
+        return True, f'{joint} is {word}'
+
+    def on_set_enabled(self, joint, request, response):
+        response.success, response.message = self.set_joint_enabled(joint, request.data)
+        return response
+
+    def publish_joint_control(self):
+        counts = self.full_counts()
+        positions = self.map.to_positions(counts) if counts is not None else {}
+        statuses = []
+        for joint in sorted({*self.map.joints, *self.locked}):
+            if joint in self.locked:
+                angle = self.locked[joint]
+                state, drives = joint_control.NO_DRIVE, []
+                text = f'no drive fitted: locked at {math.degrees(angle):+.1f} deg'
+            else:
+                drives = [drive.name for drive, joints in zip(self.map.drives, self.drive_joints)
+                          if joint in joints]
+                if joint in self.disabled:
+                    angle = self.last_angle.get(joint, positions.get(joint, 0.0))
+                    state = joint_control.DISABLED
+                    text = f'disabled: held at {math.degrees(angle):+.1f} deg'
+                else:
+                    angle = positions.get(joint, self.last_angle.get(joint, 0.0))
+                    state, text = joint_control.ENABLED, 'enabled'
+            statuses.append(joint_control.joint_status(joint, state, drives, angle, text))
+        message = DiagnosticArray(status=statuses)
+        message.header.stamp = self.get_clock().now().to_msg()
+        self.joint_control_publisher.publish(message)
 
     def on_test_fault_parameter(self, parameters):
         """Apply a simulator-only ``drive_name:fault`` parameter or clear with ``none``."""
