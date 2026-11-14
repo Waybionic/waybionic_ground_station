@@ -1,8 +1,9 @@
 /*
   WayBionic carrier bridge prototype: laptop USB serial <-> UNO R4 <-> TJA1051T <-> CAN bus.
 
-  Speaks a documented SUBSET of the Lawicel SLCAN protocol (see SlcanBridge.h). The real-arm
-  host opens it at 1,000,000 baud over USB serial and selects the CAN bus bitrate separately.
+  Speaks a documented SUBSET of the Lawicel SLCAN protocol (see SlcanBridge.h) over the RA4M1's
+  own USB port, so the serial baud rate the host opens it at does not matter, except 1200: that
+  hands the port back for an upload (UsbHandBack.h). The host selects the CAN bus bitrate with Sn.
 
   Standard 11-bit data frames only. The CAN controller stays off until the host sends 'O', so
   the board puts nothing on the bus by itself. Host frames wait in a bounded queue while the
@@ -19,8 +20,15 @@
 
 #include <WaybionicCan.h>
 
-// This is the USB serial baud rate, not the CAN bus bitrate. Both ends must use this value.
-static const unsigned long kSerialBaud = 1000000;
+#if defined(ARDUINO_UNOWIFIR4)
+// The UNO R4 WiFi's USB-C port normally belongs to its ESP32-S3, whose USB bridge firmware stops
+// passing bytes on for good, in one direction or the other, under steady two-way traffic.
+// Defining this hands the port to the RA4M1's own USB at boot (pin P408), as on the UNO R4 Minima,
+// so SerialUSB below reaches the host directly. See README.md, "USB link".
+void __USBStart();
+void __maybe_start_usb() {__USBStart();}
+#endif
+
 static const uint32_t kStatusPeriodMs = 100;
 
 static waybionic::R4CanTransport can;
@@ -34,7 +42,7 @@ public:
 class SerialSlcanOutput : public waybionic::SlcanOutput
 {
 public:
-  void write(const char * text) override {Serial.print(text);}
+  void write(const char * text) override {SerialUSB.print(text);}
 };
 
 static R4Starter starter;
@@ -44,13 +52,15 @@ static uint32_t lastStatusMs = 0;
 
 void setup()
 {
-  Serial.begin(kSerialBaud);
+  // USB ignores the baud rate.
+  SerialUSB.begin(0);
 }
 
 void loop()
 {
-  while (Serial.available() > 0) {
-    bridge.handleChar(static_cast<char>(Serial.read()), millis());
+  waybionic::handBackUsbWhenAsked();
+  while (SerialUSB.available() > 0) {
+    bridge.handleChar(static_cast<char>(SerialUSB.read()), millis());
   }
   bridge.drainTransmit(millis());
   bridge.pollCan();

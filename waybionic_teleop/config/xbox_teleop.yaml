@@ -22,14 +22,19 @@ xbox_teleop:
     tilt_up_button: dpad_right
     tilt_down_button: dpad_left
     groups: [base, upper, cartesian, incision]
+    # Left stick right turns joint_1 positive (counter-clockwise seen from above), which is to
+    # the right of an operator facing the arm. Right stick up lifts the elbow (joint_3 negative).
     base:
       joints: [joint_1, joint_2, joint_3]
       axes: [left_x, left_y, right_y]
-      scales: [1.0, 1.0, 1.0]
+      scales: [-1.0, 1.0, -1.0]
+    # Left stick up lifts the elbow (joint_3 negative), as in the base group. Right stick up tips
+    # the wrist up (joint_4 negative), and right turns the wrist roll positive (counter-clockwise
+    # from above at the zero pose), as the operator preferred on the bench arm.
     upper:
       joints: [joint_2, joint_3, joint_4, joint_5]
       axes: [left_x, left_y, right_y, right_x]
-      scales: [1.0, 1.0, 1.0, 1.0]
+      scales: [1.0, -1.0, -1.0, -1.0]
     # Straight tool-tip moves in base_link: forward (x), left (y), up (z), then tool roll. The
     # lock button keeps only the strongest of x, y and z; the tilt buttons pivot the tool about
     # its tip.
