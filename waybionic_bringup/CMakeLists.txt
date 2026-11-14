@@ -32,6 +32,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_launch_checks test/test_launch_checks.py TIMEOUT 60)
   ament_add_pytest_test(test_launch_options test/test_launch_options.py)
   ament_add_pytest_test(test_macos_app test/test_macos_app.py)
+  ament_add_pytest_test(test_release_bundles test/test_release_bundles.py)
 endif()
 
 install(PROGRAMS scripts/joint_demo.py scripts/camera_follower.py
