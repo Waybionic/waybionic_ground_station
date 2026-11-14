@@ -1,7 +1,6 @@
 # Camera Testing
 
-## Notes:
-- Data was redone with a Logitech Brio 100 Full HD Webcam that shoots in a maximum resolution of 1080p.
+> Note: All data was collected with a Logitech Brio 100 Full HD Webcam that shoots in a maximum resolution of 1080p (1280x720) at an expected frame rate of 30fps.
 
 ## Five Minute Experiment Results
 ### Ran at 1280x720 at and average of 30fps
