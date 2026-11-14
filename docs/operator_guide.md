@@ -280,7 +280,10 @@ the arm's own base and shoulder.
   `tool_link`, until the real tool is modelled; a longer tool needs a longer box.
 - The joint sliders use the same check. `joint_state_guard` moves the arm toward the
   sliders' pose, checking at least every half degree of each joint, stops at the
-  last pose before any part would touch, and moves the sliders back to it.
+  last pose before any part would touch, and moves the sliders back to it. If the arm's
+  description has collision data it cannot use (a malformed hull or fold table, or lost
+  shapes), the sliders do nothing and the guard logs an error; only the old arm and the
+  placeholder, which have no collision shapes by design, pass through unchecked.
 - When a move stops, the diagnostics panel names the part, for example
   `At limit: forearm_link: table`.
 - If the arm stands on a raised mount, set `table_height` in

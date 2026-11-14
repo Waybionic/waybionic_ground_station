@@ -1,6 +1,7 @@
 """The joint sliders move the arm only as far as it goes without hitting itself or the table."""
 
 from pathlib import Path
+import re
 
 import pytest
 import rclpy
@@ -16,6 +17,20 @@ DESCRIPTION = Path(__file__).resolve().parents[2] / 'waybionic_description' / 'u
 URDF = (DESCRIPTION / 'waybionic_arm.urdf').read_text(encoding='utf-8')
 JOINTS = ['joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5']
 SETTINGS = ('table_height', 'collision_clearance', 'self_collision_clearance')
+ROLL_HULL = re.search(r'<waybionic_hull link="wrist_roll_link" .*?/>', URDF, re.S).group(0)
+FOLD = re.search(r'<waybionic_fold .*?/>', URDF, re.S).group(0)
+MALFORMED = {
+    'a hull with a point that is not a number':
+        URDF.replace(ROLL_HULL, ROLL_HULL.replace('points="', 'points="nan ')),
+    'a hull for a link the arm does not have':
+        URDF.replace(ROLL_HULL, ROLL_HULL.replace('link="wrist_roll_link"', 'link="stray_link"')),
+    'two fold tables for one pair': URDF.replace('</robot>', FOLD + '\n</robot>'),
+    'the arm with its collision shapes lost':
+        re.sub(r'<collision\b.*?</collision>', '', URDF, flags=re.S),
+    'a joint without limits':
+        re.sub(r'(<joint name="joint_3".*?)<limit [^>]*/>', r'\1', URDF, count=1, flags=re.S),
+    'a description cut short': URDF[:len(URDF) // 2],
+}
 
 
 @pytest.fixture
@@ -38,6 +53,28 @@ def guard(monkeypatch, settings):
     yield node
     node.destroy_node()
     rclpy.try_shutdown(context=context)
+
+
+class Log:
+    """Stand in for the node's logger and keep what it says as an error."""
+
+    def __init__(self):
+        self.errors = []
+
+    def error(self, message, **kwargs):
+        self.errors.append(message)
+
+    def info(self, *args, **kwargs):
+        pass
+
+    warning = info
+
+
+@pytest.fixture
+def log(guard, monkeypatch):
+    logger = Log()
+    monkeypatch.setattr(guard, 'get_logger', lambda: logger)
+    return logger
 
 
 def sliders(**positions):
@@ -98,9 +135,36 @@ def test_a_slider_past_a_joint_limit_is_held_at_the_limit(guard):
     assert pose(guard.sent_back[-1])['joint_4'] == pytest.approx(limit)
 
 
-def test_a_model_without_the_arms_collision_shapes_passes_the_sliders_through(guard):
-    guard.load(String(data=(DESCRIPTION / 'waybionic_placeholder.urdf').read_text(
-        encoding='utf-8')))
+@pytest.mark.parametrize(
+    'model', ['waybionic_placeholder.urdf', 'waybionic_old_arm.expanded.urdf'])
+def test_a_model_without_the_arms_collision_shapes_passes_the_sliders_through(
+        guard, log, model):
+    guard.load(String(data=(DESCRIPTION / model).read_text(encoding='utf-8')))
     message = sliders(joint_2=3.0)
     guard.on_request(message)
-    assert guard.states == [message] and guard.sent_back == []
+    assert guard.states == [message] and guard.sent_back == [] and log.errors == []
+
+
+@pytest.mark.parametrize('broken', MALFORMED.values(), ids=MALFORMED.keys())
+def test_a_malformed_arm_model_blocks_the_sliders_and_says_so(guard, log, broken):
+    assert broken != URDF
+    guard.load(String(data=broken))
+    assert len(log.errors) == 1 and 'blocked' in log.errors[0]
+    # A request far past the elbow's limit was once published unchanged after such a load.
+    guard.on_request(sliders(joint_3=99.0))
+    assert guard.states == [] and guard.sent_back == []
+    assert len(log.errors) == 2 and 'ignored' in log.errors[1]
+
+
+def test_a_malformed_model_replacing_a_good_one_blocks_the_sliders_until_a_good_one_comes(
+        guard, log):
+    guard.load(String(data=URDF))
+    guard.on_request(sliders(joint_2=0.1))
+    assert len(guard.states) == 1
+    guard.load(String(data=MALFORMED['two fold tables for one pair']))
+    guard.on_request(sliders(joint_3=99.0))
+    assert len(guard.states) == 1
+    guard.load(String(data=URDF))
+    guard.on_request(sliders(joint_3=99.0))
+    limit = joint_limits(URDF, ['joint_3'])['joint_3'][1]
+    assert len(guard.states) == 2 and pose(guard.states[-1])['joint_3'] <= limit + 1e-9
