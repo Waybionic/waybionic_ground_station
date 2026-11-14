@@ -162,7 +162,8 @@ def test_the_forearm_folds_onto_the_base_until_its_parts_touch(yaw):
 def test_the_wrist_and_tool_stop_just_before_their_parts_touch_the_base(yaw):
     # With the table out of the way, the CAD parts come within 1 mm of the base at these elbow
     # angles at either yaw: the tool mount, the tool and the wrist's differential housing. The
-    # 2 mm clearance stops the elbow up to 1.3 degrees before them.
+    # check adds no clearance (self_clearance is 0): it is clear 1.3 degrees before each
+    # sampled contact angle and reports the contact 0.3 degrees after it.
     away = ArmCollision.from_urdf(URDF, table_z=-10.0)
     for shoulder, wrist, touch, link in ((45, 60, 120.5, 'wrist_roll_link'),
                                          (30, 90, 122.85, 'tool_link'),
