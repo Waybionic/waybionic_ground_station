@@ -41,6 +41,14 @@ def _clamp(value, bounds):
     return min(max(value, lower), upper)
 
 
+def _inside(point, box, start):
+    # Inside the box, or no further out than start on each axis, so a tip that starts outside
+    # can still be moved back in.
+    low, high = box
+    return all(min(lower - TOLERANCE, begin) <= value <= max(upper + TOLERANCE, begin)
+               for value, lower, upper, begin in zip(point, low, high, start))
+
+
 def nearest_within(angle, reference, bounds, tolerance=TOLERANCE):
     """Return the turn of angle nearest reference that lies within bounds, or None."""
     base = reference + math.remainder(angle - reference, 2 * math.pi)
@@ -193,14 +201,14 @@ class ArmKinematics:
                         best, best_cost = candidate, cost
         return best
 
-    def jog(self, joints, velocity, pitch_rate, roll_rate, dt, limits, max_rate):
+    def jog(self, joints, velocity, pitch_rate, roll_rate, dt, limits, max_rate, keep_in=None):
         """
         Move the tip along a straight line for dt; return (joints, fraction, blocked).
 
         pitch_rate tilts the tool about its tip. The whole step shrinks, never one joint, so
         the tip stays on the line when a joint would pass max_rate or a limit. Roll turns
-        against the yaw, so the tool doesn't spin about its own axis as the base turns; with
-        the tool pointing straight down, that keeps a blade's heading.
+        against the yaw so the tool keeps its heading. keep_in, ((x, y, z) min, (x, y, z) max)
+        in the base frame, stops the tip at the box walls.
         """
         if not (math.isfinite(dt) and dt > 0 and math.isfinite(max_rate) and max_rate > 0):
             raise ValueError('Cartesian step duration and joint speed must be positive')
@@ -215,9 +223,11 @@ class ArmKinematics:
         start, pitch = self.forward(joints)
         yaw, roll = self.joints[0], self.joints[4]
 
-        def solve(fraction, bounds, tolerance=TOLERANCE):
+        def solve(fraction, bounds, tolerance=TOLERANCE, box=keep_in):
             new_pitch = pitch + pitch_rate * dt * fraction
             target = [p + v * dt * fraction for p, v in zip(start, velocity)]
+            if box is not None and not _inside(target, box, start):
+                return None
             arm = {name: value for name, value in bounds.items() if name != roll}
             result = self.inverse(target, new_pitch, joints[roll], joints, arm, tolerance)
             if result is None:
@@ -250,7 +260,12 @@ class ArmKinematics:
             if fastest(result) <= max_rate * (1.0 + 1e-6):
                 return result, fraction, []
             fraction *= max_rate / fastest(result)
-        blocked = [] if result is not None else self._blockers(solve(fraction, {}), limits)
+        if result is not None:
+            blocked = []
+        elif keep_in is not None and solve(fraction, bounds, box=None) is not None:
+            blocked = ['keep_in']
+        else:
+            blocked = self._blockers(solve(fraction, {}, box=None), limits)
         # Go as far along the line as the limits allow; the rate check also rejects any
         # jump to another solution branch.
         low, high, best = 0.0, fraction, None
