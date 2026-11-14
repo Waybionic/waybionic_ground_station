@@ -203,8 +203,12 @@ def test_the_relay_starts_listening_once_the_carrier_is_plugged_in():
                 assert time.monotonic() < deadline, 'the relay never listened'
                 time.sleep(0.05)
         client.settimeout(2.0)
-        client.sendall(b't00121234\r')
-        assert client.recv(64) == b't00121234\r'
+        frame = b't00121234\r'
+        client.sendall(frame)
+        echoed = b''
+        while len(echoed) < len(frame):
+            echoed += client.recv(64)
+        assert echoed == frame
         client.close()
         assert 'Carrier on COM5' in messages
     finally:

@@ -1,9 +1,11 @@
 """Turn Xbox controller input into arm joint targets (pure logic, no ROS)."""
 
 from dataclasses import dataclass
+import itertools
 import math
 
 from waybionic_teleop.gamepad import AXIS, BUTTON
+from waybionic_teleop.wander import RAMP_PEAK, Wander
 
 ACTIONS = ('enable', 'stop', 'group', 'home', 'faster', 'slower', 'lock', 'tilt_up', 'tilt_down')
 CARTESIAN_AXES = ('x', 'y', 'z', 'roll')
@@ -16,12 +18,51 @@ INSERTED = 1e-9
 INCISION_LOST = ('The tool is off the incision point; press Y, withdraw it in another group, '
                  'then choose the incision group again')
 INCISION_HELD = 'The tool is inserted; withdraw it to the incision point before pressing Y'
+# Chicken head mode. The tip is held at a spot while the sticks tilt and roll the tool.
+HEAD_ARRIVED = 1e-6
+# The share of a drift of the held tip that each step takes back, so rounding never builds up.
+HEAD_PULL = 0.5
+# An approach that has made no progress for this long is reported as blocked.
+HEAD_BLOCKED_S = 1.5
+# A tilt or roll that is asked for, but gets less than this share of its step, is stopped by a
+# limit, though the kinematics does not always say which.
+HEAD_STALLED = 1e-3
+HEAD_NEAR_LIMIT = math.radians(2.0)
+HEAD_STATES = ('off', 'approach', 'hold', 'blocked', 'unavailable')
+HEAD_UNAVAILABLE = ('Chicken head needs the arm model and a chicken_head section in '
+                    'xbox_teleop.yaml')
+# Demo mode. The arm swings slowly about the pose it started from, and comes back to it.
+DEMO_STATES = ('off', 'running', 'stopping', 'unavailable')
+DEMO_UNAVAILABLE = 'Demo mode needs a demo section in xbox_teleop.yaml that fits this arm'
+# The shares of its swing that demo mode tries, biggest first, until the extremes of the swing
+# are clear of the table and the base.
+DEMO_SCALES = (1.0, 0.6, 0.35)
+WAIT_NOTE = 'Center motion controls before moving in the new group'
+HAND_BACK_NOTE = 'Center motion controls to take over from the mode that just ended'
 INCISION_JOINT_OFF = ('A joint is switched off with the tool through the incision point; switch '
                       'it back on in Joint control to withdraw the tool')
 
 
 def clamp(value, low, high):
     return min(max(value, low), high)
+
+
+def axis_words(axis):
+    """Return what to call a controller axis, for example 'left stick' for 'left_y'."""
+    side, _, kind = axis.rpartition('_')
+    return f'{side} stick' if kind in ('x', 'y') else axis.replace('_', ' ')
+
+
+@dataclass
+class HeadMode:
+    """Chicken head mode while it is on: approaching its goal joints, then holding the tip."""
+
+    goal: dict
+    # The tip position being held, once the tool has arrived there.
+    anchor: tuple = None
+    # How fast the joint furthest from its goal is going (rad/s), and how long it has been stuck.
+    rate: float = 0.0
+    stuck: float = 0.0
 
 
 @dataclass
@@ -39,6 +80,39 @@ class Group:
     def describe(self):
         moves = MOVES.get(self.mode, self.joints)
         return ', '.join(f'{axis} {move}' for axis, move in zip(self.axes, moves))
+
+
+@dataclass
+class HeadConfig:
+    """Where chicken head mode holds the tool tip, and the sticks that tilt and roll the tool."""
+
+    # The tip in the base frame (m), and the tool axis angle from straight up (rad).
+    position: tuple
+    pitch: float
+    tilt_axis: str
+    roll_axis: str
+    tilt_scale: float
+    roll_scale: float
+
+
+@dataclass
+class DemoConfig:
+    """How demo mode swings the arm's joints about the pose it starts from."""
+
+    joints: list
+    # Per joint: how far it swings each way (rad), whole swings per loop, and where in its swing
+    # it starts (rad).
+    amplitudes: list
+    cycles: list
+    phases: list
+    # Seconds of demo time for one loop, and for the swing to grow or shrink.
+    loop: float
+    ramp: float
+    # How far a joint stays from its limits, and the least swing worth making (rad).
+    margin: float
+    min_swing: float
+    # The fastest any joint may go (rad/s).
+    max_speed: float
 
 
 @dataclass
@@ -62,6 +136,39 @@ class TeleopConfig:
     speed_level: int
     deadzone: float
     home_gain: float
+    head: HeadConfig = None
+    demo: DemoConfig = None
+
+
+def head_from_parameters(params):
+    """Build the HeadConfig from the chicken_head parameters, or None if there are none."""
+    if 'chicken_head.position' not in params:
+        return None
+    axes, scales = params['chicken_head.axes'], params['chicken_head.scales']
+    if len(axes) != 2 or len(scales) != 2:
+        raise ValueError('chicken_head axes and scales need a tilt and a roll entry')
+    return HeadConfig(
+        position=tuple(float(value) for value in params['chicken_head.position']),
+        pitch=math.radians(float(params['chicken_head.pitch_deg'])),
+        tilt_axis=axes[0], roll_axis=axes[1],
+        tilt_scale=float(scales[0]), roll_scale=float(scales[1]))
+
+
+def demo_from_parameters(params):
+    """Build the DemoConfig from the demo parameters, or None if there are none."""
+    if 'demo.joints' not in params:
+        return None
+    return DemoConfig(
+        joints=list(params['demo.joints']),
+        amplitudes=[math.radians(float(value)) for value in params['demo.amplitudes_deg']],
+        # A whole number that arrived as a float is still a whole number.
+        cycles=[int(value) if isinstance(value, float) and value.is_integer() else value
+                for value in params['demo.cycles']],
+        phases=[math.radians(float(value)) for value in params['demo.phases_deg']],
+        loop=float(params['demo.loop_s']), ramp=float(params['demo.ramp_s']),
+        margin=math.radians(float(params['demo.margin_deg'])),
+        min_swing=math.radians(float(params['demo.min_swing_deg'])),
+        max_speed=math.radians(float(params['demo.max_speed_deg_s'])))
 
 
 def config_from_parameters(params):
@@ -91,7 +198,9 @@ def config_from_parameters(params):
             speed_levels=[float(level) for level in params['speed_levels']],
             speed_level=int(params['initial_speed_level']),
             deadzone=float(params['deadzone']),
-            home_gain=float(params['home_gain']))
+            home_gain=float(params['home_gain']),
+            head=head_from_parameters(params),
+            demo=demo_from_parameters(params))
     except KeyError as missing:
         raise ValueError(f'missing teleop parameter {missing}') from None
     check_config(config)
@@ -122,8 +231,20 @@ def check_config(config):
             raise ValueError(f'group {group.name} mode must be joint, cartesian or incision')
         elif not len(group.joints) == len(group.axes) == len(group.scales):
             raise ValueError(f'group {group.name} needs one axis and scale per joint')
+    head = config.head
+    if head is not None:
+        if len(head.position) != 3 or not all(math.isfinite(value) for value in head.position):
+            raise ValueError('chicken_head position must be three finite numbers (x, y, z in m)')
+        if not math.isfinite(head.pitch):
+            raise ValueError('chicken_head pitch_deg must be finite')
+        if any(not -1.0 <= scale <= 1.0 for scale in (head.tilt_scale, head.roll_scale)):
+            raise ValueError('chicken_head scales must be between -1 and 1')
+    if config.demo is not None:
+        check_demo(config, config.demo)
     unknown = [name for name in [axis for group in config.groups for axis in group.axes]
-               + [config.tool_close_axis, config.tool_open_axis] if name not in AXIS]
+               + [config.tool_close_axis, config.tool_open_axis]
+               + ([head.tilt_axis, head.roll_axis] if head is not None else [])
+               if name not in AXIS]
     unknown += [name for name in config.buttons.values() if name not in BUTTON]
     if unknown:
         raise ValueError('unknown controller inputs: ' + ', '.join(map(str, unknown)))
@@ -131,6 +252,36 @@ def check_config(config):
         raise ValueError('initial_speed_level or deadzone out of range')
     if len(config.tool_limits) != 2 or not config.tool_limits[0] < config.tool_limits[1]:
         raise ValueError('tool_limits must be [open, closed] with open < closed')
+
+
+def check_demo(config, demo):
+    """Raise ValueError unless demo mode's swings are usable and slow enough."""
+    if not demo.joints or len({len(demo.joints), len(demo.amplitudes), len(demo.cycles),
+                               len(demo.phases)}) != 1:
+        raise ValueError('demo needs a joint, an amplitude, a cycle count and a phase for '
+                         'each swing')
+    if len(set(demo.joints)) != len(demo.joints) or config.tool_joint in demo.joints:
+        raise ValueError('demo joints must be different arm joints, not the tool')
+    numbers = [*demo.amplitudes, *demo.phases, demo.loop, demo.ramp, demo.margin, demo.min_swing,
+               demo.max_speed]
+    if any(not math.isfinite(number) for number in numbers):
+        raise ValueError('demo settings must be finite numbers')
+    if any(amplitude < 0 for amplitude in demo.amplitudes) or demo.margin < 0:
+        raise ValueError('demo amplitudes_deg and margin_deg must not be negative')
+    if any(value <= 0 for value in (demo.loop, demo.ramp, demo.min_swing, demo.max_speed)):
+        raise ValueError('demo loop_s, ramp_s, min_swing_deg and max_speed_deg_s must be positive')
+    if any(isinstance(cycles, bool) or not isinstance(cycles, int) or cycles < 1
+           for cycles in demo.cycles):
+        raise ValueError('demo cycles must be whole numbers of at least 1')
+    if demo.max_speed > config.max_speed:
+        raise ValueError('demo max_speed_deg_s must not be above max_speed_deg_s')
+    for joint, amplitude, cycles in zip(demo.joints, demo.amplitudes, demo.cycles):
+        # The swing's own speed, plus the swing growing or shrinking over the ramp.
+        fastest = amplitude * (2.0 * math.pi * cycles / demo.loop + RAMP_PEAK / demo.ramp)
+        if fastest > demo.max_speed:
+            raise ValueError(
+                f'demo {joint} could go at {math.degrees(fastest):.1f} deg/s, above '
+                f'max_speed_deg_s {math.degrees(demo.max_speed):.1f}')
 
 
 class ArmTeleop:
@@ -185,7 +336,19 @@ class ArmTeleop:
         # Whether the tool was out of the body when it last left the incision group.
         self.withdrawn = True
         self.held = set()
+        # The sticks and triggers in the last controller sample, for a mode that ends between
+        # samples.
+        self.last_axes = ()
         self.wait_for_center = False
+        self.wait_note = WAIT_NOTE
+        # Chicken head mode, while it is on: see set_head_mode.
+        self.head = None
+        # Demo mode, while it is on: a Wander. See set_demo_mode.
+        self.demo = None
+        # Why demo mode last stopped by itself, until it is switched on again.
+        self.demo_ended = ''
+        self.demo_misfit = config.demo is None or any(
+            joint not in self.limits for joint in config.demo.joints)
         self.blocked = []
         self.note = 'Press Start (Xbox Menu button) to enable'
         self.warning = False
@@ -258,6 +421,7 @@ class ArmTeleop:
 
     def update(self, axes, buttons, measured, dt):
         """Apply one controller sample; return True when the targets should be sent."""
+        self.last_axes = axes
         held = {name for name, index in BUTTON.items() if index < len(buttons) and buttons[index]}
         pressed = {action for action, name in self.config.buttons.items()
                    if name in held - self.held}
@@ -277,7 +441,7 @@ class ArmTeleop:
             return False
         if self.wait_for_center:
             if self.motion_input_held(axes):
-                self.note = 'Center motion controls before moving in the new group'
+                self.note = self.wait_note
                 self.warning = True
                 return True
             self.wait_for_center = False
@@ -293,17 +457,26 @@ class ArmTeleop:
                 self.note, self.warning = INCISION_HELD, True
                 return
             self.withdrawn = self.incision_offset(self.targets)[1] <= INSERTED
+        self.end_head()
+        self.end_demo()
         self.group = (self.group + 1) % len(self.groups)
         self.stop_cartesian()
         self.velocities = dict.fromkeys(self.limits, 0.0)
         self.command_targets = dict(self.targets)
         self.wait_for_center = True
+        self.wait_note = WAIT_NOTE
         if self.active_group.mode == 'incision' and self.incision is not None:
             withdrawn = self.withdrawn or self.incision_offset(self.targets)[1] <= INSERTED
             # Keep the incision point while the tool axis still passes it. Otherwise only a
             # withdrawn tool takes a new one, at its tip; one still inside stays stopped.
             if not self.align_incision() and withdrawn:
                 self.incision = None
+
+    def hand_back(self):
+        """After a mode ends, hold the arm until the controls are centred, if they are held."""
+        if self.motion_input_held(self.last_axes):
+            self.wait_for_center = True
+            self.wait_note = HAND_BACK_NOTE
 
     def motion_input_held(self, axes):
         config = self.config
@@ -340,12 +513,16 @@ class ArmTeleop:
         self.pin_locked()
         self.stop_cartesian()
         self.wait_for_center = False
+        self.head = None
+        self.demo, self.demo_ended = None, ''
         self.enabled, self.note, self.warning = True, '', False
         if self.active_group.mode == 'incision' and self.incision is not None:
             self.align_incision()
 
     def disable(self, measured, note, warning=False):
         self.enabled, self.note, self.warning = False, note, warning
+        self.head = None
+        self.demo, self.demo_ended = None, ''
         self.velocities = dict.fromkeys(self.limits, 0.0)
         self.stop_cartesian()
         self.wait_for_center = False
@@ -372,11 +549,18 @@ class ArmTeleop:
         # Going home would drag the tool sideways through the incision.
         incision = self.active_group.mode == 'incision'
         if homing and not incision:
+            self.end_head()
+            self.end_demo()
             self.stop_cartesian()
             for joint, (lower, upper) in self.limits.items():
                 if joint != config.tool_joint and self.movable(joint):
                     error = clamp(0.0, lower, upper) - self.targets[joint]
                     desired[joint] = clamp(config.home_gain * error, -self.speed, self.speed)
+        elif self.head is not None:
+            self.head_step(axes, dt)
+            desired = {config.tool_joint: 0.0}
+        elif self.demo is not None:
+            desired.update(self.demo_step(dt))
         elif self.active_group.mode == 'cartesian':
             self.jog(axes, dt)
             desired = {config.tool_joint: 0.0}
@@ -414,6 +598,13 @@ class ArmTeleop:
             self.command_targets[joint] = clamp(
                 target + velocity * config.period, min(lower, target), max(upper, target))
         self.avoid_collisions(before)
+        if self.head is not None and self.head.anchor is None:
+            # An approach that a contact keeps stopping starts again slowly, and is reported.
+            self.head.stuck = self.head.stuck + dt if self.blocked else 0.0
+            if self.blocked:
+                self.head.rate = 0.0
+        if self.demo is not None:
+            self.demo_settle()
         self.pin_locked()
 
     def avoid_collisions(self, before):
@@ -478,6 +669,283 @@ class ArmTeleop:
         else:
             future = after
         self.command_targets.update(future)
+
+    def head_status(self):
+        """Return chicken head mode's state, one of HEAD_STATES, and a line saying why."""
+        if self.kinematics is None or self.config.head is None:
+            return 'unavailable', HEAD_UNAVAILABLE
+        head = self.head
+        if head is None:
+            return 'off', ''
+        if head.anchor is not None:
+            settings = self.config.head
+            return 'hold', (f'Holding the tip in place: the {axis_words(settings.tilt_axis)} '
+                            f'tilts the tool, the {axis_words(settings.roll_axis)} rolls it')
+        if head.stuck >= HEAD_BLOCKED_S:
+            return 'blocked', ('The way to the head position is blocked by '
+                               + ', '.join(self.blocked or ['something']))
+        return 'approach', 'Moving the tip to the head position'
+
+    def head_problem(self):
+        """Return why chicken head mode cannot start now, or '' if it can; set head_goal."""
+        if self.kinematics is None or self.config.head is None:
+            return HEAD_UNAVAILABLE
+        if not self.enabled:
+            return 'Press Start (Xbox Menu button) first, then switch Chicken head on'
+        if self.demo is not None:
+            return 'Switch Demo mode off first'
+        if self.inserted():
+            return INCISION_HELD
+        stuck = [joint for joint in self.kinematics.joints if not self.movable(joint)]
+        if stuck:
+            return (f'{", ".join(stuck)} cannot move (locked or switched off); chicken head '
+                    'needs every arm joint')
+        kinematics, head = self.kinematics, self.config.head
+        roll = kinematics.joints[4]
+        arm = {name: bounds for name, bounds in self.limits.items()
+               if name in kinematics.joints and name != roll}
+        goal = kinematics.inverse(head.position, head.pitch, self.targets[roll], self.targets, arm)
+        if goal is None:
+            return 'The head position is out of reach for the arm and its joint limits'
+        self.head_goal = goal
+        return ''
+
+    def set_head_mode(self, enabled):
+        """Switch chicken head mode on or off; return (whether it is as asked, what to tell)."""
+        if not enabled:
+            if self.head is not None:
+                self.end_head('Chicken head off: the arm holds where it is', hand_back=True)
+            return True, 'Chicken head is off'
+        if self.head is not None:
+            return True, 'Chicken head is already on'
+        problem = self.head_problem()
+        if problem:
+            return False, problem
+        self.stop_cartesian()
+        self.velocities = dict.fromkeys(self.limits, 0.0)
+        self.command_targets = dict(self.targets)
+        self.head = HeadMode(self.head_goal)
+        self.note, self.warning = 'Chicken head: moving the tip to the head position', False
+        return True, 'Chicken head is on: moving the tip to the head position'
+
+    def end_head(self, note='', hand_back=False):
+        """
+        Leave chicken head mode, if it is on, holding the arm where it is.
+
+        With ``hand_back``, the sticks that tilt and roll the tool must be centred before the
+        active group's sticks move the arm.
+        """
+        if self.head is None:
+            return
+        self.head = None
+        self.stop_cartesian()
+        self.velocities = dict.fromkeys(self.limits, 0.0)
+        self.command_targets = dict(self.targets)
+        if note:
+            self.note, self.warning = note, False
+        if hand_back:
+            self.hand_back()
+
+    def head_step(self, axes, dt):
+        """Take one step of chicken head mode: toward the head spot, or holding it."""
+        if self.head.anchor is None:
+            self.head_approach(dt)
+        else:
+            self.head_hold(axes, dt)
+
+    def head_approach(self, dt):
+        """Move every arm joint in a straight line, in joint space, to the goal pose."""
+        head, config = self.head, self.config
+        joints = self.kinematics.joints
+        error = {joint: head.goal[joint] - self.targets[joint] for joint in joints}
+        distance = max(abs(value) for value in error.values())
+        if distance <= HEAD_ARRIVED:
+            self.targets.update(head.goal)
+            self.command_targets.update(head.goal)
+            for joint in joints:
+                self.velocities[joint] = 0.0
+            head.anchor = self.kinematics.forward(head.goal)[0]
+            self.wait_for_center = True
+            self.wait_note = 'Center motion controls before tilting or rolling the head'
+            return
+        # Speed up at the acceleration limit and slow down so that every joint stops together.
+        head.rate = min(head.rate + config.max_accel * dt, self.speed,
+                        math.sqrt(2.0 * config.max_accel * distance))
+        step = min(head.rate * dt, distance)
+        remaining = distance - step
+        ahead = min(head.rate * config.period, remaining)
+        for joint in joints:
+            self.targets[joint] += error[joint] * step / distance
+            self.velocities[joint] = error[joint] * step / distance / dt
+            self.command_targets[joint] = self.targets[joint] + error[joint] * ahead / distance
+
+    def nearest_limit(self):
+        """Name the arm joint closest to one of its limits, or 'reach' if none is close."""
+        margins = {joint: min(self.targets[joint] - self.limits[joint][0],
+                              self.limits[joint][1] - self.targets[joint])
+                   for joint in self.kinematics.joints}
+        joint = min(margins, key=margins.get)
+        return [joint] if margins[joint] < HEAD_NEAR_LIMIT else ['reach']
+
+    def head_hold(self, axes, dt):
+        """Tilt and roll the tool about the held tip, with the tip pulled back to the spot."""
+        config, kinematics, head = self.config, self.kinematics, self.head
+        settings = config.head
+        if dt <= 0:
+            return
+        top = config.tilt_speed * config.speed_levels[self.level]
+        # Stick up tilts the tool up, which lowers the pitch angle, as the tilt buttons do.
+        tilt = clamp(
+            -settings.tilt_scale * self.stick(axes, settings.tilt_axis) * top
+            + top * ((config.buttons['tilt_down'] in self.held)
+                     - (config.buttons['tilt_up'] in self.held)), -top, top)
+        roll = settings.roll_scale * self.stick(axes, settings.roll_axis) * self.speed
+        step = config.max_accel * dt
+        tilt = self.tilt + clamp(tilt - self.tilt, -step, step)
+        roll = self.roll + clamp(roll - self.roll, -step, step)
+        before = {joint: self.targets[joint] for joint in kinematics.joints}
+        tip, _ = kinematics.forward(before)
+        pull = [HEAD_PULL * (goal - now) / dt for goal, now in zip(head.anchor, tip)]
+        after, fraction, self.blocked = kinematics.jog(
+            before, pull, tilt, roll, dt, self.limits, config.max_speed)
+        if not self.blocked and fraction < HEAD_STALLED and (abs(tilt) > 1e-6 or abs(roll) > 1e-6):
+            self.blocked = self.nearest_limit()
+        self.tilt, self.roll = tilt * fraction, roll * fraction
+        for joint in kinematics.joints:
+            self.velocities[joint] = (after[joint] - before[joint]) / dt
+            self.targets[joint] = after[joint]
+        if self.tilt or self.roll:
+            future, _, _ = kinematics.jog(
+                after, (0.0, 0.0, 0.0), self.tilt, self.roll, config.period, self.limits,
+                config.max_speed)
+        else:
+            future = after
+        self.command_targets.update(future)
+
+    def demo_status(self):
+        """Return demo mode's state, one of DEMO_STATES, and a line saying what is going on."""
+        if self.demo_misfit:
+            return 'unavailable', DEMO_UNAVAILABLE
+        if self.demo is None:
+            return 'off', self.demo_ended
+        if self.demo.ramp.goal == 0.0:
+            return 'stopping', 'Returning to the pose it started from'
+        return 'running', 'Moving slowly around its start pose; B stops it at once'
+
+    def demo_plan(self):
+        """Return ({joint: (amplitude, cycles, phase)}, '') for a swing that fits, or why not."""
+        if self.demo_misfit:
+            return {}, DEMO_UNAVAILABLE
+        if not self.enabled:
+            return {}, 'Press Start (Xbox Menu button) first, then switch Demo mode on'
+        if self.head is not None:
+            return {}, 'Switch Chicken head off first'
+        if self.inserted():
+            return {}, 'The tool is inserted; withdraw it to the incision point first'
+        demo, swings = self.config.demo, {}
+        for joint, amplitude, cycles, phase in zip(
+                demo.joints, demo.amplitudes, demo.cycles, demo.phases):
+            lower, upper = self.limits[joint]
+            room = min(self.targets[joint] - lower, upper - self.targets[joint]) - demo.margin
+            if self.movable(joint) and min(amplitude, room) >= demo.min_swing:
+                swings[joint] = (min(amplitude, room), cycles, phase)
+        if not swings:
+            if any(self.movable(joint) for joint in demo.joints):
+                return {}, ('No joint has room to swing here; move the arm away from its joint '
+                            'limits first')
+            return {}, 'No demo joint can move: they are locked or switched off'
+        for scale in DEMO_SCALES:
+            scaled = {joint: (amplitude * scale, cycles, phase)
+                      for joint, (amplitude, cycles, phase) in swings.items()}
+            hit = self.swing_hit(scaled)
+            if not hit:
+                return scaled, ''
+        return {}, (f'Swinging here would take the arm into {hit}; move it away from the table '
+                    'and the base first')
+
+    def swing_hit(self, swings):
+        """Name what the arm would touch at the extremes of the swings, or '' if nothing."""
+        if self.collision is None:
+            return ''
+        joints = list(swings)
+        reach = {joint: swings[joint][0] for joint in joints}
+        # The start pose, each joint at either end of its swing, and every mix of the ends.
+        offsets = [{}]
+        offsets += [{joint: sign * reach[joint]} for joint in joints for sign in (-1.0, 1.0)]
+        offsets += [{joint: sign * reach[joint] for joint, sign in zip(joints, signs)}
+                    for signs in itertools.product((-1.0, 1.0), repeat=len(joints))]
+        for offset in offsets:
+            pose = {joint: angle + offset.get(joint, 0.0) for joint, angle in self.targets.items()}
+            found = self.collision.check(pose)
+            if found:
+                return ', '.join(found)
+        return ''
+
+    def demo_tempo(self):
+        """Return how fast the demo clock runs: 1 at the starting speed level, less below it."""
+        levels = self.config.speed_levels
+        return min(1.0, levels[self.level] / levels[self.config.speed_level])
+
+    def set_demo_mode(self, enabled):
+        """Switch demo mode on or off; return (whether it is as asked, what to tell)."""
+        demo = self.demo
+        if not enabled:
+            if demo is None:
+                return True, 'Demo mode is off'
+            demo.ramp.aim(0.0)
+            self.note, self.warning = 'Demo mode off: returning to the pose it started from', False
+            return True, 'Demo mode is stopping: the arm is returning to the pose it started from'
+        if demo is not None:
+            demo.ramp.aim(1.0)
+            self.note, self.warning = 'Demo mode: moving slowly around its start pose', False
+            return True, 'Demo mode is on'
+        swings, problem = self.demo_plan()
+        if problem:
+            return False, problem
+        self.stop_cartesian()
+        self.velocities = dict.fromkeys(self.limits, 0.0)
+        self.command_targets = dict(self.targets)
+        settings = self.config.demo
+        self.demo = Wander({joint: self.targets[joint] for joint in swings}, swings,
+                           settings.loop, settings.ramp, self.demo_tempo())
+        self.demo_ended = ''
+        self.note, self.warning = 'Demo mode: moving slowly around its start pose', False
+        return True, 'Demo mode is on: the arm is starting to move slowly'
+
+    def end_demo(self, note='', warning=False, hand_back=False):
+        """Leave demo mode, if it is on, holding the arm where it is."""
+        if self.demo is None:
+            return
+        self.demo = None
+        self.demo_ended = note if warning else ''
+        self.stop_cartesian()
+        self.velocities = dict.fromkeys(self.limits, 0.0)
+        self.command_targets = dict(self.targets)
+        if note:
+            self.note, self.warning = note, warning
+        if hand_back:
+            self.hand_back()
+
+    def demo_step(self, dt):
+        """Advance the demo and return the joint velocities that follow its swing."""
+        if dt <= 0:
+            return {}
+        self.demo.advance(dt, self.demo_tempo())
+        cap = self.config.demo.max_speed
+        return {joint: clamp((goal - self.targets[joint]) / dt, -cap, cap)
+                for joint, goal in self.demo.positions().items()}
+
+    def demo_settle(self):
+        """End the demo if a step ran into something, or once its swing has shrunk to nothing."""
+        stopped = [name for name in self.blocked if name != self.config.tool_joint]
+        if stopped:
+            self.end_demo('Demo stopped: blocked by ' + ', '.join(stopped),
+                          warning=True, hand_back=True)
+        elif self.demo.finished:
+            # Back at the start pose, less the rounding of every step it took.
+            self.targets.update(self.demo.centre)
+            self.end_demo('Demo mode finished: the arm is back where it started',
+                          hand_back=True)
 
     def incise(self, axes, dt):
         """

@@ -73,7 +73,7 @@ def flatten(values, prefix=''):
     return flat
 
 
-@pytest.fixture
+@pytest.fixture(scope='session')
 def parameters():
     def load(file_name, node_name):
         with open(CONFIG / file_name, encoding='utf-8') as stream:

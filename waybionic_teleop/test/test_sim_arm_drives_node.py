@@ -45,6 +45,7 @@ from waybionic_teleop.sim_arm_drives_node import (
 from waybionic_teleop.sim_drives import SimulatedServo
 from waybionic_teleop.slcan_bus import SlcanBus
 from waybionic_teleop.teleop import ArmTeleop, config_from_parameters
+from waybionic_teleop.wander import Wander
 import yaml
 
 URDF = (Path(__file__).resolve().parents[2] / 'waybionic_description' / 'urdf'
@@ -2032,3 +2033,76 @@ def test_shutdown_error_waits_for_the_signal_thread_to_shut_rclpy_down(
     module.main()
     assert next(running, None) is None
     assert factory.return_value.destroy_node.call_count == 1
+
+
+def stopped_drive_states(node, monkeypatch, speed_deg_s, seconds=5.0):
+    """Hold the base drive still while teleop tells it to move, and return its health states."""
+    ready(node)
+    servo = node.bus.drives[node.map.drives[0].can_id]
+    clock = [max(node.heard) + 0.1]
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: clock[0])
+    velocities = {**dict.fromkeys(node.map.joints, 0.0), 'joint_1': math.radians(speed_deg_s)}
+    node.on_command(command(node, velocities=velocities, joint_1=math.radians(3.0)))
+    node.report()
+    servo.set_test_fault('stalled')
+    states = []
+    for tick in range(1, round(seconds / node.period) + 1):
+        clock[0] += node.period
+        node.on_enabled(Bool(data=True))
+        node.on_command(command(node, velocities=velocities, joint_1=math.radians(3.0)))
+        node.last_tick = clock[0] - node.period
+        node.tick()
+        if tick % round(REPORT_PERIOD_S / node.period) == 0:
+            node.report()
+            states.append(node.drive_health_states[0])
+    return states
+
+
+@pytest.mark.parametrize('speed', [1.0, 5.0, 30.0])
+def test_a_stopped_drive_told_to_move_at_a_walking_pace_or_more_is_called_stalled(
+        node, monkeypatch, speed):
+    states = stopped_drive_states(node, monkeypatch, speed)
+    assert DriveHealthState.STALLED in states
+
+
+@pytest.mark.parametrize('speed', [0.05, 0.2, 0.5])
+def test_a_drive_told_to_move_only_slowly_is_not_called_stalled(node, monkeypatch, speed):
+    # It would cover less than the stall distance in the stall window even if it moved exactly
+    # as told, so standing still tells nothing.
+    states = stopped_drive_states(node, monkeypatch, speed)
+    assert DriveHealthState.STALLED not in states
+    assert states and all(state is DriveHealthState.OK for state in states)
+
+
+def test_the_slow_swing_of_demo_mode_never_makes_a_drive_look_stalled(
+        node, monkeypatch, parameters):
+    demo = config_from_parameters(parameters('xbox_teleop.yaml', 'xbox_teleop')).demo
+    joints = [joint for joint in node.map.joints if joint in demo.joints]
+    wander = demo_wander(demo, joints)
+    ready(node)
+    clock = [max(node.heard) + 0.1]
+    monkeypatch.setattr(sim_arm_drives_node.time, 'monotonic', lambda: clock[0])
+    seen = set()
+    before = dict(wander.positions())
+    for tick in range(1, round(40.0 / node.period) + 1):
+        clock[0] += node.period
+        wander.advance(node.period, 1.0)
+        now = wander.positions()
+        velocities = {joint: (now[joint] - before[joint]) / node.period for joint in joints}
+        before = now
+        node.on_enabled(Bool(data=True))
+        node.on_command(command(node, velocities=velocities, **now))
+        node.last_tick = clock[0] - node.period
+        node.tick()
+        if tick % round(REPORT_PERIOD_S / node.period) == 0:
+            node.report()
+            seen.update(state for state in node.drive_health_states if state is not None)
+    assert node.authorized
+    assert seen == {DriveHealthState.OK}
+
+
+def demo_wander(demo, joints):
+    """Return a Wander for demo's swings on the given joints, centred on the zero pose."""
+    swings = {joint: (amplitude, cycles, phase) for joint, amplitude, cycles, phase
+              in zip(demo.joints, demo.amplitudes, demo.cycles, demo.phases) if joint in joints}
+    return Wander(dict.fromkeys(swings, 0.0), swings, demo.loop, demo.ramp)

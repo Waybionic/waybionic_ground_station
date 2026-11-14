@@ -19,6 +19,16 @@
   </class>
 
   <class
+    name="waybionic_rviz_plugins/MotionModesPanel"
+    type="waybionic_rviz_plugins::MotionModesPanel"
+    base_class_type="rviz_common::Panel">
+    <description>
+      Switch the teleop node's motion modes on or off, such as chicken head mode. The teleop node
+      moves the arm; this panel only sends the switch and sends no motion commands.
+    </description>
+  </class>
+
+  <class
     name="waybionic_rviz_plugins/JointControlPanel"
     type="waybionic_rviz_plugins::JointControlPanel"
     base_class_type="rviz_common::Panel">

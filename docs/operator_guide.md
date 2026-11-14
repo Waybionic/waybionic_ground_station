@@ -101,6 +101,9 @@ before starting the SDL bridge.
 | Incision group: left stick up/down | Insert or withdraw the tool along its own axis |
 | Incision group: right stick up/down | Tilt the tool about the incision point |
 | Incision group: right stick left/right | Tool roll |
+| Chicken head mode: left stick up/down | Tilt the tool about the held tip (the D-pad left/right tilt it too) |
+| Chicken head mode: right stick left/right | Tool roll |
+| Demo mode: sticks | Nothing: the demo moves the arm (RT / LT still work the tool) |
 | RT / LT | Close / open the placeholder end effector |
 | D-pad up/down | Speed: 10, 25, 50 or 100% of 60 deg/s, or of 50 mm/s and 30 deg/s of tilt in the Cartesian and incision groups |
 | A (hold) | Return to the zero pose (not in the incision group) |
@@ -176,6 +179,72 @@ incision. With five joints, the tool can only tilt in the arm's vertical plane.
   stops rather than pull the tool back: press Y, withdraw the tool in another group,
   then select the incision group again.
 
+**Chicken head mode** holds the tool tip at one spot while the rest of the arm moves around
+it, as a chicken keeps its head still. Press Start first, then tick **Chicken head mode** in
+the Motion modes panel (right-hand dock, under Arm setup). The same switch is the
+`/arm/chicken_head/set_enabled` service (`std_srvs/SetBool`), and its state is on the latched
+`/arm/chicken_head` topic. The arm moves every joint in a straight line to the head spot, at
+the current speed level, which takes a few seconds, and then holds it there. The default spot
+is 30 cm in front of the base and 55 cm up, with the tool pointing forward (`chicken_head` in
+`xbox_teleop.yaml`). Once the panel says *holding*, centre the sticks: the left stick tilts the
+tool and the right stick rolls it. The shoulder, elbow and wrist swing as far as the tilt needs,
+and in simulation the tip stays within half a millimetre of the spot.
+
+- The panel refuses, and says why, when teleop is not enabled, when a joint is locked or
+  switched off (the mode needs J1 to J5), when the tool is inserted through the incision
+  point, or when the head spot is out of reach of the arm's joint limits.
+- The mode ends, and the arm holds where it is, when you untick the box, press B, press Y
+  (which also selects the next group) or A, stop teleop with Start, or the controller drops
+  out.
+- Something in the way, such as the table or the base, stops the approach. After 1.5 s the
+  panel says *blocked* and names the joint. A tilt that reaches a joint limit stops there and
+  names the joint, and the tip stays held.
+- The approach moves all five joints at once, so on a real arm try it first at a low speed
+  with the stop within reach.
+
+**Demo mode** moves the arm around by itself, slowly and smoothly, to show it off or to look it
+over. Press Start first, then tick **Demo mode** in the Motion modes panel. The same switch is the
+`/arm/demo/set_enabled` service (`std_srvs/SetBool`), and its state is on the latched `/arm/demo`
+topic (`off`, `running`, `stopping` or `unavailable`). Each joint swings about the pose the arm was
+in when you ticked the box, at its own pace, so the motion does not repeat for two minutes. The
+swing grows over 12 seconds, and when you untick the box it shrinks over as long, which brings the
+arm back to exactly the pose it started from (the panel says *returning*). Ticking the box again
+while it returns carries on from there. With the settings in `xbox_teleop.yaml` (`demo`), no joint
+is commanded to go faster than 7 deg/s or to speed up or slow down by more than 3 deg/s each
+second, and the tool tip stays under 8 cm/s. Through the simulated drives the arm follows that path
+to within 0.2 degrees.
+
+![The Motion modes panel while demo mode runs](images/motion_modes_demo_running.png)
+
+Only one mode runs at a time, and the panel says why a mode is refused. While demo mode runs,
+chicken head is refused; before Start has been pressed, demo mode is:
+
+![Chicken head refused while demo mode runs](images/motion_modes_chicken_head_refused.png)
+
+![Demo mode refused until Start is pressed, with the Arm setup panel above the Motion modes panel](images/motion_modes_refused_before_start.png)
+
+- It is not the other two demos. `autoplay:=true` (the self-running demo, above) plays a scripted
+  controller, presses Start itself and runs only on simulated drives. `demo_mode:=true` sweeps each
+  joint once to check the TF, also in simulation only. Demo mode needs your Start press and is
+  checked like any other motion, so it can run on the real arm.
+- The sticks do nothing, and D-pad down slows it to half and then a fifth of its pace, including the
+  start and the return. D-pad up never speeds it up.
+- B, Start, Y, A or losing the controller end it at once and hold the arm where it is, as they do
+  for any motion. Unticking the box is the gentle way out.
+- The arm stays 10 degrees clear of its joint limits. A joint that is locked or switched off stays
+  still, and one with less than 3 degrees of room does too. If a link would reach the table or the
+  base at the extremes of the swing, the whole swing is made smaller, and if no size fits the panel
+  says what is in the way and the mode does not start. If a step runs into something anyway, the
+  mode ends, the arm holds, the controller rumbles and the panel says why until you start it again.
+- It is refused, with the reason, until teleop is enabled, while chicken head mode is on (and the
+  other way round), and while the tool is through the incision point. If you untick it while still
+  holding a stick, the sticks have to be centred before they move the arm.
+- The swing of each joint, its pace, the time to grow and shrink and the speed limit are in the
+  `demo` section of `xbox_teleop.yaml`. Settings that would let a joint go faster than
+  `max_speed_deg_s` are refused when teleop starts.
+- On the real arm it moves by itself: keep the emergency stop within reach, and press D-pad down
+  twice before the first run to see it at a fifth of its pace.
+
 ### Joint limits and collision checks
 
 The current arm URDF has provisional joint limits, and the collision checks model
@@ -224,7 +293,8 @@ again whenever the controller has been left alone for 30 seconds. The arm lifts,
 draws a square and a vertical line with the tool tip, and tilts the tool about its
 tip, with the path and a caption in RViz. Touching any button, stick or trigger
 stops the demo and leaves teleop disabled; press Start to drive the arm yourself.
-The demo runs only with simulated drives.
+The demo runs only with simulated drives. To see the real arm move around by itself, use
+[Demo mode](#how-teleop-behaves) instead.
 
 - **Windows:** double-click `scripts\windows-demo.cmd`. It starts Docker Desktop if
   needed, opens the controller bridge in its own window if Python 3 is installed,
