@@ -7,11 +7,15 @@ with the collision check that teleop uses, and publishes on /joint_states the fu
 before any part would touch the table (table_height m above the bottom of the base) or fold into
 the base or shoulder. When it stops short of the sliders, or a slider is past a joint limit, it
 publishes the pose on /joint_state_guard/accepted too, which the slider window reads back so
-that its sliders show where the arm stopped. A model without the arm's collision shapes, such as
-the old arm, has nothing to check, so its slider poses pass through unchanged.
+that its sliders show where the arm stopped.
+
+Only the models in UNCHECKED_MODELS, which have no collision shapes by design, pass their
+slider poses through unchanged. For any other description whose collision data cannot be used,
+nothing is published and an error is logged until a usable description arrives.
 """
 
 import math
+import xml.etree.ElementTree as ET
 
 import rclpy
 from rclpy._rclpy_pybind11 import RCLError
@@ -25,6 +29,18 @@ from waybionic_teleop.collision import ArmCollision
 from waybionic_teleop.kinematics import joint_limits
 
 MOVING = ('revolute', 'continuous', 'prismatic')
+# Robot names of the models drawn without collision shapes: the old arm and the placeholder. A
+# description of the arm that has lost its shapes or hulls must block the sliders, not pass for
+# one of these.
+UNCHECKED_MODELS = frozenset({'waybionic_old_arm_visualization', 'waybionic_placeholder'})
+
+
+def robot_name(urdf):
+    """Return the name of the robot in a URDF string, or None if it is not XML."""
+    try:
+        return ET.fromstring(urdf).get('name')
+    except ET.ParseError:
+        return None
 
 
 class JointStateGuard(Node):
@@ -44,7 +60,10 @@ class JointStateGuard(Node):
                              'max_step_deg positive and finite')
         # None until a description with the arm's collision shapes arrives.
         self.collision = None
+        # Set for a model in UNCHECKED_MODELS, whose poses pass through.
         self.unchecked = False
+        # Why a description that cannot be checked blocks the sliders.
+        self.blocked_by = ''
         self.limits = {}
         self.pose = {}
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
@@ -56,6 +75,12 @@ class JointStateGuard(Node):
             JointState, 'joint_state_guard/accepted', 10)
 
     def load(self, message):
+        name = robot_name(message.data)
+        if name in UNCHECKED_MODELS:
+            self.collision, self.limits, self.unchecked, self.blocked_by = None, {}, True, ''
+            self.get_logger().warning(
+                f'Joint sliders are not collision checked: {name} has no collision shapes')
+            return
         try:
             collision = ArmCollision.from_urdf(message.data, self.table_height, self.clearance,
                                                self.self_clearance)
@@ -64,10 +89,14 @@ class JointStateGuard(Node):
                       if joint['type'] in MOVING and not joint['mimic']]
             limits = joint_limits(message.data, joints)
         except ValueError as error:
-            self.collision, self.unchecked = None, True
-            self.get_logger().warning(f'Joint sliders are not collision checked: {error}')
+            # An arm whose collision data cannot be used must not move unchecked.
+            self.collision, self.limits, self.unchecked = None, {}, False
+            self.blocked_by = str(error)
+            self.get_logger().error(
+                f'Joint sliders are blocked, the arm cannot be checked: {error}')
             return
         self.collision, self.limits, self.unchecked = collision, limits, False
+        self.blocked_by = ''
         # A new description keeps the arm where it was, inside the new limits.
         self.pose = {joint: min(max(self.pose.get(joint, 0.0), low), high)
                      for joint, (low, high) in limits.items()}
@@ -77,6 +106,9 @@ class JointStateGuard(Node):
         if self.unchecked:
             self.state_publisher.publish(message)
         if self.collision is None:
+            if self.blocked_by:
+                self.get_logger().error(f'Joint slider request ignored, the arm cannot be '
+                                        f'checked: {self.blocked_by}', throttle_duration_sec=5.0)
             return
         requested = {name: position for name, position in zip(message.name, message.position)
                      if name in self.limits and math.isfinite(position)}
