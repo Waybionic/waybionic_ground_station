@@ -1,0 +1,12 @@
+Official WayBionic logo used by the poster diagrams.
+
+Source repository: https://github.com/Waybionic/website
+Path: waybionic/public/waybionic-logo.png
+Blob SHA: 7239fa956e8a44b97ccb8227bcda6f9e8d632b1d
+Downloaded: 2026-10-27
+
+The PNG is the original file. It is not redrawn. Proportions are 2500 by 2495 pixels, RGBA, transparent background.
+
+Use `waybionic-logo.png` only. A local file named `logo.png` in this folder was a corrupted UTF-16 copy and has been removed.
+
+`figures/waybionic_software_architecture.svg` embeds these exact bytes so the logo still draws when that SVG is placed inside the poster SVG. The poster header references this file directly.
